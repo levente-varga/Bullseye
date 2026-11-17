@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Ats, JobStatus } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobStatus } from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 /** Splits a textarea on newlines or commas into a clean list. */
@@ -72,8 +72,12 @@ export async function saveCriteria(form: FormData) {
           include_keywords: list(form, "include_keywords"),
           exclude_keywords: list(form, "exclude_keywords"),
           preferences: str(form, "preferences"),
+          scoring_model: SCORING_MODELS.some((m) => m.id === str(form, "scoring_model"))
+            ? str(form, "scoring_model")
+            : DEFAULT_SCORING_MODEL,
           score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
           followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
+          digest_email: str(form, "digest_email"),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1)

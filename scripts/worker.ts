@@ -10,7 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { fetchBoard } from "../src/lib/ats";
 import { hardFilter } from "../src/lib/filters";
-import { buildSystemPrompt, scoreJob, type FeedbackExample } from "../src/lib/scoring";
+import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "../src/lib/scoring";
 import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
 import type { Criteria, FetchedJob, Job, Profile, Source } from "../src/lib/types";
 
@@ -137,6 +137,8 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
 
   const client = new Anthropic();
   const system = buildSystemPrompt(ctx.profile, ctx.criteria, ctx.feedback);
+  const model = resolveModel(ctx.criteria.scoring_model);
+  console.log(`Scoring ${pending.length} listings with ${model}`);
   let scored = 0;
   let errors = 0;
 
@@ -145,7 +147,7 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
     Array.from({ length: SCORE_CONCURRENCY }, async () => {
       for (let job = queue.shift(); job; job = queue.shift()) {
         try {
-          const s = await scoreJob(client, system, job);
+          const s = await scoreJob(client, model, system, job);
           await must(
             db
               .from("jobs")
@@ -205,7 +207,7 @@ async function runFetch(mode: "watchlist" | "full") {
     );
     if (strong.length) {
       const { subject, html } = renderWatchlistAlert(strong);
-      await sendEmail(subject, html);
+      await sendEmail(subject, html, ctx.criteria.digest_email);
       await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", strong.map((j) => j.id)));
     }
     totals.alerted = strong.length;
@@ -243,7 +245,7 @@ async function runDigest() {
   const stats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0 };
   if (newMatches.length || followUps.length || statusChanges.length) {
     const { subject, html } = renderDigest({ newMatches, followUps, statusChanges });
-    await sendEmail(subject, html);
+    await sendEmail(subject, html, criteria.digest_email);
     stats.emailed = 1;
     if (newMatches.length) {
       await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", newMatches.map((j) => j.id)));
