@@ -17,7 +17,9 @@ GitHub Actions (cron)
                                        Inbox · Pipeline · Criteria · Sources · Profile · Report
 ```
 
-1. **Fetch.** Listings come from the public job-board APIs of Greenhouse, Lever and Ashby. These are official, unauthenticated endpoints, so there's no scraping to break.
+1. **Fetch.** Listings come from companies' own job boards through public endpoints: Greenhouse, Lever and Ashby APIs, Teamtailor RSS feeds, and the SmartRecruiters API. An aggregator ([Sweden Game Jobs](https://www.swedengamejobs.com)) catches companies with custom career sites; for those, the description is fetched from the original posting.
+   - **Deduplication:** the same posting from two sources is stored once, keyed on the ATS job ID (or a cleaned-up URL). The company's own board wins. If it's added later, it adopts the aggregator's copy along with your decisions on it.
+   - **Discovery:** companies seen on the aggregator are suggested as direct sources on the Sources page.
 2. **Filter.** Cheap hard filters (role in the title, location or remote, excluded title words, must-have keywords) run first, at no cost.
 3. **Score.** Listings that pass are scored 0–100 by Claude against your criteria, your CV and your **last 40 approve/skip decisions**. The skip reasons are the feedback loop.
 4. **Review.** The Inbox shows matches above your threshold. Approve moves a listing to the Pipeline. Skip records why.
@@ -61,7 +63,8 @@ The service-role and API keys never go to Vercel.
 | `SUPABASE_URL` | `SCORING_MODEL` (fallback only; the model is picked on the Criteria page, default Haiku 5.5) |
 | `SUPABASE_SERVICE_ROLE_KEY` | `MAX_SCORE_PER_RUN` (default 60) |
 | `ANTHROPIC_API_KEY` | `APP_URL` (your Vercel URL, linked from emails) |
-| `RESEND_API_KEY` | `DIGEST_FROM` (needs a verified domain in Resend) |
+| `RESEND_API_KEY` | `DIGEST_FROM` (e.g. `Headshot <headshot@jobs.example.com>`; needs a verified domain in Resend) |
+| | `DIGEST_REPLY_TO` (a real inbox for replies) |
 | | `DIGEST_TO` (fallback recipient; normally set on the Criteria page) |
 
 Then run **Actions → Daily search and digest → Run workflow** once to test.
@@ -76,4 +79,4 @@ Hosting, database, cron and email all fit in free tiers. GitHub Actions minutes 
 ## Roadmap
 - [ ] Tailored CV and cover-letter drafts for approved jobs
 - [ ] Assisted apply: prefill forms from the profile and answer bank
-- [ ] More sources: Workable, SmartRecruiters, aggregator APIs
+- [ ] More sources: Workable, Jobylon, Workday, more aggregators

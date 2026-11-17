@@ -9,15 +9,18 @@ import "./env";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { fetchBoard } from "../src/lib/ats";
+import { dedupeKey, detectAts } from "../src/lib/dedupe";
+import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
 import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "../src/lib/scoring";
 import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
-import type { Criteria, FetchedJob, Job, Profile, Source } from "../src/lib/types";
+import { ATS_INFO, type Criteria, type FetchedJob, type Job, type Profile, type Source } from "../src/lib/types";
 
 type Mode = "watchlist" | "full" | "digest";
 
 const MAX_SCORE_PER_RUN = Number(process.env.MAX_SCORE_PER_RUN || 60);
 const SCORE_CONCURRENCY = 4;
+const DESCRIBE_CONCURRENCY = 4;
 const OPEN_STATUSES = ["new", "filtered", "scored"];
 
 function env(name: string): string {
@@ -75,11 +78,40 @@ async function loadContext() {
 // Fetch + filter
 // ---------------------------------------------------------------------------
 
-async function syncSource(source: Source, criteria: Criteria) {
-  const stats = { fetched: 0, inserted: 0, filtered: 0, closed: 0 };
-  let fetched: FetchedJob[];
+/** Runs `fn` over `items` with at most `n` in flight. */
+async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: n }, async () => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) await fn(item);
+  }));
+}
+
+type Existing = { id: string; source_id: string; dedupe_key: string; status: string; thin: boolean };
+
+/** Jobs from any source sharing one of these dedupe keys. */
+async function findByKeys(keys: string[]): Promise<Map<string, Existing>> {
+  const out = new Map<string, Existing>();
+  for (let i = 0; i < keys.length; i += 200) {
+    const rows = await must<Existing[]>(
+      db.from("jobs").select("id, source_id, dedupe_key, status, thin").in("dedupe_key", keys.slice(i, i + 200)),
+    );
+    for (const r of rows) out.set(r.dedupe_key, r);
+  }
+  return out;
+}
+
+/**
+ * Fetches one source and stores what's new. Direct sources (company ATSes)
+ * run before aggregators: an aggregator only adds postings no other source
+ * has, and a direct source "adopts" a posting an aggregator found first, so
+ * your decisions on it are kept and it gets the full description.
+ */
+async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set<string>) {
+  const stats = { fetched: 0, inserted: 0, filtered: 0, closed: 0, duplicates: 0, adopted: 0, described: 0, stale: 0 };
+  const isAggregator = Boolean(ATS_INFO[source.ats]?.aggregator);
+  let fetched: (FetchedJob & { dedupe_key: string })[];
   try {
-    fetched = await fetchBoard(source.ats, source.slug, source.company_name);
+    fetched = (await fetchBoard(source)).map((j) => ({ ...j, dedupe_key: dedupeKey(j.url) }));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.from("sources").update({ last_error: msg, last_checked_at: new Date().toISOString() }).eq("id", source.id);
@@ -94,12 +126,95 @@ async function syncSource(source: Source, criteria: Criteria) {
   const known = new Set(existing.map((j) => j.external_id));
   const live = new Set(fetched.map((j) => j.external_id));
 
-  const fresh = fetched.filter((j) => !known.has(j.external_id));
-  const rows = fresh.map((j) => {
-    const reason = hardFilter(j, criteria);
-    if (reason) stats.filtered++;
-    return { ...j, source_id: source.id, status: reason ? "filtered" : "new", filter_reason: reason };
+  // An aggregator skips companies you follow directly: their own board is the source of
+  // truth, and aggregator entries missing from it are usually already-closed postings.
+  const direct = new Set<string>();
+  if (isAggregator) {
+    const rows = await must<{ ats: string; slug: string }[]>(db.from("sources").select("ats, slug").eq("enabled", true));
+    rows.forEach((r) => direct.add(`${r.ats}:${r.slug.toLowerCase()}`));
+  }
+  const coveredByDirect = (url: string) => {
+    const d = detectAts(url);
+    const ats = d.ats === "teamtailor?" ? "teamtailor" : d.ats;
+    return direct.has(`${ats}:${d.slug.toLowerCase()}`);
+  };
+
+  // New to this source, and unique within this fetch.
+  const seenKeys = new Set<string>();
+  const fresh = fetched.filter((j) => {
+    if (known.has(j.external_id) || seenKeys.has(j.dedupe_key)) return false;
+    if (isAggregator && coveredByDirect(j.url)) {
+      stats.duplicates++;
+      return false;
+    }
+    seenKeys.add(j.dedupe_key);
+    return true;
   });
+
+  // Cross-source duplicates.
+  const matches = await findByKeys(fresh.map((j) => j.dedupe_key));
+  const candidates: typeof fresh = [];
+  for (const j of fresh) {
+    const m = matches.get(j.dedupe_key);
+    if (!m) {
+      candidates.push(j);
+    } else if (!isAggregator && aggregatorIds.has(m.source_id)) {
+      // Adopt: move the aggregator's row to this direct source with full data.
+      const rescore = m.thin && m.status === "scored";
+      await must(
+        db
+          .from("jobs")
+          .update({
+            source_id: source.id,
+            external_id: j.external_id,
+            url: j.url,
+            title: j.title,
+            location: j.location,
+            remote: j.remote,
+            description: j.description,
+            compensation: j.compensation,
+            thin: false,
+            ...(rescore ? { status: "new", score: null } : {}),
+          })
+          .eq("id", m.id),
+      );
+      stats.adopted++;
+    } else {
+      stats.duplicates++;
+    }
+  }
+
+  // Filter on title/location first, fetch descriptions only for survivors, then filter fully.
+  const rows: Record<string, unknown>[] = [];
+  const needDescription: (typeof candidates)[number][] = [];
+  for (const j of candidates) {
+    const reason = hardFilter(j, criteria, { skipKeywordCheck: !j.description });
+    if (reason) {
+      stats.filtered++;
+      rows.push({ ...j, source_id: source.id, status: "filtered", filter_reason: reason });
+    } else if (!j.description) {
+      needDescription.push(j);
+    } else {
+      rows.push({ ...j, source_id: source.id, status: "new", filter_reason: null });
+    }
+  }
+  await pool(needDescription, DESCRIBE_CONCURRENCY, async (j) => {
+    try {
+      j.description = await describe(source, j);
+      stats.described++;
+    } catch (e) {
+      if (e instanceof PostingClosedError) {
+        stats.stale++; // listed by the source, but the posting itself is gone: don't store it
+        return;
+      }
+      console.warn(`  no description for ${j.title} @ ${j.company}: ${e instanceof Error ? e.message : e}`);
+    }
+    const thin = j.description.length < THIN_THRESHOLD;
+    const reason = thin ? null : hardFilter(j, criteria);
+    if (reason) stats.filtered++;
+    rows.push({ ...j, source_id: source.id, thin, status: reason ? "filtered" : "new", filter_reason: reason });
+  });
+
   for (let i = 0; i < rows.length; i += 500) {
     await must(
       db.from("jobs").upsert(rows.slice(i, i + 500), { onConflict: "source_id,external_id", ignoreDuplicates: true }),
@@ -114,9 +229,53 @@ async function syncSource(source: Source, criteria: Criteria) {
   }
   stats.closed = gone.length;
 
+  if (isAggregator) await discoverSources(fetched);
+
   await db.from("sources").update({ last_error: null, last_checked_at: new Date().toISOString() }).eq("id", source.id);
-  console.log(`[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.filtered} filtered), ${stats.closed} closed`);
+  console.log(
+    `[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.filtered} filtered, ` +
+      `${stats.described} described), ${stats.duplicates} duplicates, ${stats.adopted} adopted, ` +
+      `${stats.stale} stale skipped, ${stats.closed} closed`,
+  );
   return { ...stats, errors: 0 };
+}
+
+/** From aggregator listings, suggest companies that could be added as direct sources. */
+async function discoverSources(jobs: FetchedJob[]) {
+  const sources = await must<{ ats: string; slug: string }[]>(db.from("sources").select("ats, slug"));
+  const have = new Set(sources.map((s) => `${s.ats}:${s.slug.toLowerCase()}`));
+  const known = await must<{ ats: string; slug: string }[]>(db.from("source_suggestions").select("ats, slug"));
+  const suggested = new Map(known.map((s) => [s.slug.toLowerCase(), s.ats]));
+
+  const groups = new Map<string, { ats: string; slug: string; company_name: string; job_count: number }>();
+  for (const j of jobs) {
+    const d = detectAts(j.url);
+    const key = `${d.ats}:${d.slug.toLowerCase()}`;
+    const g = groups.get(key) ?? { ats: d.ats, slug: d.slug, company_name: j.company, job_count: 0 };
+    g.job_count++;
+    groups.set(key, g);
+  }
+
+  const rows = [];
+  for (const g of groups.values()) {
+    if (g.ats === "teamtailor?") {
+      // Confirm once per host; afterwards the stored suggestion remembers the answer.
+      const prev = suggested.get(g.slug.toLowerCase());
+      g.ats = prev ?? ((await isTeamtailor(g.slug)) ? "teamtailor" : "custom");
+    }
+    if (have.has(`${g.ats}:${g.slug.toLowerCase()}`)) continue;
+    rows.push({ ...g, last_seen_at: new Date().toISOString() });
+  }
+  if (rows.length) await must(db.from("source_suggestions").upsert(rows, { onConflict: "ats,slug" }));
+}
+
+async function isTeamtailor(host: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://${host}/jobs.rss`, { signal: AbortSignal.timeout(10_000) });
+    return res.ok && (res.headers.get("content-type") ?? "").includes("xml");
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,9 +346,15 @@ async function runFetch(mode: "watchlist" | "full") {
     return { sources: 0 };
   }
 
+  // Direct sources first, aggregators last (see syncSource). Aggregators are looked up across
+  // all sources, so a watchlist run can still adopt rows an aggregator found.
+  const all = await must<{ id: string; ats: Source["ats"] }[]>(db.from("sources").select("id, ats"));
+  const aggregatorIds = new Set(all.filter((s) => ATS_INFO[s.ats]?.aggregator).map((s) => s.id));
+  sources.sort((a, b) => Number(aggregatorIds.has(a.id)) - Number(aggregatorIds.has(b.id)));
+
   const totals: Record<string, number> = { sources: sources.length };
   for (const s of sources) {
-    const st = await syncSource(s, ctx.criteria);
+    const st = await syncSource(s, ctx.criteria, aggregatorIds);
     for (const [k, v] of Object.entries(st)) totals[k] = (totals[k] ?? 0) + v;
   }
   Object.assign(totals, await scorePending(sources.map((s) => s.id), ctx));

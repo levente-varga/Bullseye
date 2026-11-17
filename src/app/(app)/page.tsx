@@ -67,6 +67,11 @@ function JobCard({ job }: { job: Job }) {
               {job.remote && " · Remote"}
               {job.compensation && ` · ${job.compensation}`}
             </p>
+            {job.thin && (
+              <p className="mt-1 inline-block rounded border border-amber-500/50 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-400">
+                Limited info: scored on title and location only
+              </p>
+            )}
           </div>
           {job.score_summary && <p className="text-sm">{job.score_summary}</p>}
           <div className="grid gap-2 text-sm sm:grid-cols-2">

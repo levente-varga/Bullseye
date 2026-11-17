@@ -12,7 +12,11 @@ const hasWord = (haystack: string, word: string) =>
  * Cheap, deterministic filters that run before any LLM call.
  * Returns null if the job passes, or the reason it was filtered out.
  */
-export function hardFilter(job: FetchedJob, c: Criteria): string | null {
+export function hardFilter(
+  job: FetchedJob,
+  c: Criteria,
+  opts: { skipKeywordCheck?: boolean } = {},
+): string | null {
   // Title only: descriptions mention almost everything in passing.
   const excluded = c.exclude_keywords.find((k) => k.trim() && hasWord(job.title, k));
   if (excluded) return `Excluded keyword: "${excluded}"`;
@@ -30,7 +34,8 @@ export function hardFilter(job: FetchedJob, c: Criteria): string | null {
     return "Remote-only and remote is turned off";
   }
 
-  if (c.include_keywords.length && !c.include_keywords.some((k) => k.trim() && has(`${job.title}\n${job.description}`, k))) {
+  // Without a description (not fetched yet, or none available) the keyword check would wrongly reject.
+  if (!opts.skipKeywordCheck && job.description && c.include_keywords.length && !c.include_keywords.some((k) => k.trim() && has(`${job.title}\n${job.description}`, k))) {
     return "Description contains none of the required keywords";
   }
 
