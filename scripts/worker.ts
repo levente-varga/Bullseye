@@ -12,6 +12,7 @@ import { fetchBoard } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
+import { costUsd } from "../src/lib/pricing";
 import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "../src/lib/scoring";
 import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
 import { ATS_INFO, type Criteria, type FetchedJob, type Job, type Profile, type Source } from "../src/lib/types";
@@ -300,13 +301,17 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
   console.log(`Scoring ${pending.length} listings with ${model}`);
   let scored = 0;
   let errors = 0;
+  const spend = { cost: 0, tokensIn: 0, tokensOut: 0 };
 
   const queue = [...pending];
   await Promise.all(
     Array.from({ length: SCORE_CONCURRENCY }, async () => {
       for (let job = queue.shift(); job; job = queue.shift()) {
         try {
-          const s = await scoreJob(client, model, system, job);
+          const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job);
+          spend.cost += costUsd(answeredBy, usage);
+          spend.tokensIn += usage.input + usage.cacheWrite + usage.cacheRead;
+          spend.tokensOut += usage.output;
           await must(
             db
               .from("jobs")
@@ -329,7 +334,14 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
       }
     }),
   );
-  return { scored, score_errors: errors };
+  console.log(`Scoring cost $${spend.cost.toFixed(4)} (${spend.tokensIn} tokens in, ${spend.tokensOut} out)`);
+  return {
+    scored,
+    score_errors: errors,
+    cost_usd: Math.round(spend.cost * 1e6) / 1e6,
+    tokens_in: spend.tokensIn,
+    tokens_out: spend.tokensOut,
+  };
 }
 
 // ---------------------------------------------------------------------------

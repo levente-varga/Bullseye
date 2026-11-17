@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ago } from "@/lib/time";
+import { agoText } from "@/lib/time";
 import { PIPELINE_STATUSES } from "@/lib/types";
 import { SidebarNav } from "./NavLinks";
 import { Dot } from "./ui";
@@ -62,7 +62,7 @@ export async function SidebarData() {
         <div className="flex items-center gap-2">
           <Dot tone={!last ? "muted" : last.error ? "bad" : last.finished_at ? "ok" : "warn"} />
           <span className="muted">
-            {!last ? "No runs yet" : `Last ${last.kind} run ${ago(last.started_at)} ago`}
+            {!last ? "No runs yet" : `Last ${last.kind} run ${agoText(last.started_at)}`}
           </span>
         </div>
         <div className="faint">

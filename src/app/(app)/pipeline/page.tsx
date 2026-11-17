@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { IconExternal } from "@/components/icons";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
-import { ago, nowMs } from "@/lib/time";
+import { agoText, nowMs } from "@/lib/time";
 import { PIPELINE_STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { markFollowedUp, setStatus } from "../actions";
 
@@ -84,8 +84,8 @@ export default async function PipelinePage() {
                         </a>
                         <div className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px]">
                           <span>{job.company}</span>
-                          {job.applied_at && <span className="mono faint">applied {ago(job.applied_at)} ago</span>}
-                          {job.followed_up_at && <span className="mono faint">followed up {ago(job.followed_up_at)} ago</span>}
+                          {job.applied_at && <span className="mono faint">applied {agoText(job.applied_at)}</span>}
+                          {job.followed_up_at && <span className="mono faint">followed up {agoText(job.followed_up_at)}</span>}
                           {due(job) && (
                             <span className="inline-flex items-center gap-1.5">
                               <Dot tone="warn" />
