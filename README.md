@@ -58,7 +58,7 @@ The service-role and API keys never go to Vercel.
 
 | Secrets | Variables (optional) |
 |---|---|
-| `SUPABASE_URL` | `SCORING_MODEL` (default `claude-opus-5-5`; `claude-haiku-5-5` is much cheaper) |
+| `SUPABASE_URL` | `SCORING_MODEL` (fallback only; the model is picked on the Criteria page, default Haiku 5.5) |
 | `SUPABASE_SERVICE_ROLE_KEY` | `MAX_SCORE_PER_RUN` (default 60) |
 | `ANTHROPIC_API_KEY` | `APP_URL` (your Vercel URL, linked from emails) |
 | `RESEND_API_KEY` | `DIGEST_FROM` (needs a verified domain in Resend) |
@@ -70,7 +70,7 @@ Then run **Actions → Daily search and digest → Run workflow** once to test.
 
 Hosting, database, cron and email all fit in free tiers. GitHub Actions minutes are unlimited for public repos. The only variable cost is LLM scoring, which you control with:
 - **hard filters**: tighter filters mean fewer listings to score
-- **`SCORING_MODEL`**: Haiku costs a fraction of Opus
+- **the scoring model** (Criteria page): Haiku 5.5 is the default and costs a fraction of Sonnet or Opus
 - **`MAX_SCORE_PER_RUN`**: a hard cap on scoring calls per run
 
 ## Roadmap

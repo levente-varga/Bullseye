@@ -1,15 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import type { Criteria, FetchedJob, Profile } from "./types";
+import { SCORING_MODELS, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
 
 /**
  * LLM scoring: how well does a listing fit the candidate?
- *
- * Model is configurable via SCORING_MODEL. claude-haiku-5-5 is ~40x cheaper
- * than the default and is usually good enough for fit scoring.
+ * The model is picked on the Criteria page (default Claude Haiku 5.5).
  */
-export const SCORING_MODEL = process.env.SCORING_MODEL || "claude-opus-5-5";
 
 export const ScoreSchema = z.object({
   score: z.number().int().min(0).max(100),
@@ -71,17 +68,25 @@ ${examples}
 </past_decisions>`;
 }
 
-const SUPPORTS_SERVER_FALLBACK = !SCORING_MODEL.startsWith("claude-haiku");
+/** Resolves the model to use: dashboard setting, then the SCORING_MODEL env var, then Haiku. */
+export function resolveModel(setting: string | null | undefined): ScoringModel {
+  const known = (m?: string | null): m is ScoringModel => SCORING_MODELS.some((x) => x.id === m);
+  if (known(setting)) return setting;
+  if (known(process.env.SCORING_MODEL)) return process.env.SCORING_MODEL;
+  return "claude-haiku-5-5";
+}
 
 export async function scoreJob(
   client: Anthropic,
+  model: ScoringModel,
   system: string,
   job: FetchedJob,
 ): Promise<Score> {
   const response = await client.beta.messages.parse({
-    model: SCORING_MODEL,
+    model,
     max_tokens: 2000,
-    ...(SUPPORTS_SERVER_FALLBACK
+    // Haiku has no server-side refusal fallback; Sonnet and Opus do.
+    ...(model !== "claude-haiku-5-5"
       ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
       : {}),
     // Stable per run: cached after the first job, so later jobs are cheaper.
