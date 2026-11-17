@@ -111,19 +111,6 @@ export function CreditChart(props: { points: BalancePoint[]; zeroAt: number | nu
           {zeroAt && end === zeroAt && (
             <circle cx={x(zeroAt)} cy={y(0)} r={4} fill="var(--surface)" stroke="var(--accent)" strokeWidth={2} />
           )}
-          {/* $0 is beyond the chart's horizon: say when, at the end of the dashed line */}
-          {zeroAt && end !== zeroAt && (
-            <text
-              x={M.left + iw}
-              y={Math.max(M.top + 10, y(projEndV) - 10)}
-              textAnchor="end"
-              className="mono"
-              fontSize={11}
-              fill="var(--muted)"
-            >
-              $0 ≈ {fmtDate(zeroAt, true)} →
-            </text>
-          )}
 
           {/* entries (top-ups / corrections) and the current value */}
           {points

@@ -17,10 +17,10 @@
   --muted: #8d8d97;
   --faint: #5d5d67;
 
-  --accent: #d4481f; /* deep reddish orange: bars, primary buttons, focus */
-  --accent-strong: #f0643a; /* hover, icons, accent text on dark */
-  --accent-fg: #ffffff;
-  --link: #f2875f;
+  --accent: #e0704b; /* reddish orange: bars, primary buttons, focus */
+  --accent-strong: #ec8a67; /* hover, icons, accent text on dark */
+  --accent-fg: #1a0f0a; /* dark ink on the accent: 5.9:1, white was only 4.4:1 */
+  --link: #f09a78;
 
   --ok: #3ccf91;
   --warn: #f2b84b;
@@ -29,7 +29,7 @@
   --ok-tint: rgba(60, 207, 145, 0.12);
   --warn-tint: rgba(242, 184, 75, 0.14);
   --bad-tint: rgba(240, 86, 122, 0.14);
-  --accent-tint: rgba(212, 72, 31, 0.16);
+  --accent-tint: rgba(224, 112, 75, 0.16);
 
   --hatch: rgba(255, 255, 255, 0.07);
 
@@ -48,17 +48,17 @@
     --fg: #17171a;
     --muted: #6b6b73;
     --faint: #a0a0a8;
-    --accent: #c03d14;
-    --accent-strong: #a3320f;
-    --accent-fg: #ffffff;
-    --link: #b23a12;
+    --accent: #d9663f;
+    --accent-strong: #c4552f;
+    --accent-fg: #1a0f0a;
+    --link: #b04a26;
     --ok: #13a36b;
     --warn: #c88a12;
     --bad: #d63461;
     --ok-tint: rgba(19, 163, 107, 0.1);
     --warn-tint: rgba(200, 138, 18, 0.12);
     --bad-tint: rgba(214, 52, 97, 0.1);
-    --accent-tint: rgba(192, 61, 20, 0.1);
+    --accent-tint: rgba(217, 102, 63, 0.12);
     --hatch: rgba(0, 0, 0, 0.08);
     color-scheme: light;
   }
@@ -73,17 +73,17 @@
   --fg: #17171a;
   --muted: #6b6b73;
   --faint: #a0a0a8;
-  --accent: #c03d14;
-  --accent-strong: #a3320f;
-  --accent-fg: #ffffff;
-  --link: #b23a12;
+  --accent: #d9663f;
+  --accent-strong: #c4552f;
+  --accent-fg: #1a0f0a;
+  --link: #b04a26;
   --ok: #13a36b;
   --warn: #c88a12;
   --bad: #d63461;
   --ok-tint: rgba(19, 163, 107, 0.1);
   --warn-tint: rgba(200, 138, 18, 0.12);
   --bad-tint: rgba(214, 52, 97, 0.1);
-  --accent-tint: rgba(192, 61, 20, 0.1);
+  --accent-tint: rgba(217, 102, 63, 0.12);
   --hatch: rgba(0, 0, 0, 0.08);
   color-scheme: light;
 }
@@ -124,7 +124,7 @@ input[type="checkbox"] {
 input[type="checkbox"]:checked {
   background-color: var(--accent);
   border-color: var(--accent);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.6 2.4' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='square'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.6 2.4' fill='none' stroke='%231a0f0a' stroke-width='1.7' stroke-linecap='square'/%3E%3C/svg%3E");
 }
 input[type="checkbox"]:focus-visible {
   outline: 1px solid var(--accent);
@@ -141,8 +141,12 @@ input[type="radio"] {
 ::selection {
   background: var(--accent-tint);
 }
-a {
-  color: inherit;
+/* In the base layer, so color classes on links (.muted, .faint, .link) win.
+   Unlayered, this rule silently beat every one of them. */
+@layer base {
+  a {
+    color: inherit;
+  }
 }
 
 @layer components {

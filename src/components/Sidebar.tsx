@@ -42,8 +42,8 @@ export async function SidebarData() {
           <span className="mono">{watch.length}</span>
         </div>
         {watch.length === 0 ? (
-          <Link href="/sources" className="faint block px-2 text-[12px] hover:text-[var(--fg)]">
-            Click Watch on a source to check it hourly →
+          <Link href="/sources" className="muted block px-2 text-center text-[12px] hover:text-[var(--fg)]">
+            Click Watch on a source to check it hourly
           </Link>
         ) : (
           <ul className="space-y-px">
