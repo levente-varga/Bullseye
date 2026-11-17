@@ -1,4 +1,14 @@
-export type Ats = "greenhouse" | "lever" | "ashby";
+export type Ats = "greenhouse" | "lever" | "ashby" | "teamtailor" | "smartrecruiters" | "swedengamejobs";
+
+/** How each source type is configured on the Sources page. */
+export const ATS_INFO: Record<Ats, { label: string; slugLabel: string; slugExample: string; aggregator?: boolean }> = {
+  greenhouse: { label: "Greenhouse", slugLabel: "Board slug or URL", slugExample: "job-boards.greenhouse.io/mojangab" },
+  lever: { label: "Lever", slugLabel: "Board slug or URL", slugExample: "jobs.lever.co/avalanchestudios" },
+  ashby: { label: "Ashby", slugLabel: "Board slug or URL", slugExample: "jobs.ashbyhq.com/voodoo" },
+  teamtailor: { label: "Teamtailor", slugLabel: "Career site domain", slugExample: "career.paradoxplaza.com" },
+  smartrecruiters: { label: "SmartRecruiters", slugLabel: "Company identifier or URL", slugExample: "jobs.smartrecruiters.com/Ubisoft2" },
+  swedengamejobs: { label: "Sweden Game Jobs (aggregator)", slugLabel: "—", slugExample: "swedengamejobs.com", aggregator: true },
+};
 
 export type JobStatus =
   | "new"
@@ -71,6 +81,18 @@ export interface Source {
   enabled: boolean;
   last_checked_at: string | null;
   last_error: string | null;
+  /** Optional ISO country code filter (SmartRecruiters). */
+  country: string | null;
+}
+
+export interface SourceSuggestion {
+  id: string;
+  /** An Ats value, or "custom" for career sites Headshot has no adapter for. */
+  ats: Ats | "custom";
+  slug: string;
+  company_name: string;
+  job_count: number;
+  status: "new" | "added" | "dismissed";
 }
 
 export interface Job {
@@ -96,6 +118,9 @@ export interface Job {
   applied_at: string | null;
   followed_up_at: string | null;
   notified_at: string | null;
+  dedupe_key: string | null;
+  /** True when no real description could be found; the score is based on title and location only. */
+  thin: boolean;
 }
 
 export interface Run {

@@ -101,7 +101,7 @@ Company: ${job.company}
 Location: ${job.location || "unknown"}${job.remote ? " (remote possible)" : ""}
 Compensation: ${job.compensation ?? "not stated"}
 
-${job.description}
+${job.description || "(No description available: judge on title, company and location only, and keep the score moderate unless the title is a clear match or mismatch.)"}
 </listing>`,
       },
     ],
