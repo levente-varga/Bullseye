@@ -84,12 +84,12 @@ export function ScoreMeter({ score, width = "w-16" }: { score: number | null; wi
 }
 
 /** Big number with a small muted unit, as in "$1542.27 list price". */
-export function Stat(props: { label: string; value: ReactNode; unit?: string; sub?: ReactNode }) {
+export function Stat(props: { label: string; value: ReactNode; unit?: string; sub?: ReactNode; small?: boolean }) {
   return (
-    <div className="px-4 py-3">
+    <div className={props.small ? "px-3 py-2.5" : "px-4 py-3"}>
       <div className="eyebrow mb-1.5">{props.label}</div>
       <div className="flex items-baseline gap-1.5">
-        <span className="mono text-[1.6rem] leading-none tracking-tight">{props.value}</span>
+        <span className={`mono leading-none tracking-tight ${props.small ? "text-[1.1rem]" : "text-[1.6rem]"}`}>{props.value}</span>
         {props.unit && <span className="faint text-[12px]">{props.unit}</span>}
       </div>
       {props.sub && <div className="faint mt-1.5 text-[12px]">{props.sub}</div>}
