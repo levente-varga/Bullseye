@@ -74,6 +74,7 @@ export async function saveCriteria(form: FormData) {
           preferences: str(form, "preferences"),
           score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
           followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
+          digest_email: str(form, "digest_email"),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1)

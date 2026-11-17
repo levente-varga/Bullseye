@@ -62,7 +62,7 @@ The service-role and API keys never go to Vercel.
 | `SUPABASE_SERVICE_ROLE_KEY` | `MAX_SCORE_PER_RUN` (default 60) |
 | `ANTHROPIC_API_KEY` | `APP_URL` (your Vercel URL, linked from emails) |
 | `RESEND_API_KEY` | `DIGEST_FROM` (needs a verified domain in Resend) |
-| `DIGEST_TO` | |
+| | `DIGEST_TO` (fallback recipient; normally set on the Criteria page) |
 
 Then run **Actions → Daily search and digest → Run workflow** once to test.
 

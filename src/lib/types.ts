@@ -50,6 +50,7 @@ export interface Criteria {
   preferences: string;
   score_threshold: number;
   followup_days: number;
+  digest_email: string;
 }
 
 export interface Source {

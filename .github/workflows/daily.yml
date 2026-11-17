@@ -20,7 +20,7 @@ jobs:
       SCORING_MODEL: ${{ vars.SCORING_MODEL }}
       MAX_SCORE_PER_RUN: ${{ vars.MAX_SCORE_PER_RUN }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      DIGEST_TO: ${{ secrets.DIGEST_TO }}
+      DIGEST_TO: ${{ vars.DIGEST_TO }}
       DIGEST_FROM: ${{ vars.DIGEST_FROM }}
       APP_URL: ${{ vars.APP_URL }}
     steps:
