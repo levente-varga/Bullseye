@@ -1,4 +1,4 @@
-/** Headshot's small component set: square, bordered, dense. Styles live in globals.css. */
+/** Bullseye's small component set: square, bordered, dense. Styles live in globals.css. */
 import type { ReactNode } from "react";
 
 export function PageHeader(props: { title: string; meta?: ReactNode; actions?: ReactNode }) {

@@ -7,7 +7,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const newsreader = Newsreader({ variable: "--font-newsreader", subsets: ["latin"], weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: "Headshot",
+  title: "Bullseye",
   description: "Automated job search: find, score and track job listings.",
 };
 

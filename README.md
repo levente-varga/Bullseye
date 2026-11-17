@@ -1,6 +1,6 @@
-# Headshot
+# Bullseye
 
-An automated job search that runs itself. Headshot polls company job boards on a schedule, filters listings against your criteria, has Claude score the rest for fit, and emails you a daily digest. You review matches in a small dashboard: approve or skip with a reason, and the scorer learns from your decisions.
+An automated job search that runs itself. Bullseye polls company job boards on a schedule, filters listings against your criteria, has Claude score the rest for fit, and emails you a daily digest. You review matches in a small dashboard: approve or skip with a reason, and the scorer learns from your decisions.
 
 **Stack:** Next.js 16 on Vercel (dashboard) · Supabase (Postgres + auth) · GitHub Actions (scheduled worker) · Claude API (scoring) · Resend (email). Everything runs on free tiers except LLM usage.
 
@@ -63,7 +63,7 @@ The service-role and API keys never go to Vercel.
 | `SUPABASE_URL` | `SCORING_MODEL` (fallback only; the model is picked on the Criteria page, default Haiku 5.5) |
 | `SUPABASE_SERVICE_ROLE_KEY` | `MAX_SCORE_PER_RUN` (default 60) |
 | `ANTHROPIC_API_KEY` | `APP_URL` (your Vercel URL, linked from emails) |
-| `RESEND_API_KEY` | `DIGEST_FROM` (e.g. `Headshot <headshot@jobs.example.com>`; needs a verified domain in Resend) |
+| `RESEND_API_KEY` | `DIGEST_FROM` (e.g. `Bullseye <bullseye@jobs.example.com>`; needs a verified domain in Resend) |
 | | `DIGEST_REPLY_TO` (a real inbox for replies) |
 | | `DIGEST_TO` (fallback recipient; normally set on the Criteria page) |
 

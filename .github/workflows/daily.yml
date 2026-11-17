@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: headshot-worker
+  group: bullseye-worker
   cancel-in-progress: false
 
 jobs:

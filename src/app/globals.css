@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * Headshot design tokens. Tune the look here.
+ * Bullseye design tokens. Tune the look here.
  * Dark is the primary theme; light follows the OS or the sidebar toggle.
  * Everything is square: no border radius anywhere.
  */
@@ -9,7 +9,7 @@
   --bg: #0d0d0f; /* page */
   --surface: #121215; /* panels */
   --surface-2: #17171b; /* table headers, hovered rows */
-  --row-active: #151d33; /* highlighted row (navy) */
+  --row-active: #22150f; /* highlighted row (warm, follows the accent) */
   --border: #26262c;
   --border-strong: #34343c;
 
@@ -17,10 +17,10 @@
   --muted: #8d8d97;
   --faint: #5d5d67;
 
-  --accent: #6a7ff0; /* indigo: bars, primary buttons, focus */
-  --accent-strong: #8396ff;
-  --accent-fg: #0d0d0f;
-  --link: #7f98ff;
+  --accent: #d4481f; /* deep reddish orange: bars, primary buttons, focus */
+  --accent-strong: #f0643a; /* hover, icons, accent text on dark */
+  --accent-fg: #ffffff;
+  --link: #f2875f;
 
   --ok: #3ccf91;
   --warn: #f2b84b;
@@ -29,7 +29,7 @@
   --ok-tint: rgba(60, 207, 145, 0.12);
   --warn-tint: rgba(242, 184, 75, 0.14);
   --bad-tint: rgba(240, 86, 122, 0.14);
-  --accent-tint: rgba(106, 127, 240, 0.16);
+  --accent-tint: rgba(212, 72, 31, 0.16);
 
   --hatch: rgba(255, 255, 255, 0.07);
 
@@ -42,23 +42,23 @@
     --bg: #f6f6f4;
     --surface: #ffffff;
     --surface-2: #f0f0ee;
-    --row-active: #eaeefc;
+    --row-active: #fbefe9;
     --border: #e2e2df;
     --border-strong: #cfcfcb;
     --fg: #17171a;
     --muted: #6b6b73;
     --faint: #a0a0a8;
-    --accent: #4a5fd6;
-    --accent-strong: #3348c2;
+    --accent: #c03d14;
+    --accent-strong: #a3320f;
     --accent-fg: #ffffff;
-    --link: #3d55d4;
+    --link: #b23a12;
     --ok: #13a36b;
     --warn: #c88a12;
     --bad: #d63461;
     --ok-tint: rgba(19, 163, 107, 0.1);
     --warn-tint: rgba(200, 138, 18, 0.12);
     --bad-tint: rgba(214, 52, 97, 0.1);
-    --accent-tint: rgba(74, 95, 214, 0.1);
+    --accent-tint: rgba(192, 61, 20, 0.1);
     --hatch: rgba(0, 0, 0, 0.08);
     color-scheme: light;
   }
@@ -67,23 +67,23 @@
   --bg: #f6f6f4;
   --surface: #ffffff;
   --surface-2: #f0f0ee;
-  --row-active: #eaeefc;
+  --row-active: #fbefe9;
   --border: #e2e2df;
   --border-strong: #cfcfcb;
   --fg: #17171a;
   --muted: #6b6b73;
   --faint: #a0a0a8;
-  --accent: #4a5fd6;
-  --accent-strong: #3348c2;
+  --accent: #c03d14;
+  --accent-strong: #a3320f;
   --accent-fg: #ffffff;
-  --link: #3d55d4;
+  --link: #b23a12;
   --ok: #13a36b;
   --warn: #c88a12;
   --bad: #d63461;
   --ok-tint: rgba(19, 163, 107, 0.1);
   --warn-tint: rgba(200, 138, 18, 0.12);
   --bad-tint: rgba(214, 52, 97, 0.1);
-  --accent-tint: rgba(74, 95, 214, 0.1);
+  --accent-tint: rgba(192, 61, 20, 0.1);
   --hatch: rgba(0, 0, 0, 0.08);
   color-scheme: light;
 }
