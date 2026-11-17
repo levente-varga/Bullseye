@@ -61,7 +61,8 @@ The service-role and API keys never go to Vercel.
 | `SUPABASE_URL` | `SCORING_MODEL` (fallback only; the model is picked on the Criteria page, default Haiku 5.5) |
 | `SUPABASE_SERVICE_ROLE_KEY` | `MAX_SCORE_PER_RUN` (default 60) |
 | `ANTHROPIC_API_KEY` | `APP_URL` (your Vercel URL, linked from emails) |
-| `RESEND_API_KEY` | `DIGEST_FROM` (needs a verified domain in Resend) |
+| `RESEND_API_KEY` | `DIGEST_FROM` (e.g. `Headshot <headshot@jobs.example.com>`; needs a verified domain in Resend) |
+| | `DIGEST_REPLY_TO` (a real inbox for replies) |
 | | `DIGEST_TO` (fallback recipient; normally set on the Criteria page) |
 
 Then run **Actions → Daily search and digest → Run workflow** once to test.
