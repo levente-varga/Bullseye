@@ -210,6 +210,30 @@ export async function deleteAnswer(form: FormData) {
   revalidatePath("/profile");
 }
 
+// --- Credits ----------------------------------------------------------------
+
+/** Records the balance the Anthropic Console shows (after a top-up, or as a correction). */
+export async function addCreditEntry(form: FormData) {
+  const supabase = await db();
+  const balance = Number(str(form, "balance").replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(balance) || balance < 0) return;
+  // A past date is stored at midday UTC; today means "now", so it sorts after today's runs.
+  const date = str(form, "date");
+  const today = new Date().toISOString().slice(0, 10);
+  const enteredAt = !date || date >= today ? new Date().toISOString() : `${date}T12:00:00Z`;
+  check(
+    (await supabase.from("credit_entries").insert({ balance_usd: balance, entered_at: enteredAt, note: str(form, "note") || null }))
+      .error,
+  );
+  revalidatePath("/report");
+}
+
+export async function deleteCreditEntry(form: FormData) {
+  const supabase = await db();
+  check((await supabase.from("credit_entries").delete().eq("id", str(form, "id"))).error);
+  revalidatePath("/report");
+}
+
 // --- Auth -------------------------------------------------------------------
 
 export async function signOut() {
