@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobStatus } from "@/lib/types";
+import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobStatus } from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 /** Splits a textarea on newlines or commas into a clean list. */
@@ -99,25 +99,59 @@ export async function addExcludeKeyword(form: FormData) {
 
 // --- Sources ----------------------------------------------------------------
 
+/** Turns what the user typed (a URL or a bare value) into the slug each source type expects. */
+function normalizeSlug(ats: Ats, input: string): string {
+  const raw = input.trim();
+  if (ats === "swedengamejobs") return "swedengamejobs.com";
+  if (ats === "teamtailor") {
+    // The career site's host, e.g. career.paradoxplaza.com
+    return raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
+  }
+  // Board slug: the first path segment of a board URL, or the bare value.
+  const value = raw.replace(/^https?:\/\/[^/]+\//, "").split(/[/?#]/)[0];
+  // SmartRecruiters company identifiers keep their case (e.g. Ubisoft2).
+  return ats === "smartrecruiters" ? value : value.toLowerCase();
+}
+
 export async function addSource(form: FormData) {
   const supabase = await db();
   const ats = str(form, "ats") as Ats;
-  // Accept a full board URL or a bare slug.
-  const slug = str(form, "slug")
-    .replace(/^https?:\/\/[^/]+\//, "")
-    .split(/[/?#]/)[0]
-    .toLowerCase();
+  if (!(ats in ATS_INFO)) return;
+  const slug = normalizeSlug(ats, str(form, "slug"));
   if (!slug) return;
+  const fallbackName = ats === "swedengamejobs" ? "Sweden Game Jobs" : slug;
   check(
     (
       await supabase.from("sources").insert({
         ats,
         slug,
-        company_name: str(form, "company_name") || slug,
+        company_name: str(form, "company_name") || fallbackName,
+        country: str(form, "country").toLowerCase() || null,
         watchlist: form.get("watchlist") === "on",
       })
     ).error,
   );
+  revalidatePath("/sources");
+}
+
+export async function acceptSuggestion(form: FormData) {
+  const supabase = await db();
+  const id = str(form, "id");
+  const { data: s, error } = await supabase.from("source_suggestions").select("*").eq("id", id).single();
+  check(error);
+  if (!s || !(s.ats in ATS_INFO)) return;
+  const insert = await supabase
+    .from("sources")
+    .insert({ ats: s.ats, slug: s.slug, company_name: s.company_name, watchlist: false });
+  // Already a source (unique ats+slug): still mark the suggestion handled.
+  if (insert.error && insert.error.code !== "23505") throw new Error(insert.error.message);
+  check((await supabase.from("source_suggestions").update({ status: "added" }).eq("id", id)).error);
+  revalidatePath("/sources");
+}
+
+export async function dismissSuggestion(form: FormData) {
+  const supabase = await db();
+  check((await supabase.from("source_suggestions").update({ status: "dismissed" }).eq("id", str(form, "id"))).error);
   revalidatePath("/sources");
 }
 
