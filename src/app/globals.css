@@ -9,7 +9,7 @@
   --bg: #0d0d0f; /* page */
   --surface: #121215; /* panels */
   --surface-2: #17171b; /* table headers, hovered rows */
-  --row-active: #22150f; /* highlighted row (warm, follows the accent) */
+  --row-active: #1d1611; /* highlighted row (warm, follows the accent) */
   --border: #26262c;
   --border-strong: #34343c;
 
@@ -17,10 +17,11 @@
   --muted: #8d8d97;
   --faint: #5d5d67;
 
-  --accent: #e0704b; /* reddish orange: bars, primary buttons, focus */
-  --accent-strong: #ec8a67; /* hover, icons, accent text on dark */
-  --accent-fg: #1a0f0a; /* dark ink on the accent: 5.9:1, white was only 4.4:1 */
-  --link: #f09a78;
+  --accent: #b97541; /* muted orange: bars, primary buttons, focus (same in both themes) */
+  --accent-hover: #a86a3e; /* buttons darken on hover, so white text stays readable */
+  --accent-strong: #dca374; /* accent-colored text and icons on dark surfaces */
+  --accent-fg: #ffffff; /* white on the accent: 3.7:1, 4.4:1 on hover */
+  --link: #dca374;
 
   --ok: #3ccf91;
   --warn: #f2b84b;
@@ -29,7 +30,7 @@
   --ok-tint: rgba(60, 207, 145, 0.12);
   --warn-tint: rgba(242, 184, 75, 0.14);
   --bad-tint: rgba(240, 86, 122, 0.14);
-  --accent-tint: rgba(224, 112, 75, 0.16);
+  --accent-tint: rgba(185, 117, 65, 0.16);
 
   --hatch: rgba(255, 255, 255, 0.07);
 
@@ -42,23 +43,24 @@
     --bg: #f6f6f4;
     --surface: #ffffff;
     --surface-2: #f0f0ee;
-    --row-active: #fbefe9;
+    --row-active: #f7efe7;
     --border: #e2e2df;
     --border-strong: #cfcfcb;
     --fg: #17171a;
     --muted: #6b6b73;
     --faint: #a0a0a8;
-    --accent: #d9663f;
-    --accent-strong: #c4552f;
-    --accent-fg: #1a0f0a;
-    --link: #b04a26;
+    --accent: #b97541;
+    --accent-hover: #a86a3e;
+    --accent-strong: #915a30;
+    --accent-fg: #ffffff;
+    --link: #915a30;
     --ok: #13a36b;
     --warn: #c88a12;
     --bad: #d63461;
     --ok-tint: rgba(19, 163, 107, 0.1);
     --warn-tint: rgba(200, 138, 18, 0.12);
     --bad-tint: rgba(214, 52, 97, 0.1);
-    --accent-tint: rgba(217, 102, 63, 0.12);
+    --accent-tint: rgba(185, 117, 65, 0.12);
     --hatch: rgba(0, 0, 0, 0.08);
     color-scheme: light;
   }
@@ -67,23 +69,24 @@
   --bg: #f6f6f4;
   --surface: #ffffff;
   --surface-2: #f0f0ee;
-  --row-active: #fbefe9;
+  --row-active: #f7efe7;
   --border: #e2e2df;
   --border-strong: #cfcfcb;
   --fg: #17171a;
   --muted: #6b6b73;
   --faint: #a0a0a8;
-  --accent: #d9663f;
-  --accent-strong: #c4552f;
-  --accent-fg: #1a0f0a;
-  --link: #b04a26;
+  --accent: #b97541;
+  --accent-hover: #a86a3e;
+  --accent-strong: #915a30;
+  --accent-fg: #ffffff;
+  --link: #915a30;
   --ok: #13a36b;
   --warn: #c88a12;
   --bad: #d63461;
   --ok-tint: rgba(19, 163, 107, 0.1);
   --warn-tint: rgba(200, 138, 18, 0.12);
   --bad-tint: rgba(214, 52, 97, 0.1);
-  --accent-tint: rgba(217, 102, 63, 0.12);
+  --accent-tint: rgba(185, 117, 65, 0.12);
   --hatch: rgba(0, 0, 0, 0.08);
   color-scheme: light;
 }
@@ -109,8 +112,11 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   font-size: 14px;
 }
-/* Checkboxes: square like everything else. */
-input[type="checkbox"] {
+/* Checkboxes and radios: square like everything else, pixel-aligned so they stay crisp.
+   A checked checkbox fills with the accent and shows a check; a selected radio shows
+   an accent square inside, with a small gap to the border. */
+input[type="checkbox"],
+input[type="radio"] {
   appearance: none;
   flex-shrink: 0;
   width: 14px;
@@ -124,19 +130,26 @@ input[type="checkbox"] {
 input[type="checkbox"]:checked {
   background-color: var(--accent);
   border-color: var(--accent);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.6 2.4' fill='none' stroke='%231a0f0a' stroke-width='1.7' stroke-linecap='square'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.6 2.4' fill='none' stroke='white' stroke-width='1.7' stroke-linecap='square'/%3E%3C/svg%3E");
 }
-input[type="checkbox"]:focus-visible {
+input[type="radio"]:checked {
+  border-color: var(--accent);
+  /* An 8px accent square; the 2px gap around it is transparent, so it matches any background. */
+  padding: 2px;
+  background-color: var(--accent);
+  background-clip: content-box;
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
-input[type="checkbox"]:hover {
+input[type="checkbox"]:hover,
+input[type="radio"]:hover {
   border-color: var(--muted);
 }
-/* Radios: the browser's own (crisp at any size), tinted with the accent. */
-input[type="radio"] {
-  accent-color: var(--accent);
-  cursor: pointer;
+input[type="radio"]:checked:hover {
+  border-color: var(--accent);
 }
 ::selection {
   background: var(--accent-tint);
@@ -207,7 +220,7 @@ input[type="radio"] {
     background: var(--accent);
     color: var(--accent-fg);
   }
-  .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
   .btn-ghost {
     @apply inline-flex cursor-pointer items-center gap-1.5 px-1.5 py-1 text-[13px];
     color: var(--muted);
