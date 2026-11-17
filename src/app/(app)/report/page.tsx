@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { CreditChart } from "@/components/CreditChart";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
-import { buildSeries, type CreditEntry } from "@/lib/credits";
+import { buildSeries, dayStart, type TopUp } from "@/lib/credits";
 import { formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
 import { addCreditEntry, deleteCreditEntry } from "../actions";
@@ -46,7 +46,7 @@ export default async function ReportPage() {
   const responded = c.interview + c.offer;
   const tracked = Object.values(c).reduce((a, b) => a + b, 0);
   // API spend is recorded per run from the first run that tracks it; older runs show "–".
-  const COST_KEYS = new Set(["cost_usd", "tokens_in", "tokens_out"]);
+  const COST_KEYS = new Set(["cost_usd", "tokens_in", "tokens_out", "cost_estimated"]);
   const costed = (runs as Run[]).filter((r) => typeof r.stats.cost_usd === "number");
   const totalCost = costed.reduce((a, r) => a + r.stats.cost_usd, 0);
   const funnelMax = Math.max(1, ...FUNNEL.map((f) => c[f.status]));
@@ -54,18 +54,19 @@ export default async function ReportPage() {
   const bucketCounts = BUCKETS.map((b) => scoreList.filter((s) => s >= b.min && s <= b.max).length);
   const bucketMax = Math.max(1, ...bucketCounts);
 
-  // Credits: manual balance entries minus recorded run costs since the first entry.
-  const { data: entryRows } = await supabase.from("credit_entries").select("*").order("entered_at", { ascending: false });
-  const entries = (entryRows ?? []).map((e) => ({ ...e, balance_usd: Number(e.balance_usd) })) as CreditEntry[];
-  const firstEntry = entries.at(-1)?.entered_at;
-  const { data: spendRows } = firstEntry
-    ? await supabase.from("runs").select("finished_at, stats").gte("finished_at", firstEntry).limit(5000)
+  // Credits: top-ups minus recorded run costs from the day of the first top-up on.
+  // (The column is still called balance_usd; it holds the top-up amount.)
+  const { data: entryRows } = await supabase.from("credit_entries").select("id, entered_at, balance_usd").order("entered_at", { ascending: false });
+  const topUps: TopUp[] = (entryRows ?? []).map((e) => ({ id: e.id, entered_at: e.entered_at, amount_usd: Number(e.balance_usd) }));
+  const firstTopUp = topUps.at(-1)?.entered_at;
+  const { data: spendRows } = firstTopUp
+    ? await supabase.from("runs").select("finished_at, stats").gte("finished_at", new Date(dayStart(firstTopUp)).toISOString()).limit(5000)
     : { data: [] };
   const costedRuns = (spendRows ?? [])
     .filter((r) => r.finished_at && typeof r.stats?.cost_usd === "number")
     .map((r) => ({ at: r.finished_at as string, cost_usd: r.stats.cost_usd as number }));
   const now = nowMs();
-  const series = buildSeries(entries, costedRuns, now);
+  const series = buildSeries(topUps, costedRuns, now);
   const todayIso = new Date(now).toISOString().slice(0, 10);
 
   return (
@@ -89,7 +90,7 @@ export default async function ReportPage() {
           <Stat label="Response rate" value={applied ? Math.round((responded / applied) * 100) : "–"} unit={applied ? "%" : undefined} />
         </section>
 
-        <div className="grid items-start gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="split">
           <Panel title="Funnel" aside="all time">
             <ul className="space-y-3 p-3">
               {FUNNEL.map((f) => (
@@ -141,44 +142,36 @@ export default async function ReportPage() {
               )
             }
           />
-          <div className="grid items-start gap-6 lg:grid-cols-[1fr_300px]">
+          <div className="split">
             <Panel title="Remaining API credit" aside={series?.perDay ? `trend: last ${Math.round(series.windowDays)}d` : undefined}>
               {series ? (
                 <div className="px-2 pt-3 pb-1">
                   <CreditChart points={series.points} zeroAt={series.zeroAt} now={now} />
                 </div>
               ) : (
-                <Empty>
-                  Enter your current balance from the Anthropic Console to start tracking. The chart subtracts each
-                  run&apos;s cost and projects when you&apos;ll hit $0.
-                </Empty>
+                <Empty>Add your first top-up to start tracking.</Empty>
               )}
             </Panel>
 
-            <Panel title="Balance entries">
-              <form action={addCreditEntry} className="space-y-2 border-b border-[var(--border)] p-3">
-                <div className="grid grid-cols-[1fr_96px] gap-1.5">
-                  <input name="date" type="date" defaultValue={todayIso} max={todayIso} className="input mono" />
-                  <input name="balance" inputMode="decimal" required placeholder="$5.00" className="input mono" />
-                </div>
-                <input name="note" placeholder="Note, e.g. top-up $5" className="input" />
-                <button className="btn-primary w-full">Add balance</button>
-                <p className="hint">The balance the Console shows after a top-up. Re-enter it anytime to correct drift.</p>
+            <Panel title="Top-ups">
+              <form action={addCreditEntry} className="flex gap-1.5 border-b border-[var(--border)] p-3">
+                <input name="date" type="date" defaultValue={todayIso} max={todayIso} className="input mono min-w-0 flex-1" />
+                <input name="amount" inputMode="decimal" required placeholder="$5.00" className="input mono w-20" />
+                <button className="btn-primary">Add</button>
               </form>
-              {entries.length === 0 ? (
-                <Empty>No entries yet.</Empty>
+              {topUps.length === 0 ? (
+                <Empty>No top-ups yet.</Empty>
               ) : (
                 <ul className="divide">
-                  {entries.map((e) => (
+                  {topUps.map((e) => (
                     <li key={e.id} className="flex items-center gap-3 px-3 py-2 text-[12px]">
-                      <span className="mono muted w-20 shrink-0">
-                        {new Date(e.entered_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
+                      <span className="mono muted flex-1">
+                        {new Date(e.entered_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
                       </span>
-                      <span className="mono w-16 shrink-0 text-right text-[13px]">${e.balance_usd.toFixed(2)}</span>
-                      <span className="faint min-w-0 flex-1 truncate">{e.note}</span>
+                      <span className="mono text-right text-[13px]">+${e.amount_usd.toFixed(2)}</span>
                       <form action={deleteCreditEntry}>
                         <input type="hidden" name="id" value={e.id} />
-                        <button className="btn-ghost btn-danger text-[12px]" aria-label="Delete entry">
+                        <button className="btn-ghost btn-danger text-[12px]" aria-label="Delete top-up">
                           ✕
                         </button>
                       </form>
@@ -236,12 +229,21 @@ export default async function ReportPage() {
                           <td
                             className="mono text-right text-[12px]"
                             title={
-                              typeof r.stats.cost_usd === "number"
-                                ? `${r.stats.tokens_in ?? 0} tokens in, ${r.stats.tokens_out ?? 0} out`
-                                : "Not recorded for this run"
+                              r.stats.cost_estimated
+                                ? "Estimated: this run predates cost tracking"
+                                : typeof r.stats.cost_usd === "number"
+                                  ? `${r.stats.tokens_in ?? 0} tokens in, ${r.stats.tokens_out ?? 0} out`
+                                  : "Not recorded for this run"
                             }
                           >
-                            {typeof r.stats.cost_usd === "number" ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
+                            {typeof r.stats.cost_usd === "number" ? (
+                              <>
+                                {r.stats.cost_estimated ? <span className="faint">≈</span> : null}
+                                {formatUsd(r.stats.cost_usd)}
+                              </>
+                            ) : (
+                              <span className="faint">–</span>
+                            )}
                           </td>
                           <td className="text-[12px]">
                             {r.error ? (

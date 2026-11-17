@@ -293,7 +293,8 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
       .order("first_seen_at", { ascending: false })
       .limit(MAX_SCORE_PER_RUN),
   );
-  if (!pending.length) return { scored: 0, score_errors: 0 };
+  // Always report a cost, even $0, so the Report never shows a run as "unknown".
+  if (!pending.length) return { scored: 0, score_errors: 0, cost_usd: 0, tokens_in: 0, tokens_out: 0 };
 
   const client = new Anthropic();
   const system = buildSystemPrompt(ctx.profile, ctx.criteria, ctx.feedback);
@@ -355,7 +356,7 @@ async function runFetch(mode: "watchlist" | "full") {
   const sources = await must<Source[]>(q);
   if (!sources.length) {
     console.log(`No ${mode === "watchlist" ? "watchlist " : ""}sources configured.`);
-    return { sources: 0 };
+    return { sources: 0, cost_usd: 0 };
   }
 
   // Direct sources first, aggregators last (see syncSource). Aggregators are looked up across
@@ -419,7 +420,8 @@ async function runDigest() {
       .order("status_changed_at", { ascending: false }),
   );
 
-  const stats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0 };
+  // cost_usd: the digest makes no Claude calls.
+  const stats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0, cost_usd: 0 };
   if (newMatches.length || followUps.length || statusChanges.length) {
     const { subject, html } = renderDigest({ newMatches, followUps, statusChanges });
     await sendEmail(subject, html, criteria.digest_email);

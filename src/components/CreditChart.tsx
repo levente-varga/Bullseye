@@ -60,7 +60,7 @@ export function CreditChart(props: { points: BalancePoint[]; zeroAt: number | nu
       readout = {
         t: nearest.t,
         v: nearest.balance,
-        label: nearest.kind === "entry" ? `entered${nearest.label ? ` · ${nearest.label}` : ""}` : nearest.kind === "now" ? "now" : "after run",
+        label: nearest.kind === "topup" ? "top-up" : nearest.kind === "now" ? "now" : "after run",
       };
     }
   }

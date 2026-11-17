@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { IconExternal } from "@/components/icons";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
 import { agoText, nowMs } from "@/lib/time";
-import { PIPELINE_STATUSES, type Job, type JobStatus } from "@/lib/types";
+import { JOB_LIST_COLUMNS, PIPELINE_STATUSES, type Job, type JobStatus } from "@/lib/types";
 import { markFollowedUp, setStatus } from "../actions";
 
 const LABEL: Record<string, string> = {
@@ -24,11 +24,11 @@ const NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
 export default async function PipelinePage() {
   const supabase = await createClient();
   const [{ data, error }, { data: criteria }] = await Promise.all([
-    supabase.from("jobs").select("*").in("status", PIPELINE_STATUSES).order("status_changed_at", { ascending: false }),
+    supabase.from("jobs").select(JOB_LIST_COLUMNS).in("status", PIPELINE_STATUSES).order("status_changed_at", { ascending: false }),
     supabase.from("criteria").select("followup_days").eq("id", 1).single(),
   ]);
   if (error) throw new Error(error.message);
-  const jobs = data as Job[];
+  const jobs = data as unknown as Job[];
   const followupDays = criteria?.followup_days ?? 10;
   const followupMs = followupDays * 86_400_000;
   const now = nowMs();

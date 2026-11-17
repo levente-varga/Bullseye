@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import { detectSource } from "@/lib/detect-source";
 import { createClient } from "@/lib/supabase/server";
-import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobStatus } from "@/lib/types";
+import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobDetails, type JobStatus } from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 /** Splits a textarea on newlines or commas into a clean list. */
@@ -31,6 +31,13 @@ export async function approveJob(form: FormData) {
   check((await supabase.from("jobs").update({ status: "approved" }).eq("id", id)).error);
   check((await supabase.from("feedback").insert({ job_id: id, decision: "approve", note: str(form, "note") || null })).error);
   revalidatePath("/");
+}
+
+/** The scorer's reasoning for one job, loaded when its Inbox row is opened. */
+export async function getJobDetails(id: string): Promise<JobDetails | null> {
+  const supabase = await db();
+  const { data } = await supabase.from("jobs").select("url, score_summary, score_pros, score_cons").eq("id", id).single();
+  return (data as JobDetails | null) ?? null;
 }
 
 export async function skipJob(form: FormData) {
@@ -301,19 +308,16 @@ export async function deleteAnswer(form: FormData) {
 
 // --- Credits ----------------------------------------------------------------
 
-/** Records the balance the Anthropic Console shows (after a top-up, or as a correction). */
+/** Records a credit top-up: an amount added on a day. It counts from that day's start, so the day's runs are included. */
 export async function addCreditEntry(form: FormData) {
   const supabase = await db();
-  const balance = Number(str(form, "balance").replace(/[$,\s]/g, ""));
-  if (!Number.isFinite(balance) || balance < 0) return;
-  // A past date is stored at midday UTC; today means "now", so it sorts after today's runs.
-  const date = str(form, "date");
+  const amount = Number(str(form, "amount").replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0) return;
   const today = new Date().toISOString().slice(0, 10);
-  const enteredAt = !date || date >= today ? new Date().toISOString() : `${date}T12:00:00Z`;
-  check(
-    (await supabase.from("credit_entries").insert({ balance_usd: balance, entered_at: enteredAt, note: str(form, "note") || null }))
-      .error,
-  );
+  const date = str(form, "date");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= today ? date : today;
+  // balance_usd holds the top-up amount (the column predates top-ups).
+  check((await supabase.from("credit_entries").insert({ balance_usd: amount, entered_at: `${day}T00:00:00Z` })).error);
   revalidatePath("/report");
 }
 

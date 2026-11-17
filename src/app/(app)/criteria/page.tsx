@@ -26,7 +26,7 @@ export default async function CriteriaPage() {
         meta="Hard filters run first and cost nothing; only listings that pass are scored. Separate list entries with commas or new lines. Changes apply to listings fetched from now on."
       />
 
-      <div className="grid items-start gap-6 lg:grid-cols-[1fr_300px]">
+      <div className="split">
         <form action={saveCriteria} className="space-y-6">
           <Panel title="Filters">
             <div className="divide">
