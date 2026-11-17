@@ -1,54 +1,206 @@
 @import "tailwindcss";
 
+/*
+ * Headshot design tokens. Tune the look here.
+ * Dark is the primary theme; light follows the OS or the sidebar toggle.
+ * Everything is square: no border radius anywhere.
+ */
 :root {
-  --background: #fafafa;
-  --surface: #ffffff;
-  --foreground: #18181b;
-  --muted: #71717a;
-  --border: #e4e4e7;
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
+  --bg: #0d0d0f; /* page */
+  --surface: #121215; /* panels */
+  --surface-2: #17171b; /* table headers, hovered rows */
+  --row-active: #151d33; /* highlighted row (navy) */
+  --border: #26262c;
+  --border-strong: #34343c;
+
+  --fg: #e7e7ea;
+  --muted: #8d8d97;
+  --faint: #5d5d67;
+
+  --accent: #6a7ff0; /* indigo: bars, primary buttons, focus */
+  --accent-strong: #8396ff;
+  --accent-fg: #0d0d0f;
+  --link: #7f98ff;
+
+  --ok: #3ccf91;
+  --warn: #f2b84b;
+  --bad: #f0567a;
+
+  --ok-tint: rgba(60, 207, 145, 0.12);
+  --warn-tint: rgba(242, 184, 75, 0.14);
+  --bad-tint: rgba(240, 86, 122, 0.14);
+  --accent-tint: rgba(106, 127, 240, 0.16);
+
+  --hatch: rgba(255, 255, 255, 0.07);
+
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b0b0d;
-    --surface: #16161a;
-    --foreground: #ececef;
-    --muted: #9b9ba5;
-    --border: #2a2a31;
-    --accent: #3b82f6;
+/* Light: follows the OS unless the toggle forces dark. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --surface-2: #f0f0ee;
+    --row-active: #eaeefc;
+    --border: #e2e2df;
+    --border-strong: #cfcfcb;
+    --fg: #17171a;
+    --muted: #6b6b73;
+    --faint: #a0a0a8;
+    --accent: #4a5fd6;
+    --accent-strong: #3348c2;
     --accent-fg: #ffffff;
+    --link: #3d55d4;
+    --ok: #13a36b;
+    --warn: #c88a12;
+    --bad: #d63461;
+    --ok-tint: rgba(19, 163, 107, 0.1);
+    --warn-tint: rgba(200, 138, 18, 0.12);
+    --bad-tint: rgba(214, 52, 97, 0.1);
+    --accent-tint: rgba(74, 95, 214, 0.1);
+    --hatch: rgba(0, 0, 0, 0.08);
+    color-scheme: light;
   }
+}
+:root[data-theme="light"] {
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-2: #f0f0ee;
+  --row-active: #eaeefc;
+  --border: #e2e2df;
+  --border-strong: #cfcfcb;
+  --fg: #17171a;
+  --muted: #6b6b73;
+  --faint: #a0a0a8;
+  --accent: #4a5fd6;
+  --accent-strong: #3348c2;
+  --accent-fg: #ffffff;
+  --link: #3d55d4;
+  --ok: #13a36b;
+  --warn: #c88a12;
+  --bad: #d63461;
+  --ok-tint: rgba(19, 163, 107, 0.1);
+  --warn-tint: rgba(200, 138, 18, 0.12);
+  --bad-tint: rgba(214, 52, 97, 0.1);
+  --accent-tint: rgba(74, 95, 214, 0.1);
+  --hatch: rgba(0, 0, 0, 0.08);
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-newsreader);
 }
 
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--fg);
+}
+body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 14px;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+::selection {
+  background: var(--accent-tint);
+}
+a {
+  color: inherit;
 }
 
 @layer components {
-  .card { @apply rounded-lg border border-[var(--border)] bg-[var(--surface)]; }
+  /* --- type --------------------------------------------------------------- */
+  .serif { font-family: var(--font-newsreader), Georgia, serif; }
+  .mono { font-family: var(--font-geist-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted); }
-  .label { @apply text-sm font-medium; }
+  .faint { color: var(--faint); }
+  .link { color: var(--link); }
+  .link:hover { text-decoration: underline; }
+  .page-title { @apply text-[2rem] leading-tight tracking-tight; font-family: var(--font-newsreader), Georgia, serif; }
+  .section-title { @apply text-[1.45rem] leading-tight tracking-tight; font-family: var(--font-newsreader), Georgia, serif; }
+  .eyebrow { @apply text-[11px] font-medium uppercase tracking-[0.08em]; color: var(--faint); }
+
+  /* --- surfaces ------------------------------------------------------------ */
+  .panel { background: var(--surface); border: 1px solid var(--border); }
+  .divide > * + * { border-top: 1px solid var(--border); }
+  .rule { border-top: 1px solid var(--border); }
+
+  /* --- tables ------------------------------------------------------------- */
+  .table { @apply w-full border-collapse text-left; }
+  .table th {
+    @apply px-3 py-2 text-[11px] font-medium uppercase tracking-[0.08em];
+    color: var(--faint);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .table td { @apply px-3 py-2.5 align-top; border-bottom: 1px solid var(--border); }
+  .table tr:last-child td { border-bottom: 0; }
+  .table tbody tr:hover td { background: var(--surface-2); }
+
+  /* --- controls ------------------------------------------------------------ */
   .input {
-    @apply w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)];
+    @apply w-full px-2.5 py-1.5 text-[13px] outline-none;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--fg);
   }
+  .input:focus { border-color: var(--accent); }
+  .input::placeholder { color: var(--faint); }
+  .label { @apply block text-[12px] font-medium; color: var(--muted); }
+  .hint { @apply block text-[12px]; color: var(--faint); }
+
   .btn {
-    @apply inline-flex items-center justify-center rounded-md border border-[var(--border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--background)] cursor-pointer;
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 px-2.5 py-1 text-[13px] font-medium whitespace-nowrap;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--fg);
   }
+  .btn:hover { background: var(--surface-2); }
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] hover:opacity-90 cursor-pointer;
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 px-2.5 py-1 text-[13px] font-medium whitespace-nowrap;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-fg);
   }
-  .chip { @apply inline-flex cursor-pointer items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-xs; }
-  .chip:has(input:checked) { @apply border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]; }
-  .h1 { @apply text-2xl font-semibold tracking-tight; }
+  .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn-ghost {
+    @apply inline-flex cursor-pointer items-center gap-1.5 px-1.5 py-1 text-[13px];
+    color: var(--muted);
+  }
+  .btn-ghost:hover { color: var(--fg); }
+  .btn-danger { color: var(--bad); }
+
+  .chip {
+    @apply inline-flex cursor-pointer items-center px-2 py-0.5 text-[12px];
+    border: 1px solid var(--border-strong);
+    color: var(--muted);
+  }
+  .chip:has(input:checked) { border-color: var(--accent); background: var(--accent-tint); color: var(--fg); }
+
+  /* --- small pieces --------------------------------------------------------- */
+  .pill { @apply inline-flex items-center px-1.5 py-px text-[11px] font-medium leading-4 whitespace-nowrap; }
+  .pill-ok { color: var(--ok); background: var(--ok-tint); }
+  .pill-warn { color: var(--warn); background: var(--warn-tint); }
+  .pill-bad { color: var(--bad); background: var(--bad-tint); }
+  .pill-accent { color: var(--accent-strong); background: var(--accent-tint); }
+  .pill-muted { color: var(--muted); background: var(--surface-2); }
+
+  .dot { @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full; }
+
+  /* Thin bar on a diagonally hatched track. */
+  .bar {
+    @apply relative h-[5px] w-full overflow-hidden;
+    background-image: repeating-linear-gradient(-45deg, var(--hatch) 0 1px, transparent 1px 4px);
+  }
+  .bar > span { @apply absolute inset-y-0 left-0 block; }
+
+  .skeleton { background: var(--surface-2); }
 }

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ScoreBadge } from "@/components/ScoreBadge";
+import { IconExternal } from "@/components/icons";
+import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
+import { ago, pad2 } from "@/lib/time";
 import { SKIP_REASONS, type Job } from "@/lib/types";
 import { approveJob, skipJob } from "./actions";
 
@@ -12,113 +14,149 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const { data: criteria } = await supabase.from("criteria").select("score_threshold").eq("id", 1).single();
   const threshold = criteria?.score_threshold ?? 60;
 
-  let q = supabase.from("jobs").select("*").eq("status", "scored").order("score", { ascending: false }).limit(100);
-  if (!showAll) q = q.gte("score", threshold);
-  const { data: jobs, error } = await q;
+  const [{ data, error }, { count: scoredCount }] = await Promise.all([
+    (showAll
+      ? supabase.from("jobs").select("*").eq("status", "scored")
+      : supabase.from("jobs").select("*").eq("status", "scored").gte("score", threshold)
+    )
+      .order("score", { ascending: false })
+      .limit(150),
+    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
+  ]);
   if (error) throw new Error(error.message);
+  const jobs = data as Job[];
+  const above = showAll ? jobs.filter((j) => (j.score ?? 0) >= threshold).length : jobs.length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="h1">Inbox</h1>
-          <p className="muted text-sm">
-            {jobs.length} scored {jobs.length === 1 ? "listing" : "listings"}
-            {showAll ? "" : ` at or above your threshold of ${threshold}`}. Approve or skip each one. Skip reasons teach
-            the scorer.
-          </p>
-        </div>
-        <Link href={showAll ? "/" : "/?all=1"} className="btn">
-          {showAll ? "Only above threshold" : "Show all scored"}
-        </Link>
-      </div>
+    <>
+      <PageHeader
+        title="Inbox"
+        meta={
+          <>
+            <span className="mono text-[var(--fg)]">{above}</span> above your threshold of{" "}
+            <span className="mono">{threshold}</span> · <span className="mono">{scoredCount ?? 0}</span> scored and
+            waiting · approve or skip each one, and your skip reasons tune the scorer
+          </>
+        }
+        actions={
+          <div className="inline-flex border border-[var(--border-strong)] text-[12px]">
+            <Link href="/" className={`px-2.5 py-1 ${!showAll ? "bg-[var(--surface-2)]" : "muted"}`}>
+              Above threshold
+            </Link>
+            <Link href="/?all=1" className={`border-l border-[var(--border-strong)] px-2.5 py-1 ${showAll ? "bg-[var(--surface-2)]" : "muted"}`}>
+              All scored
+            </Link>
+          </div>
+        }
+      />
 
-      {jobs.length === 0 ? (
-        <div className="card muted p-8 text-center text-sm">
-          Nothing waiting. New listings arrive after the next worker run. Add companies under{" "}
-          <Link href="/sources" className="underline">
-            Sources
-          </Link>{" "}
-          if you haven&apos;t yet.
+      <section className="panel">
+        <div className="eyebrow hidden grid-cols-[28px_72px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
+          <span>#</span>
+          <span>Fit</span>
+          <span>Role</span>
+          <span>Location</span>
+          <span>Seen</span>
+          <span />
         </div>
-      ) : (
-        <ul className="space-y-3">
-          {(jobs as Job[]).map((job) => (
-            <JobCard key={job.id} job={job} />
-          ))}
-        </ul>
-      )}
-    </div>
+        {jobs.length === 0 ? (
+          <Empty>
+            Nothing waiting. New listings arrive with the next run.{" "}
+            <Link href="/sources" className="link">
+              Add sources
+            </Link>{" "}
+            if you haven&apos;t yet.
+          </Empty>
+        ) : (
+          <ol className="divide">
+            {jobs.map((job, i) => (
+              <JobRow key={job.id} job={job} index={i + 1} dim={(job.score ?? 0) < threshold} />
+            ))}
+          </ol>
+        )}
+      </section>
+    </>
   );
 }
 
-function JobCard({ job }: { job: Job }) {
+function JobRow({ job, index, dim }: { job: Job; index: number; dim: boolean }) {
   return (
-    <li className="card p-4">
-      <div className="flex gap-3">
-        <ScoreBadge score={job.score} />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <a href={job.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-              {job.title}
-            </a>
-            <p className="muted text-sm">
-              {job.company} · {job.location || "Location n/a"}
-              {job.remote && " · Remote"}
-              {job.compensation && ` · ${job.compensation}`}
-            </p>
-            {job.thin && (
-              <p className="mt-1 inline-block rounded border border-amber-500/50 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-400">
-                Limited info: scored on title and location only
-              </p>
-            )}
+    <li>
+      <details className="group">
+        <summary
+          className={`grid cursor-pointer list-none grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[28px_72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
+        >
+          <span className="mono faint pt-0.5 text-[12px]">{pad2(index)}</span>
+          <ScoreMeter score={job.score} width="w-[72px]" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-medium">{job.title}</span>
+              {job.remote && <Pill tone="accent">Remote</Pill>}
+              {job.thin && <Pill tone="warn">Limited info</Pill>}
+            </div>
+            <div className="muted mt-0.5 text-[12px]">
+              {job.company}
+              {job.compensation && <span className="mono"> · {job.compensation}</span>}
+            </div>
           </div>
-          {job.score_summary && <p className="text-sm">{job.score_summary}</p>}
-          <div className="grid gap-2 text-sm sm:grid-cols-2">
-            {!!job.score_pros?.length && (
-              <ul className="space-y-0.5">
-                {job.score_pros.map((p) => (
-                  <li key={p} className="text-emerald-700 dark:text-emerald-400">
-                    + {p}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {!!job.score_cons?.length && (
-              <ul className="space-y-0.5">
-                {job.score_cons.map((c) => (
-                  <li key={c} className="text-amber-700 dark:text-amber-400">
-                    − {c}
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="muted col-start-3 truncate text-[12px] lg:col-start-auto lg:pt-0.5">
+            {job.location || "Location n/a"}
           </div>
-
-          <div className="flex flex-wrap items-start gap-2 pt-1">
+          <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(job.first_seen_at)}</span>
+          <div className="col-start-3 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
             <form action={approveJob}>
               <input type="hidden" name="id" value={job.id} />
               <button className="btn-primary">Approve</button>
             </form>
-            <details className="group flex-1">
-              <summary className="btn list-none">Skip…</summary>
-              <form action={skipJob} className="mt-3 space-y-3">
-                <input type="hidden" name="id" value={job.id} />
-                <div className="flex flex-wrap gap-1.5">
-                  {SKIP_REASONS.map((r) => (
-                    <label key={r} className="chip">
-                      <input type="checkbox" name="reasons" value={r} className="sr-only" />
-                      {r}
-                    </label>
-                  ))}
-                </div>
-                <input name="other" placeholder="Other reason (optional)" className="input" />
-                <button className="btn">Confirm skip</button>
-              </form>
-            </details>
+            <span className="btn">
+              <span className="group-open:hidden">Details</span>
+              <span className="hidden group-open:inline">Close</span>
+            </span>
           </div>
+        </summary>
+
+        <div className="grid gap-5 border-t border-[var(--border)] bg-[var(--bg)] px-3 py-4 lg:grid-cols-[1fr_320px] lg:pl-[132px]">
+          <div className="space-y-3">
+            {job.score_summary && <p className="text-[13px] leading-relaxed">{job.score_summary}</p>}
+            <div className="grid gap-3 text-[13px] sm:grid-cols-2">
+              <ul className="space-y-1">
+                {(job.score_pros ?? []).map((p) => (
+                  <li key={p} className="flex gap-2">
+                    <span className="mono text-[var(--ok)]">+</span>
+                    <span className="muted">{p}</span>
+                  </li>
+                ))}
+              </ul>
+              <ul className="space-y-1">
+                {(job.score_cons ?? []).map((c) => (
+                  <li key={c} className="flex gap-2">
+                    <span className="mono text-[var(--bad)]">−</span>
+                    <span className="muted">{c}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <a href={job.url} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1 text-[12px]">
+              Open posting <IconExternal />
+            </a>
+          </div>
+
+          <form action={skipJob} className="space-y-2.5">
+            <input type="hidden" name="id" value={job.id} />
+            <div className="eyebrow">Skip because</div>
+            <div className="flex flex-wrap gap-1.5">
+              {SKIP_REASONS.map((r) => (
+                <label key={r} className="chip">
+                  <input type="checkbox" name="reasons" value={r} className="sr-only" />
+                  {r}
+                </label>
+              ))}
+            </div>
+            <input name="other" placeholder="Other reason (optional)" className="input" />
+            <button className="btn">Skip</button>
+          </form>
         </div>
-      </div>
+      </details>
     </li>
   );
 }
