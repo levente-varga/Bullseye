@@ -1,7 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
+import { CreditChart } from "@/components/CreditChart";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
+import { buildSeries, type CreditEntry } from "@/lib/credits";
 import { formatUsd } from "@/lib/pricing";
-import { agoText } from "@/lib/time";
+import { agoText, nowMs } from "@/lib/time";
+import { addCreditEntry, deleteCreditEntry } from "../actions";
 import type { JobStatus, Run } from "@/lib/types";
 
 const FUNNEL: { status: JobStatus; label: string; tone: Tone }[] = [
@@ -51,6 +54,20 @@ export default async function ReportPage() {
   const bucketCounts = BUCKETS.map((b) => scoreList.filter((s) => s >= b.min && s <= b.max).length);
   const bucketMax = Math.max(1, ...bucketCounts);
 
+  // Credits: manual balance entries minus recorded run costs since the first entry.
+  const { data: entryRows } = await supabase.from("credit_entries").select("*").order("entered_at", { ascending: false });
+  const entries = (entryRows ?? []).map((e) => ({ ...e, balance_usd: Number(e.balance_usd) })) as CreditEntry[];
+  const firstEntry = entries.at(-1)?.entered_at;
+  const { data: spendRows } = firstEntry
+    ? await supabase.from("runs").select("finished_at, stats").gte("finished_at", firstEntry).limit(5000)
+    : { data: [] };
+  const costedRuns = (spendRows ?? [])
+    .filter((r) => r.finished_at && typeof r.stats?.cost_usd === "number")
+    .map((r) => ({ at: r.finished_at as string, cost_usd: r.stats.cost_usd as number }));
+  const now = nowMs();
+  const series = buildSeries(entries, costedRuns, now);
+  const todayIso = new Date(now).toISOString().slice(0, 10);
+
   return (
     <>
       <PageHeader
@@ -97,6 +114,81 @@ export default async function ReportPage() {
             </ul>
           </Panel>
         </div>
+
+        <section>
+          <SectionHeader
+            title="Credits"
+            actions={
+              series && (
+                <span className="muted">
+                  <span className="mono text-[var(--fg)]">{formatUsd(series.current)}</span> left
+                  {series.perDay ? (
+                    <>
+                      {" "}· burning <span className="mono">{formatUsd(series.perDay)}</span>/day
+                      {series.zeroAt && (
+                        <>
+                          {" "}· runs out ≈{" "}
+                          <span className="mono text-[var(--fg)]">
+                            {new Date(series.zeroAt).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+                          </span>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    " · no spend recorded yet"
+                  )}
+                </span>
+              )
+            }
+          />
+          <div className="grid items-start gap-6 lg:grid-cols-[1fr_300px]">
+            <Panel title="Remaining API credit" aside={series?.perDay ? `trend: last ${Math.round(series.windowDays)}d` : undefined}>
+              {series ? (
+                <div className="px-2 pt-3 pb-1">
+                  <CreditChart points={series.points} zeroAt={series.zeroAt} now={now} />
+                </div>
+              ) : (
+                <Empty>
+                  Enter your current balance from the Anthropic Console to start tracking. The chart subtracts each
+                  run&apos;s cost and projects when you&apos;ll hit $0.
+                </Empty>
+              )}
+            </Panel>
+
+            <Panel title="Balance entries">
+              <form action={addCreditEntry} className="space-y-2 border-b border-[var(--border)] p-3">
+                <div className="grid grid-cols-[1fr_96px] gap-1.5">
+                  <input name="date" type="date" defaultValue={todayIso} max={todayIso} className="input mono" />
+                  <input name="balance" inputMode="decimal" required placeholder="$5.00" className="input mono" />
+                </div>
+                <input name="note" placeholder="Note, e.g. top-up $5" className="input" />
+                <button className="btn-primary w-full">Add balance</button>
+                <p className="hint">The balance the Console shows after a top-up. Re-enter it anytime to correct drift.</p>
+              </form>
+              {entries.length === 0 ? (
+                <Empty>No entries yet.</Empty>
+              ) : (
+                <ul className="divide">
+                  {entries.map((e) => (
+                    <li key={e.id} className="flex items-center gap-3 px-3 py-2 text-[12px]">
+                      <span className="mono muted w-20 shrink-0">
+                        {new Date(e.entered_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })}
+                      </span>
+                      <span className="mono w-16 shrink-0 text-right text-[13px]">${e.balance_usd.toFixed(2)}</span>
+                      <span className="faint min-w-0 flex-1 truncate">{e.note}</span>
+                      <form action={deleteCreditEntry}>
+                        <input type="hidden" name="id" value={e.id} />
+                        <button className="btn-ghost btn-danger text-[12px]" aria-label="Delete entry">
+                          ✕
+                        </button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+        </section>
 
         <section>
           <SectionHeader

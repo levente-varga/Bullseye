@@ -54,9 +54,17 @@ export interface Profile {
   email: string;
   phone: string;
   location: string;
+  linkedin_url: string;
+  github_url: string;
+  website_url: string;
+  /** Any other links (one per entry). */
   links: string[];
   headline: string;
+  /** The text the scorer reads; filled from the uploaded PDF, editable. */
   cv_text: string;
+  cv_file_path: string | null;
+  cv_file_name: string | null;
+  cv_uploaded_at: string | null;
 }
 
 export interface Criteria {

@@ -5,7 +5,10 @@ import { agoText, pad2 } from "@/lib/time";
 import { ATS_INFO, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
-export default async function SourcesPage() {
+export default async function SourcesPage({ searchParams }: PageProps<"/sources">) {
+  const sp = await searchParams;
+  const added = typeof sp.added === "string" ? sp.added : null;
+  const addError = typeof sp.error === "string" ? sp.error : null;
   const supabase = await createClient();
   const [{ data, error }, { data: sugg }] = await Promise.all([
     supabase.from("sources").select("*").order("company_name"),
@@ -163,25 +166,36 @@ export default async function SourcesPage() {
           </section>
         )}
 
-        <section>
+        <section id="add" className="scroll-mt-6">
           <SectionHeader title="Add a source" />
+          {added && (
+            <div className="mb-3 flex items-center gap-2 border border-[var(--border)] bg-[var(--ok-tint)] px-3 py-2 text-[13px]">
+              <Dot tone="ok" /> Added {added}
+            </div>
+          )}
+          {addError && (
+            <div className="mb-3 flex items-start gap-2 border border-[var(--border)] bg-[var(--bad-tint)] px-3 py-2 text-[13px]">
+              <span className="pt-1.5"><Dot tone="bad" /></span> {addError}
+            </div>
+          )}
           <form action={addSource} className="panel">
-            <div className="grid gap-3 p-3 sm:grid-cols-[200px_1fr_1fr]">
+            <div className="grid gap-3 p-3 sm:grid-cols-[200px_1fr_220px]">
               <label className="space-y-1">
                 <span className="label">Type</span>
-                <select name="ats" className="input">
+                <select name="ats" className="input" defaultValue="auto">
+                  <option value="auto">Auto-detect from URL</option>
                   {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
                     <option key={a} value={a}>{ATS_INFO[a].label}</option>
                   ))}
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="label">Board, domain or URL</span>
-                <input name="slug" className="input mono" placeholder="career.paradoxplaza.com" />
+                <span className="label">Careers page, job posting or board</span>
+                <input name="slug" className="input mono" placeholder="https://career.paradoxplaza.com" />
               </label>
               <label className="space-y-1">
                 <span className="label">Company name</span>
-                <input name="company_name" className="input" placeholder="Paradox" />
+                <input name="company_name" className="input" placeholder="Guessed if empty" />
               </label>
             </div>
             <div className="flex flex-wrap items-center gap-4 border-t border-[var(--border)] px-3 py-2.5">
@@ -196,7 +210,12 @@ export default async function SourcesPage() {
               <button className="btn-primary ml-auto">Add source</button>
             </div>
             <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
-              <summary className="faint cursor-pointer">What goes in the board field?</summary>
+              <summary className="faint cursor-pointer">How does this work?</summary>
+              <p className="muted mt-2 leading-relaxed">
+                Companies publish their jobs through a job system (an ATS). Bullseye reads five of them. With{" "}
+                <b>Auto-detect</b>, paste the company&apos;s careers page or any of its job postings; Bullseye finds the
+                system and the board itself. If it can&apos;t, pick the type by hand and enter the board:
+              </p>
               <ul className="muted mt-2 grid gap-1 sm:grid-cols-2">
                 {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
                   <li key={a}>

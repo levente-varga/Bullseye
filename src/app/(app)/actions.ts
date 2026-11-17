@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
+import { detectSource } from "@/lib/detect-source";
 import { createClient } from "@/lib/supabase/server";
 import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobStatus } from "@/lib/types";
 
@@ -115,23 +117,43 @@ function normalizeSlug(ats: Ats, input: string): string {
 
 export async function addSource(form: FormData) {
   const supabase = await db();
-  const ats = str(form, "ats") as Ats;
-  if (!(ats in ATS_INFO)) return;
-  const slug = normalizeSlug(ats, str(form, "slug"));
-  if (!slug) return;
-  const fallbackName = ats === "swedengamejobs" ? "Sweden Game Jobs" : slug;
-  check(
-    (
-      await supabase.from("sources").insert({
-        ats,
-        slug,
-        company_name: str(form, "company_name") || fallbackName,
-        country: str(form, "country").toLowerCase() || null,
-        watchlist: form.get("watchlist") === "on",
-      })
-    ).error,
-  );
+  const chosen = str(form, "ats");
+  const back = (q: Record<string, string>) => redirect(`/sources?${new URLSearchParams(q)}#add`);
+
+  let ats: Ats;
+  let slug: string;
+  let name = str(form, "company_name");
+  let jobCount: number | null = null;
+
+  if (chosen === "auto") {
+    const found = await detectSource(str(form, "slug"));
+    if ("error" in found) back({ error: found.error });
+    else {
+      ({ ats, slug } = found);
+      name ||= found.companyGuess;
+      jobCount = found.jobCount;
+    }
+  } else {
+    if (!(chosen in ATS_INFO)) back({ error: "Pick a source type." });
+    ats = chosen as Ats;
+    slug = normalizeSlug(ats, str(form, "slug"));
+    if (!slug) back({ error: "Enter the board, domain or URL." });
+    name ||= ats === "swedengamejobs" ? "Sweden Game Jobs" : slug;
+  }
+
+  const { error } = await supabase.from("sources").insert({
+    ats: ats!,
+    slug: slug!,
+    company_name: name,
+    country: str(form, "country").toLowerCase() || null,
+    watchlist: form.get("watchlist") === "on",
+  });
+  if (error?.code === "23505") back({ error: `${name} is already one of your sources.` });
+  check(error);
   revalidatePath("/sources");
+  back({
+    added: `${name} · ${ATS_INFO[ats!].label}${jobCount !== null ? ` · ${jobCount} open ${jobCount === 1 ? "job" : "jobs"}` : ""}`,
+  });
 }
 
 export async function acceptSuggestion(form: FormData) {
@@ -185,12 +207,79 @@ export async function saveProfile(form: FormData) {
           phone: str(form, "phone"),
           location: str(form, "location"),
           headline: str(form, "headline"),
-          links: list(form, "links"),
-          cv_text: str(form, "cv_text"),
+          linkedin_url: url(str(form, "linkedin_url")),
+          github_url: url(str(form, "github_url")),
+          website_url: url(str(form, "website_url")),
+          links: list(form, "links").map(url),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1)
     ).error,
+  );
+  revalidatePath("/profile");
+}
+
+/** "github.com/me" → "https://github.com/me"; empty stays empty. */
+const url = (v: string) => (v && !/^https?:\/\//i.test(v) ? `https://${v}` : v);
+
+export async function saveCvText(form: FormData) {
+  const supabase = await db();
+  check(
+    (await supabase.from("profile").update({ cv_text: str(form, "cv_text"), updated_at: new Date().toISOString() }).eq("id", 1))
+      .error,
+  );
+  revalidatePath("/profile");
+}
+
+/** Stores the PDF in the private "cv" bucket and fills cv_text from it. */
+export async function uploadCv(form: FormData) {
+  const supabase = await db();
+  const back = (q: Record<string, string>) => redirect(`/profile?${new URLSearchParams(q)}#cv`);
+  const file = form.get("cv");
+  if (!(file instanceof File) || file.size === 0) back({ cv_error: "Choose a PDF file first." });
+  const pdf = file as File;
+  if (pdf.type !== "application/pdf" && !pdf.name.toLowerCase().endsWith(".pdf")) back({ cv_error: "Only PDF files are supported." });
+  if (pdf.size > MAX_CV_BYTES) back({ cv_error: "That file is over 5 MB." });
+
+  const bytes = await pdf.arrayBuffer();
+  let text = "";
+  try {
+    text = await extractPdfText(bytes);
+  } catch {
+    back({ cv_error: "Couldn't read that PDF. Is it password-protected or damaged?" });
+  }
+
+  const { data: before } = await supabase.from("profile").select("cv_file_path").eq("id", 1).single();
+  const path = `cv-${Date.now()}.pdf`;
+  const up = await supabase.storage.from("cv").upload(path, bytes, { contentType: "application/pdf" });
+  if (up.error) back({ cv_error: `Upload failed: ${up.error.message}` });
+
+  check(
+    (
+      await supabase
+        .from("profile")
+        .update({
+          cv_file_path: path,
+          cv_file_name: pdf.name,
+          cv_uploaded_at: new Date().toISOString(),
+          // Keep the old text if the PDF has no text layer (a scan), so nothing is lost.
+          ...(text ? { cv_text: text } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", 1)
+    ).error,
+  );
+  if (before?.cv_file_path) await supabase.storage.from("cv").remove([before.cv_file_path]);
+  revalidatePath("/profile");
+  back(text ? { cv: "uploaded" } : { cv: "no_text" });
+}
+
+export async function deleteCv() {
+  const supabase = await db();
+  const { data } = await supabase.from("profile").select("cv_file_path").eq("id", 1).single();
+  if (data?.cv_file_path) await supabase.storage.from("cv").remove([data.cv_file_path]);
+  check(
+    (await supabase.from("profile").update({ cv_file_path: null, cv_file_name: null, cv_uploaded_at: null }).eq("id", 1)).error,
   );
   revalidatePath("/profile");
 }
@@ -208,6 +297,30 @@ export async function deleteAnswer(form: FormData) {
   const supabase = await db();
   check((await supabase.from("answers").delete().eq("id", str(form, "id"))).error);
   revalidatePath("/profile");
+}
+
+// --- Credits ----------------------------------------------------------------
+
+/** Records the balance the Anthropic Console shows (after a top-up, or as a correction). */
+export async function addCreditEntry(form: FormData) {
+  const supabase = await db();
+  const balance = Number(str(form, "balance").replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(balance) || balance < 0) return;
+  // A past date is stored at midday UTC; today means "now", so it sorts after today's runs.
+  const date = str(form, "date");
+  const today = new Date().toISOString().slice(0, 10);
+  const enteredAt = !date || date >= today ? new Date().toISOString() : `${date}T12:00:00Z`;
+  check(
+    (await supabase.from("credit_entries").insert({ balance_usd: balance, entered_at: enteredAt, note: str(form, "note") || null }))
+      .error,
+  );
+  revalidatePath("/report");
+}
+
+export async function deleteCreditEntry(form: FormData) {
+  const supabase = await db();
+  check((await supabase.from("credit_entries").delete().eq("id", str(form, "id"))).error);
+  revalidatePath("/report");
 }
 
 // --- Auth -------------------------------------------------------------------

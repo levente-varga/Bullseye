@@ -120,7 +120,8 @@ export default async function PipelinePage() {
         })}
       </div>
       <p className="faint mt-4 text-[12px]">
-        Follow-ups are flagged after <span className="mono">{followupDays}</span> days without contact (set on the
+        &quot;Follow-up due&quot; means an application has had no reply for <span className="mono">{followupDays}</span>{" "}
+        days: a reminder to write to the company. Click Followed up afterwards to restart the timer (set on the
         Criteria page).
       </p>
     </>
