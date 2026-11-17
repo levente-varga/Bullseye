@@ -59,6 +59,14 @@ export default async function CriteriaPage() {
           </label>
         </div>
 
+        <label className="block space-y-1">
+          <span className="label">Send digest and alerts to</span>
+          <input name="digest_email" type="email" defaultValue={criteria.digest_email} className="input" placeholder="you@example.com" />
+          <span className="muted block text-xs">
+            Until you verify a sending domain in Resend, it only delivers to your Resend account&apos;s email.
+          </span>
+        </label>
+
         <button className="btn-primary">Save criteria</button>
       </form>
 

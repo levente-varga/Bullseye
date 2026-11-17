@@ -56,11 +56,12 @@ export function renderWatchlistAlert(jobs: Job[]): { subject: string; html: stri
   };
 }
 
-export async function sendEmail(subject: string, html: string): Promise<void> {
+/** Sends to `to` (from the dashboard setting), falling back to the DIGEST_TO env var. */
+export async function sendEmail(subject: string, html: string, to?: string): Promise<void> {
   const { Resend } = await import("resend");
-  const to = process.env.DIGEST_TO;
+  to = to?.trim() || process.env.DIGEST_TO;
   if (!process.env.RESEND_API_KEY || !to) {
-    console.warn("RESEND_API_KEY or DIGEST_TO not set; skipping email:", subject);
+    console.warn("RESEND_API_KEY or a recipient (dashboard setting / DIGEST_TO) not set; skipping email:", subject);
     return;
   }
   const resend = new Resend(process.env.RESEND_API_KEY);

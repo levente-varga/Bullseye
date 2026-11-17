@@ -205,7 +205,7 @@ async function runFetch(mode: "watchlist" | "full") {
     );
     if (strong.length) {
       const { subject, html } = renderWatchlistAlert(strong);
-      await sendEmail(subject, html);
+      await sendEmail(subject, html, ctx.criteria.digest_email);
       await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", strong.map((j) => j.id)));
     }
     totals.alerted = strong.length;
@@ -243,7 +243,7 @@ async function runDigest() {
   const stats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0 };
   if (newMatches.length || followUps.length || statusChanges.length) {
     const { subject, html } = renderDigest({ newMatches, followUps, statusChanges });
-    await sendEmail(subject, html);
+    await sendEmail(subject, html, criteria.digest_email);
     stats.emailed = 1;
     if (newMatches.length) {
       await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", newMatches.map((j) => j.id)));
