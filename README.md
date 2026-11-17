@@ -7,9 +7,9 @@ An automated job search that runs itself. Bullseye polls company job boards on a
 ## How it works
 
 ```
-GitHub Actions (cron)
-  ├─ hourly   worker watchlist  → poll watchlist companies → score → instant email alert
-  └─ daily    worker full       → poll all companies → filter → score
+GitHub Actions, every 15 min: worker tick → runs what the schedule (Criteria page) says is due
+  ├─ watchlist (e.g. hourly)  → poll watched companies → score → instant email alert
+  └─ daily (e.g. 07:00 local) → poll all companies → filter → score
               worker digest     → email: new matches · follow-ups due · status changes
                      │
                      ▼
@@ -67,7 +67,7 @@ The service-role and API keys never go to Vercel.
 | | `DIGEST_REPLY_TO` (a real inbox for replies) |
 | | `DIGEST_TO` (fallback recipient; normally set on the Criteria page) |
 
-Then run **Actions → Daily search and digest → Run workflow** once to test.
+Then run **Actions → Scheduler → Run workflow** with mode `daily` once to test. The schedule itself (daily time, watchlist interval, timezone) is set on the Criteria page.
 
 ## Costs
 

@@ -1,18 +1,37 @@
 import type { ReactNode } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
-import { daysAgoIso } from "@/lib/time";
-import { SCORING_MODELS, type Criteria } from "@/lib/types";
+import { TimezoneSelect } from "@/components/TimezoneSelect";
+import { nextRuns, timezones } from "@/lib/schedule";
+import { daysAgoIso, nowMs } from "@/lib/time";
+import { SCORING_MODELS, WATCH_INTERVALS, type Criteria } from "@/lib/types";
 import { addExcludeKeyword, saveCriteria } from "../actions";
+
+/** "Today 07:00", "Tomorrow 07:00", "Off", in the schedule's timezone. */
+function fmtRun(t: number | null, tz: string): string {
+  if (t === null) return "off";
+  const now = nowMs();
+  if (t <= now + 60_000) return "at the next check (within ~15 min)";
+  const day = (x: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(x);
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(t);
+  const label = day(t) === day(now) ? "today" : day(t) === day(now + 86_400_000) ? "tomorrow" : day(t);
+  return `${label} ${time}`;
+}
 
 export default async function CriteriaPage() {
   const supabase = await createClient();
-  const [{ data: c, error }, { data: skips }] = await Promise.all([
+  const lastRun = (kind: string) =>
+    supabase.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1);
+  const [{ data: c, error }, { data: skips }, { data: lastWatch }, { data: lastFull }] = await Promise.all([
     supabase.from("criteria").select("*").eq("id", 1).single(),
     supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
+    lastRun("watchlist"),
+    lastRun("full"),
   ]);
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
+  const ms = (rows: { started_at: string }[] | null) => (rows?.[0] ? Date.parse(rows[0].started_at) : null);
+  const next = nextRuns(criteria, { watchlist: ms(lastWatch), full: ms(lastFull) }, nowMs());
 
   const counts = new Map<string, number>();
   for (const s of skips ?? []) for (const r of s.reasons as string[]) counts.set(r, (counts.get(r) ?? 0) + 1);
@@ -80,6 +99,38 @@ export default async function CriteriaPage() {
                 <input name="score_threshold" type="number" min={0} max={100} defaultValue={criteria.score_threshold} className="input mono w-24" />
               </Row>
             </div>
+          </Panel>
+
+          <Panel title="Schedule" aside={`times in ${criteria.timezone.replace(/_/g, " ")}`}>
+            <div className="divide">
+              <Row label="Daily search" hint="Checks every source, scores what's new, then sends the digest.">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-[13px]">
+                    <input type="checkbox" name="daily_enabled" defaultChecked={criteria.daily_enabled} />
+                    <span className="muted">every day at</span>
+                  </label>
+                  <input name="daily_time" type="time" defaultValue={criteria.daily_time} className="input mono w-28" />
+                </div>
+                <p className="hint mt-1.5">Next: {fmtRun(next.daily, criteria.timezone)}</p>
+              </Row>
+              <Row label="Watchlist check" hint="Only watched sources; strong new matches are emailed right away.">
+                <select name="watch_interval_minutes" defaultValue={criteria.watch_interval_minutes} className="input w-auto">
+                  {WATCH_INTERVALS.map((w) => (
+                    <option key={w.minutes} value={w.minutes}>
+                      {w.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="hint mt-1.5">Next: {fmtRun(next.watchlist, criteria.timezone)}</p>
+              </Row>
+              <Row label="Timezone" hint="The daily time above is in this timezone.">
+                <TimezoneSelect name="timezone" value={criteria.timezone} options={timezones()} />
+              </Row>
+            </div>
+            <p className="faint border-t border-[var(--border)] px-3 py-2 text-[12px]">
+              Bullseye checks the schedule every 15 minutes, and GitHub sometimes starts that a few minutes late, so
+              runs happen up to ~20 minutes after the set time.
+            </p>
           </Panel>
 
           <Panel title="Notifications">
