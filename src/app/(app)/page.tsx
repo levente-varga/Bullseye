@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { IconExternal } from "@/components/icons";
+import { PendingBar } from "@/components/PendingBar";
+import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
 import { ago, pad2 } from "@/lib/time";
 import { SKIP_REASONS, type Job } from "@/lib/types";
@@ -42,9 +44,11 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
           <div className="inline-flex border border-[var(--border-strong)] text-[12px]">
             <Link href="/" className={`px-2.5 py-1 ${!showAll ? "bg-[var(--surface-2)]" : "muted"}`}>
               Above threshold
+              <PendingBar />
             </Link>
             <Link href="/?all=1" className={`border-l border-[var(--border-strong)] px-2.5 py-1 ${showAll ? "bg-[var(--surface-2)]" : "muted"}`}>
               All scored
+              <PendingBar />
             </Link>
           </div>
         }
@@ -106,7 +110,7 @@ function JobRow({ job, index, dim }: { job: Job; index: number; dim: boolean }) 
           <div className="col-start-3 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
             <form action={approveJob}>
               <input type="hidden" name="id" value={job.id} />
-              <button className="btn-primary">Approve</button>
+              <SubmitButton className="btn-primary">Approve</SubmitButton>
             </form>
             <span className="btn">
               <span className="group-open:hidden">Details</span>
@@ -153,7 +157,7 @@ function JobRow({ job, index, dim }: { job: Job; index: number; dim: boolean }) 
               ))}
             </div>
             <input name="other" placeholder="Other reason (optional)" className="input" />
-            <button className="btn">Skip</button>
+            <SubmitButton className="btn">Skip</SubmitButton>
           </form>
         </div>
       </details>
