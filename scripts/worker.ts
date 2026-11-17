@@ -1,5 +1,5 @@
 /**
- * Headshot worker. Runs in GitHub Actions (or locally with `npm run worker -- <mode>`).
+ * Bullseye worker. Runs in GitHub Actions (or locally with `npm run worker -- <mode>`).
  *
  *   watchlist  poll watchlist companies only; email an alert for strong new matches
  *   full       poll every enabled source; score new listings

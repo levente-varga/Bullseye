@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { IconCrosshair } from "@/components/icons";
+import { IconBullseye } from "@/components/icons";
 import { createClient } from "@/lib/supabase/server";
 
 async function signIn(form: FormData) {
@@ -20,8 +20,8 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
       <form action={signIn} className="panel w-full max-w-[360px]">
         <div className="border-b border-[var(--border)] px-5 py-5">
           <div className="flex items-center gap-2">
-            <IconCrosshair width={18} height={18} className="text-[var(--accent-strong)]" />
-            <span className="serif text-[1.5rem] leading-none tracking-tight">headshot</span>
+            <IconBullseye width={18} height={18} className="text-[var(--accent-strong)]" />
+            <span className="serif text-[1.5rem] leading-none tracking-tight">bullseye</span>
           </div>
           <p className="faint mt-2 text-[12px]">Sign in to your job search.</p>
         </div>

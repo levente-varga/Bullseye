@@ -23,7 +23,7 @@ function section(title: string, jobs: Job[], empty: string): string {
 
 function wrap(body: string): string {
   const link = appUrl()
-    ? `<p style="margin-top:24px"><a href="${esc(appUrl())}" style="color:#2563eb">Open Headshot →</a></p>`
+    ? `<p style="margin-top:24px"><a href="${esc(appUrl())}" style="color:#d4481f">Open Bullseye →</a></p>`
     : "";
   return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;color:#111">${body}${link}</div>`;
 }
@@ -36,7 +36,7 @@ export function renderDigest(args: {
   const { newMatches, followUps, statusChanges } = args;
   const top = newMatches[0]?.score;
   const subject =
-    `Headshot: ${newMatches.length} new match${newMatches.length === 1 ? "" : "es"}` +
+    `Bullseye: ${newMatches.length} new match${newMatches.length === 1 ? "" : "es"}` +
     (top != null ? `, top ${top}` : "") +
     (followUps.length ? ` · ${followUps.length} follow-up${followUps.length === 1 ? "" : "s"} due` : "");
   const html = wrap(`
@@ -51,7 +51,7 @@ export function renderDigest(args: {
 export function renderWatchlistAlert(jobs: Job[]): { subject: string; html: string } {
   const companies = [...new Set(jobs.map((j) => j.company))].join(", ");
   return {
-    subject: `Headshot alert: new posting at ${companies}`,
+    subject: `Bullseye alert: new posting at ${companies}`,
     html: wrap(`<h1 style="font-size:20px">New on your watchlist</h1>${section("Matches", jobs, "")}`),
   };
 }
@@ -66,7 +66,7 @@ export async function sendEmail(subject: string, html: string, to?: string): Pro
   }
   const resend = new Resend(process.env.RESEND_API_KEY);
   const { error } = await resend.emails.send({
-    from: process.env.DIGEST_FROM || "Headshot <onboarding@resend.dev>",
+    from: process.env.DIGEST_FROM || "Bullseye <onboarding@resend.dev>",
     // Replies go to a real inbox, since the sending subdomain can't receive mail.
     ...(process.env.DIGEST_REPLY_TO ? { replyTo: process.env.DIGEST_REPLY_TO } : {}),
     to,

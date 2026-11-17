@@ -7,7 +7,7 @@ import type { Ats, FetchedJob, Source } from "./types";
  * data; it only gives titles and links, so descriptions are fetched later.
  */
 
-export const USER_AGENT = "HeadshotBot/1.0 (+https://github.com/levente-varga/Headshot)";
+export const USER_AGENT = "BullseyeBot/1.0 (+https://github.com/levente-varga/Bullseye)";
 
 const MAX_DESCRIPTION = 12_000;
 

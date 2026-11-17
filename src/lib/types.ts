@@ -87,7 +87,7 @@ export interface Source {
 
 export interface SourceSuggestion {
   id: string;
-  /** An Ats value, or "custom" for career sites Headshot has no adapter for. */
+  /** An Ats value, or "custom" for career sites Bullseye has no adapter for. */
   ats: Ats | "custom";
   slug: string;
   company_name: string;
