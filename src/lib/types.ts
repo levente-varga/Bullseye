@@ -20,6 +20,14 @@ export const PIPELINE_STATUSES: JobStatus[] = [
   "rejected",
 ];
 
+export const SCORING_MODELS = [
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", note: "Fast and cheapest. Default." },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", note: "Better judgment, about 20x the cost of Haiku." },
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5", note: "Most capable, about 40x the cost of Haiku." },
+] as const;
+export type ScoringModel = (typeof SCORING_MODELS)[number]["id"];
+export const DEFAULT_SCORING_MODEL: ScoringModel = "claude-haiku-5-5";
+
 export const SKIP_REASONS = [
   "Too senior",
   "Too junior",
@@ -48,6 +56,7 @@ export interface Criteria {
   include_keywords: string[];
   exclude_keywords: string[];
   preferences: string;
+  scoring_model: ScoringModel;
   score_threshold: number;
   followup_days: number;
 }

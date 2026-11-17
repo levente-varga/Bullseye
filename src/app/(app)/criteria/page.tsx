@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Criteria } from "@/lib/types";
+import { SCORING_MODELS, type Criteria } from "@/lib/types";
 import { daysAgoIso } from "@/lib/time";
 import { addExcludeKeyword, saveCriteria } from "../actions";
 
@@ -47,6 +47,22 @@ export default async function CriteriaPage() {
             placeholder="E.g. I prefer product companies over agencies, small-to-mid teams, and want to grow towards full-stack."
           />
         </label>
+
+        <fieldset className="space-y-2">
+          <legend className="label">Scoring model</legend>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {SCORING_MODELS.map((m) => (
+              <label key={m.id} className="card flex cursor-pointer gap-2 p-3 text-sm has-[:checked]:border-[var(--accent)]">
+                <input type="radio" name="scoring_model" value={m.id} defaultChecked={criteria.scoring_model === m.id} className="mt-0.5" />
+                <span>
+                  <span className="block font-medium">{m.label}</span>
+                  <span className="muted block text-xs">{m.note}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="muted text-xs">Used from the next worker run. Already-scored listings keep their score.</p>
+        </fieldset>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block space-y-1">
