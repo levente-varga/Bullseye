@@ -29,4 +29,5 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DIGEST_TO: ${{ vars.DIGEST_TO }}
           DIGEST_FROM: ${{ vars.DIGEST_FROM }}
+          DIGEST_REPLY_TO: ${{ vars.DIGEST_REPLY_TO }}
           APP_URL: ${{ vars.APP_URL }}

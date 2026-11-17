@@ -67,6 +67,8 @@ export async function sendEmail(subject: string, html: string, to?: string): Pro
   const resend = new Resend(process.env.RESEND_API_KEY);
   const { error } = await resend.emails.send({
     from: process.env.DIGEST_FROM || "Headshot <onboarding@resend.dev>",
+    // Replies go to a real inbox, since the sending subdomain can't receive mail.
+    ...(process.env.DIGEST_REPLY_TO ? { replyTo: process.env.DIGEST_REPLY_TO } : {}),
     to,
     subject,
     html,
