@@ -43,3 +43,6 @@ next-env.d.ts
 
 # design reference screenshots (third-party UI, keep out of the public repo)
 /design/reference/
+
+# JetBrains IDE settings
+.idea/

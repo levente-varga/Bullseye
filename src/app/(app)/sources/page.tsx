@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ATS_BOARD_URL } from "@/lib/ats";
+import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
+import { ago, pad2 } from "@/lib/time";
 import { ATS_INFO, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
@@ -15,143 +17,200 @@ export default async function SourcesPage() {
   const addable = suggestions.filter((s) => s.ats !== "custom");
   const custom = suggestions.filter((s) => s.ats === "custom");
 
+  // Listings per source (open = new, scored or in the pipeline).
+  const counts = await Promise.all(
+    sources.map(async (s) => {
+      const { count } = await supabase
+        .from("jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("source_id", s.id)
+        .not("status", "in", "(closed,filtered)");
+      return [s.id, count ?? 0] as const;
+    }),
+  );
+  const open = Object.fromEntries(counts);
+
+  const ok = sources.filter((s) => s.enabled && !s.last_error).length;
+  const failing = sources.filter((s) => s.enabled && s.last_error).length;
+  const paused = sources.filter((s) => !s.enabled).length;
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="h1">Sources</h1>
-        <p className="muted text-sm">
-          Company job boards Headshot checks, plus aggregators that catch everything else. A posting found in two
-          places is stored once: the company&apos;s own board wins because it has the full description. Watchlist
-          companies are checked hourly and trigger an instant email.
-        </p>
-      </div>
+    <>
+      <PageHeader
+        title="Sources"
+        meta={
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="inline-flex items-center gap-1.5"><Dot tone="ok" /><span className="mono text-[var(--fg)]">{ok}</span> healthy</span>
+            {failing > 0 && <span className="inline-flex items-center gap-1.5"><Dot tone="bad" /><span className="mono text-[var(--fg)]">{failing}</span> failing</span>}
+            {paused > 0 && <span className="inline-flex items-center gap-1.5"><Dot /><span className="mono text-[var(--fg)]">{paused}</span> paused</span>}
+            <span className="faint">A posting found in two places is stored once; the company&apos;s own board wins.</span>
+          </span>
+        }
+      />
 
-      <form action={addSource} className="card space-y-3 p-4">
-        <div className="grid gap-3 sm:grid-cols-[180px_1fr_1fr]">
-          <label className="block space-y-1">
-            <span className="label">Type</span>
-            <select name="ats" className="input">
-              {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
-                <option key={a} value={a}>
-                  {ATS_INFO[a].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block space-y-1">
-            <span className="label">Board, domain or URL</span>
-            <input name="slug" className="input" placeholder="e.g. career.paradoxplaza.com" />
-          </label>
-          <label className="block space-y-1">
-            <span className="label">Company name</span>
-            <input name="company_name" className="input" placeholder="Paradox" />
-          </label>
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="block space-y-1">
-            <span className="label">Country filter</span>
-            <input name="country" className="input w-28" placeholder="se" maxLength={2} />
-          </label>
-          <label className="flex items-center gap-2 pb-2 text-sm">
-            <input type="checkbox" name="watchlist" /> Watchlist
-          </label>
-          <button className="btn-primary mb-0.5">Add source</button>
-        </div>
-        <details className="muted text-xs">
-          <summary className="cursor-pointer">What goes in the board field?</summary>
-          <ul className="mt-2 space-y-1">
-            {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
-              <li key={a}>
-                <b>{ATS_INFO[a].label}:</b>{" "}
-                {ATS_INFO[a].aggregator ? "nothing, leave it empty" : <code>{ATS_INFO[a].slugExample}</code>}
-              </li>
-            ))}
-            <li>The country filter (two letters, e.g. se) only applies to SmartRecruiters, whose boards are often global.</li>
-          </ul>
-        </details>
-      </form>
-
-      {addable.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="font-medium">Suggested direct sources</h2>
-          <p className="muted text-sm">
-            Seen on an aggregator. Adding them gets full descriptions and faster updates for these companies.
-          </p>
-          <ul className="card divide-y divide-[var(--border)]">
-            {addable.map((s) => (
-              <li key={s.id} className="flex flex-wrap items-center gap-3 p-3">
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium">{s.company_name}</span>
-                  <p className="muted text-sm">
-                    {ATS_INFO[s.ats as Ats]?.label ?? s.ats} · {s.slug} · {s.job_count} open{" "}
-                    {s.job_count === 1 ? "job" : "jobs"}
-                  </p>
-                </div>
-                <form action={acceptSuggestion}>
-                  <input type="hidden" name="id" value={s.id} />
-                  <button className="btn-primary">Add</button>
-                </form>
-                <form action={dismissSuggestion}>
-                  <input type="hidden" name="id" value={s.id} />
-                  <button className="btn">Dismiss</button>
-                </form>
-              </li>
-            ))}
-          </ul>
+      <div className="space-y-10">
+        <section>
+          <Panel>
+            {sources.length === 0 ? (
+              <Empty>No sources yet. Add one below, or pick from the suggestions.</Empty>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table min-w-[720px]">
+                  <thead>
+                    <tr>
+                      <th className="w-10">#</th>
+                      <th>Source</th>
+                      <th className="w-40">Type</th>
+                      <th className="w-20 text-right">Open</th>
+                      <th className="w-28">Checked</th>
+                      <th className="w-64" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sources.map((s, i) => (
+                      <tr key={s.id} className={s.enabled ? "" : "opacity-55"}>
+                        <td className="mono faint text-[12px]">{pad2(i + 1)}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <Dot tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"} />
+                            <a href={ATS_BOARD_URL[s.ats](s.slug)} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+                              {s.company_name}
+                            </a>
+                            {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
+                          </div>
+                          {!ATS_INFO[s.ats]?.aggregator && (
+                            <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
+                              {s.slug}
+                              {s.country && ` · ${s.country.toUpperCase()} only`}
+                            </div>
+                          )}
+                          {s.last_error && <div className="mt-1 pl-3.5 text-[12px] text-[var(--bad)]">{s.last_error}</div>}
+                        </td>
+                        <td>
+                          <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
+                        </td>
+                        <td className="mono text-right">{open[s.id]}</td>
+                        <td className="mono muted text-[12px]">{s.last_checked_at ? `${ago(s.last_checked_at)} ago` : "never"}</td>
+                        <td>
+                          <div className="flex justify-end gap-1.5">
+                            <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />
+                            <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
+                            <form action={deleteSource}>
+                              <input type="hidden" name="id" value={s.id} />
+                              <button className="btn btn-danger">Remove</button>
+                            </form>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
         </section>
-      )}
 
-      <section className="space-y-2">
-        <h2 className="font-medium">Your sources</h2>
-        {sources.length === 0 ? (
-          <p className="muted text-sm">No sources yet.</p>
-        ) : (
-          <ul className="card divide-y divide-[var(--border)]">
-            {sources.map((s) => (
-              <li key={s.id} className="flex flex-wrap items-center gap-3 p-3">
-                <div className="min-w-0 flex-1">
-                  <a
-                    href={ATS_BOARD_URL[s.ats](s.slug)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium hover:underline"
-                  >
-                    {s.company_name}
-                  </a>
-                  <p className="muted text-sm">
-                    {ATS_INFO[s.ats]?.label ?? s.ats}
-                    {!ATS_INFO[s.ats]?.aggregator && ` · ${s.slug}`}
-                    {s.country && ` · ${s.country.toUpperCase()} only`} ·{" "}
-                    {s.last_checked_at ? `checked ${new Date(s.last_checked_at).toLocaleString()}` : "never checked"}
-                    {!s.enabled && " · paused"}
-                  </p>
-                  {s.last_error && <p className="text-sm text-red-600">Last error: {s.last_error}</p>}
-                </div>
-                <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="★ Watchlist" offLabel="☆ Watch" />
-                <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
-                <form action={deleteSource}>
-                  <input type="hidden" name="id" value={s.id} />
-                  <button className="btn text-red-600">Remove</button>
-                </form>
-              </li>
-            ))}
-          </ul>
+        {addable.length > 0 && (
+          <section>
+            <SectionHeader title="Suggested" count={addable.length} actions={<span className="faint">seen on an aggregator · adding gets full descriptions and hourly-ready updates</span>} />
+            <Panel>
+              <div className="overflow-x-auto">
+                <table className="table min-w-[620px]">
+                  <thead>
+                    <tr>
+                      <th className="w-10">#</th>
+                      <th>Company</th>
+                      <th className="w-40">Type</th>
+                      <th className="w-20 text-right">Jobs</th>
+                      <th className="w-44" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {addable.map((s, i) => (
+                      <tr key={s.id}>
+                        <td className="mono faint text-[12px]">{pad2(i + 1)}</td>
+                        <td>
+                          <div className="font-medium">{s.company_name}</div>
+                          <div className="mono faint mt-0.5 text-[11px]">{s.slug}</div>
+                        </td>
+                        <td><Pill>{ATS_INFO[s.ats as Ats]?.label ?? s.ats}</Pill></td>
+                        <td className="mono text-right">{s.job_count}</td>
+                        <td>
+                          <div className="flex justify-end gap-1.5">
+                            <form action={acceptSuggestion}>
+                              <input type="hidden" name="id" value={s.id} />
+                              <button className="btn-primary">Add</button>
+                            </form>
+                            <form action={dismissSuggestion}>
+                              <input type="hidden" name="id" value={s.id} />
+                              <button className="btn">Dismiss</button>
+                            </form>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+            {custom.length > 0 && (
+              <p className="faint mt-3 text-[12px] leading-relaxed">
+                <span className="eyebrow mr-2">Aggregator only</span>
+                {custom.map((s) => `${s.company_name} (${s.job_count})`).join(" · ")}. These use custom career sites with
+                no adapter; their jobs still arrive through the aggregator.
+              </p>
+            )}
+          </section>
         )}
-      </section>
 
-      {custom.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="font-medium">Covered by the aggregator only</h2>
-          <p className="muted text-sm">
-            These companies use their own career sites, which Headshot has no adapter for. Their jobs still arrive
-            through the aggregator, with descriptions fetched from the original postings where possible.
-          </p>
-          <p className="muted text-sm">
-            {custom.map((s) => `${s.company_name} (${s.job_count})`).join(" · ")}
-          </p>
+        <section>
+          <SectionHeader title="Add a source" />
+          <form action={addSource} className="panel">
+            <div className="grid gap-3 p-3 sm:grid-cols-[200px_1fr_1fr]">
+              <label className="space-y-1">
+                <span className="label">Type</span>
+                <select name="ats" className="input">
+                  {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
+                    <option key={a} value={a}>{ATS_INFO[a].label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="label">Board, domain or URL</span>
+                <input name="slug" className="input mono" placeholder="career.paradoxplaza.com" />
+              </label>
+              <label className="space-y-1">
+                <span className="label">Company name</span>
+                <input name="company_name" className="input" placeholder="Paradox" />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 border-t border-[var(--border)] px-3 py-2.5">
+              <label className="flex items-center gap-2 text-[13px]">
+                <span className="muted">Country</span>
+                <input name="country" className="input mono w-16" placeholder="se" maxLength={2} />
+              </label>
+              <label className="flex items-center gap-2 text-[13px]">
+                <input type="checkbox" name="watchlist" />
+                <span className="muted">Watchlist (hourly + instant email)</span>
+              </label>
+              <button className="btn-primary ml-auto">Add source</button>
+            </div>
+            <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
+              <summary className="faint cursor-pointer">What goes in the board field?</summary>
+              <ul className="muted mt-2 grid gap-1 sm:grid-cols-2">
+                {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
+                  <li key={a}>
+                    {ATS_INFO[a].label}:{" "}
+                    {ATS_INFO[a].aggregator ? <span className="faint">leave empty</span> : <code className="mono faint">{ATS_INFO[a].slugExample}</code>}
+                  </li>
+                ))}
+                <li>The country filter (two letters) only applies to SmartRecruiters.</li>
+              </ul>
+            </details>
+          </form>
         </section>
-      )}
-    </div>
+      </div>
+    </>
   );
 }
 
