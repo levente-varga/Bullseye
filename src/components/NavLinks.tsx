@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { PendingBar } from "./PendingBar";
 import { IconChart, IconInbox, IconPipeline, IconSliders, IconSources, IconUser } from "./icons";
 
 export const NAV = [
@@ -35,6 +36,7 @@ export function SidebarNav({ counts = {} }: { counts?: NavCounts }) {
             <Icon className={active ? "text-[var(--accent-strong)]" : "text-[var(--faint)]"} />
             <span className="flex-1">{label}</span>
             {counts[key] !== undefined && <span className="mono faint text-[11px]">{counts[key]}</span>}
+            <PendingBar />
           </Link>
         );
       })}
@@ -56,6 +58,7 @@ export function TopNav() {
           }`}
         >
           {label}
+          <PendingBar />
         </Link>
       ))}
     </nav>
