@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
-import { ago } from "@/lib/time";
+import { formatUsd } from "@/lib/pricing";
+import { agoText } from "@/lib/time";
 import type { JobStatus, Run } from "@/lib/types";
 
 const FUNNEL: { status: JobStatus; label: string; tone: Tone }[] = [
@@ -41,6 +42,10 @@ export default async function ReportPage() {
   const applied = c.applied + c.interview + c.offer + c.rejected;
   const responded = c.interview + c.offer;
   const tracked = Object.values(c).reduce((a, b) => a + b, 0);
+  // API spend is recorded per run from the first run that tracks it; older runs show "–".
+  const COST_KEYS = new Set(["cost_usd", "tokens_in", "tokens_out"]);
+  const costed = (runs as Run[]).filter((r) => typeof r.stats.cost_usd === "number");
+  const totalCost = costed.reduce((a, r) => a + r.stats.cost_usd, 0);
   const funnelMax = Math.max(1, ...FUNNEL.map((f) => c[f.status]));
   const scoreList = (scores ?? []).map((s) => s.score as number);
   const bucketCounts = BUCKETS.map((b) => scoreList.filter((s) => s >= b.min && s <= b.max).length);
@@ -94,7 +99,18 @@ export default async function ReportPage() {
         </div>
 
         <section>
-          <SectionHeader title="Runs" count={(runs as Run[]).length} />
+          <SectionHeader
+            title="Runs"
+            count={(runs as Run[]).length}
+            actions={
+              costed.length > 0 && (
+                <span className="muted">
+                  API spend <span className="mono text-[var(--fg)]">{formatUsd(totalCost)}</span> over{" "}
+                  <span className="mono">{costed.length}</span> {costed.length === 1 ? "run" : "runs"}
+                </span>
+              )
+            }
+          />
           <Panel>
             {(runs as Run[]).length === 0 ? (
               <Empty>No runs yet. The worker logs here every time it runs.</Empty>
@@ -106,6 +122,7 @@ export default async function ReportPage() {
                       <th className="w-24">When</th>
                       <th className="w-24">Kind</th>
                       <th className="w-20">Took</th>
+                      <th className="w-24 text-right">Cost</th>
                       <th>Result</th>
                     </tr>
                   </thead>
@@ -115,7 +132,7 @@ export default async function ReportPage() {
                       return (
                         <tr key={r.id}>
                           <td className="mono muted text-[12px]" title={new Date(r.started_at).toLocaleString()}>
-                            {ago(r.started_at)} ago
+                            {agoText(r.started_at)}
                           </td>
                           <td>
                             <span className="inline-flex items-center gap-2">
@@ -124,6 +141,16 @@ export default async function ReportPage() {
                             </span>
                           </td>
                           <td className="mono muted text-[12px]">{took == null ? "…" : took < 60 ? `${took}s` : `${Math.round(took / 60)}m`}</td>
+                          <td
+                            className="mono text-right text-[12px]"
+                            title={
+                              typeof r.stats.cost_usd === "number"
+                                ? `${r.stats.tokens_in ?? 0} tokens in, ${r.stats.tokens_out ?? 0} out`
+                                : "Not recorded for this run"
+                            }
+                          >
+                            {typeof r.stats.cost_usd === "number" ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
+                          </td>
                           <td className="text-[12px]">
                             {r.error ? (
                               <span className="text-[var(--bad)]">{r.error}</span>
@@ -132,7 +159,7 @@ export default async function ReportPage() {
                             ) : (
                               <span className="mono muted">
                                 {Object.entries(r.stats)
-                                  .filter(([, v]) => v)
+                                  .filter(([k, v]) => v && !COST_KEYS.has(k))
                                   .map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`)
                                   .join(" · ") || "nothing to do"}
                               </span>

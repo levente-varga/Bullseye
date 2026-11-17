@@ -14,4 +14,10 @@ export function ago(iso: string | null | undefined): string {
   return `${Math.floor(s / (86_400 * 30))}mo`;
 }
 
-export const pad2 = (n: number) => String(n).padStart(2, "0");
+/** Relative time as a phrase: "just now", "3h ago". */
+export function agoText(iso: string | null | undefined): string {
+  const a = ago(iso);
+  return a === "now" ? "just now" : a === "—" ? a : `${a} ago`;
+}
+
+export const pad2 =(n: number) => String(n).padStart(2, "0");

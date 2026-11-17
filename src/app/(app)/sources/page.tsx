@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
-import { ago, pad2 } from "@/lib/time";
+import { agoText, pad2 } from "@/lib/time";
 import { ATS_INFO, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
@@ -90,7 +90,7 @@ export default async function SourcesPage() {
                           <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
                         </td>
                         <td className="mono text-right">{open[s.id]}</td>
-                        <td className="mono muted text-[12px]">{s.last_checked_at ? `${ago(s.last_checked_at)} ago` : "never"}</td>
+                        <td className="mono muted text-[12px]">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
                         <td>
                           <div className="flex justify-end gap-1.5">
                             <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />

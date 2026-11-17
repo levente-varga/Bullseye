@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import type { TokenUsage } from "./pricing";
 import { SCORING_MODELS, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
 
 /**
@@ -81,7 +82,7 @@ export async function scoreJob(
   model: ScoringModel,
   system: string,
   job: FetchedJob,
-): Promise<Score> {
+): Promise<{ score: Score; model: string; usage: TokenUsage }> {
   const response = await client.beta.messages.parse({
     model,
     max_tokens: 2000,
@@ -113,5 +114,15 @@ ${job.description || "(No description available: judge on title, company and loc
   if (!response.parsed_output) {
     throw new Error(`Scoring returned no parseable output (stop_reason=${response.stop_reason})`);
   }
-  return response.parsed_output;
+  const u = response.usage;
+  return {
+    score: response.parsed_output,
+    model: response.model, // can differ from the request if a refusal fallback answered
+    usage: {
+      input: u.input_tokens,
+      output: u.output_tokens,
+      cacheWrite: u.cache_creation_input_tokens ?? 0,
+      cacheRead: u.cache_read_input_tokens ?? 0,
+    },
+  };
 }
