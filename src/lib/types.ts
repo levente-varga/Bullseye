@@ -131,6 +131,22 @@ export interface Job {
   thin: boolean;
 }
 
+/**
+ * The job columns list views show. Lists stay light: no descriptions (up to 12k
+ * characters each), and the scorer's reasoning is loaded only when a row is opened
+ * (getJobDetails), because every row is sent twice (HTML + React data).
+ */
+export const JOB_LIST_COLUMNS =
+  "id, source_id, title, company, location, remote, url, compensation, first_seen_at, status, status_changed_at, " +
+  "score, thin, applied_at, followed_up_at";
+
+export interface JobDetails {
+  url: string;
+  score_summary: string | null;
+  score_pros: string[] | null;
+  score_cons: string[] | null;
+}
+
 export interface Run {
   id: string;
   kind: "watchlist" | "full" | "digest";

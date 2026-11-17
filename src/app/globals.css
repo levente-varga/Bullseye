@@ -101,13 +101,16 @@ body {
   background: var(--bg);
   color: var(--fg);
 }
+html {
+  /* Always reserve the scrollbar's width, so content doesn't shift when a page becomes long enough to scroll. */
+  scrollbar-gutter: stable;
+}
 body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   font-size: 14px;
 }
-/* Checkboxes: square like everything else. Radios stay round ("pick one"), same styling. */
-input[type="checkbox"],
-input[type="radio"] {
+/* Checkboxes: square like everything else. */
+input[type="checkbox"] {
   appearance: none;
   flex-shrink: 0;
   width: 14px;
@@ -118,27 +121,22 @@ input[type="radio"] {
   cursor: pointer;
   vertical-align: -2px;
 }
-input[type="radio"] {
-  border-radius: 9999px;
-}
 input[type="checkbox"]:checked {
   background-color: var(--accent);
   border-color: var(--accent);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.6 2.4' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='square'/%3E%3C/svg%3E");
 }
-input[type="radio"]:checked {
-  border-color: var(--accent);
-  background-image: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px);
-  background-size: 100% 100%;
-}
-input[type="checkbox"]:focus-visible,
-input[type="radio"]:focus-visible {
+input[type="checkbox"]:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
-input[type="checkbox"]:hover,
-input[type="radio"]:hover {
+input[type="checkbox"]:hover {
   border-color: var(--muted);
+}
+/* Radios: the browser's own (crisp at any size), tinted with the accent. */
+input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 ::selection {
   background: var(--accent-tint);
@@ -163,6 +161,10 @@ a {
   .panel { background: var(--surface); border: 1px solid var(--border); }
   .divide > * + * { border-top: 1px solid var(--border); }
   .rule { border-top: 1px solid var(--border); }
+
+  /* The app's one two-column layout: a main column plus a fixed 320px side column.
+     Use it for every side-by-side pair, so the gap falls in the same place on every page. */
+  .split { @apply grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]; }
 
   /* --- tables ------------------------------------------------------------- */
   .table { @apply w-full border-collapse text-left; }
