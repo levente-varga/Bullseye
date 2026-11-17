@@ -13,11 +13,12 @@ const base = (props: SVGProps<SVGSVGElement>) => ({
   ...props,
 });
 
-export const IconCrosshair = (p: SVGProps<SVGSVGElement>) => (
+/** The Bullseye logo: concentric rings with a solid center. */
+export const IconBullseye = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <circle cx="8" cy="8" r="5.5" />
-    <path d="M8 0.5v4M8 11.5v4M0.5 8h4M11.5 8h4" />
-    <rect x="7.25" y="7.25" width="1.5" height="1.5" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="8" r="6.75" />
+    <circle cx="8" cy="8" r="4.25" />
+    <circle cx="8" cy="8" r="1.9" fill="currentColor" stroke="none" />
   </svg>
 );
 export const IconInbox = (p: SVGProps<SVGSVGElement>) => (

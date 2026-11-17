@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { IconCrosshair } from "@/components/icons";
+import { IconBullseye } from "@/components/icons";
 import { TopNav } from "@/components/NavLinks";
 import { SidebarData, SidebarFallback } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -9,8 +9,8 @@ import { signOut } from "./actions";
 function Wordmark() {
   return (
     <Link href="/" className="flex items-center gap-2">
-      <IconCrosshair width={18} height={18} className="text-[var(--accent-strong)]" />
-      <span className="serif text-[1.35rem] leading-none tracking-tight">headshot</span>
+      <IconBullseye width={18} height={18} className="text-[var(--accent-strong)]" />
+      <span className="serif text-[1.35rem] leading-none tracking-tight">bullseye</span>
     </Link>
   );
 }
