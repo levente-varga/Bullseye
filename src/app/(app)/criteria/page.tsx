@@ -87,10 +87,14 @@ export default async function CriteriaPage() {
               <Row label="Send emails to" hint="The daily digest and watchlist alerts.">
                 <input name="digest_email" type="email" defaultValue={criteria.digest_email} className="input" placeholder="you@example.com" />
               </Row>
-              <Row label="Follow up after" hint="Days without contact before an application is flagged.">
+              <Row
+                label="Remind me to follow up"
+                hint="When an application gets no reply for this long, it's flagged in the Pipeline and listed in your digest, so you can write to the company."
+              >
                 <div className="flex items-center gap-2">
+                  <span className="muted text-[12px]">after</span>
                   <input name="followup_days" type="number" min={1} defaultValue={criteria.followup_days} className="input mono w-24" />
-                  <span className="faint text-[12px]">days</span>
+                  <span className="muted text-[12px]">days without a reply</span>
                 </div>
               </Row>
             </div>
