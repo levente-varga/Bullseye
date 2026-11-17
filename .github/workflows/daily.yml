@@ -1,0 +1,36 @@
+name: Daily search and digest
+
+on:
+  schedule:
+    - cron: "23 5 * * *" # 05:23 UTC every day
+  workflow_dispatch:
+
+concurrency:
+  group: headshot-worker
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SCORING_MODEL: ${{ vars.SCORING_MODEL }}
+      MAX_SCORE_PER_RUN: ${{ vars.MAX_SCORE_PER_RUN }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DIGEST_TO: ${{ secrets.DIGEST_TO }}
+      DIGEST_FROM: ${{ vars.DIGEST_FROM }}
+      APP_URL: ${{ vars.APP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run worker -- full
+      # Send the digest even if some sources failed to fetch.
+      - if: always()
+        run: npm run worker -- digest

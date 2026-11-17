@@ -1,0 +1,279 @@
+/**
+ * Headshot worker. Runs in GitHub Actions (or locally with `npm run worker -- <mode>`).
+ *
+ *   watchlist  poll watchlist companies only; email an alert for strong new matches
+ *   full       poll every enabled source; score new listings
+ *   digest     send the daily email: new matches, follow-ups due, status changes
+ */
+import "./env";
+import Anthropic from "@anthropic-ai/sdk";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { fetchBoard } from "../src/lib/ats";
+import { hardFilter } from "../src/lib/filters";
+import { buildSystemPrompt, scoreJob, type FeedbackExample } from "../src/lib/scoring";
+import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
+import type { Criteria, FetchedJob, Job, Profile, Source } from "../src/lib/types";
+
+type Mode = "watchlist" | "full" | "digest";
+
+const MAX_SCORE_PER_RUN = Number(process.env.MAX_SCORE_PER_RUN || 60);
+const SCORE_CONCURRENCY = 4;
+const OPEN_STATUSES = ["new", "filtered", "scored"];
+
+function env(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var ${name}`);
+  return v;
+}
+
+const db: SupabaseClient = createClient(
+  env("NEXT_PUBLIC_SUPABASE_URL"),
+  env("SUPABASE_SERVICE_ROLE_KEY"),
+  { auth: { persistSession: false } },
+);
+
+/** Supabase caps selects at 1000 rows; page through. */
+type Result = PromiseLike<{ data: unknown; error: unknown }>;
+
+async function selectAll<T>(build: (from: number, to: number) => Result): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build(from, from + 999);
+    if (error) throw error;
+    const page = (data ?? []) as T[];
+    out.push(...page);
+    if (page.length < 1000) return out;
+  }
+}
+
+/** Awaits a Supabase query, throws on error, returns its data. */
+async function must<T = unknown>(p: Result): Promise<T> {
+  const { data, error } = await p;
+  if (error) throw error;
+  return data as T;
+}
+
+async function loadContext() {
+  const criteria = await must<Criteria>(db.from("criteria").select("*").eq("id", 1).single());
+  const profile = await must<Profile>(db.from("profile").select("*").eq("id", 1).single());
+  const rows = await must<
+    { decision: "approve" | "skip"; reasons: string[]; note: string | null; jobs: { title: string; company: string } | null }[]
+  >(
+    db
+      .from("feedback")
+      .select("decision, reasons, note, jobs(title, company)")
+      .order("created_at", { ascending: false })
+      .limit(40),
+  );
+  const feedback: FeedbackExample[] = rows
+    .filter((r) => r.jobs)
+    .map((r) => ({ ...r.jobs!, decision: r.decision, reasons: r.reasons, note: r.note }));
+  return { criteria, profile, feedback };
+}
+
+// ---------------------------------------------------------------------------
+// Fetch + filter
+// ---------------------------------------------------------------------------
+
+async function syncSource(source: Source, criteria: Criteria) {
+  const stats = { fetched: 0, inserted: 0, filtered: 0, closed: 0 };
+  let fetched: FetchedJob[];
+  try {
+    fetched = await fetchBoard(source.ats, source.slug, source.company_name);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await db.from("sources").update({ last_error: msg, last_checked_at: new Date().toISOString() }).eq("id", source.id);
+    console.error(`[${source.company_name}] fetch failed: ${msg}`);
+    return { ...stats, errors: 1 };
+  }
+  stats.fetched = fetched.length;
+
+  const existing = await selectAll<{ id: string; external_id: string; status: string }>((a, b) =>
+    db.from("jobs").select("id, external_id, status").eq("source_id", source.id).range(a, b),
+  );
+  const known = new Set(existing.map((j) => j.external_id));
+  const live = new Set(fetched.map((j) => j.external_id));
+
+  const fresh = fetched.filter((j) => !known.has(j.external_id));
+  const rows = fresh.map((j) => {
+    const reason = hardFilter(j, criteria);
+    if (reason) stats.filtered++;
+    return { ...j, source_id: source.id, status: reason ? "filtered" : "new", filter_reason: reason };
+  });
+  for (let i = 0; i < rows.length; i += 500) {
+    await must(
+      db.from("jobs").upsert(rows.slice(i, i + 500), { onConflict: "source_id,external_id", ignoreDuplicates: true }),
+    );
+  }
+  stats.inserted = rows.length;
+
+  // Postings that vanished before you acted on them get closed.
+  const gone = existing.filter((j) => !live.has(j.external_id) && OPEN_STATUSES.includes(j.status));
+  for (let i = 0; i < gone.length; i += 200) {
+    await must(db.from("jobs").update({ status: "closed" }).in("id", gone.slice(i, i + 200).map((j) => j.id)));
+  }
+  stats.closed = gone.length;
+
+  await db.from("sources").update({ last_error: null, last_checked_at: new Date().toISOString() }).eq("id", source.id);
+  console.log(`[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.filtered} filtered), ${stats.closed} closed`);
+  return { ...stats, errors: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Scoring
+// ---------------------------------------------------------------------------
+
+async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof loadContext>>) {
+  const pending = await must<Job[]>(
+    db
+      .from("jobs")
+      .select("*")
+      .eq("status", "new")
+      .in("source_id", sourceIds)
+      .order("first_seen_at", { ascending: false })
+      .limit(MAX_SCORE_PER_RUN),
+  );
+  if (!pending.length) return { scored: 0, score_errors: 0 };
+
+  const client = new Anthropic();
+  const system = buildSystemPrompt(ctx.profile, ctx.criteria, ctx.feedback);
+  let scored = 0;
+  let errors = 0;
+
+  const queue = [...pending];
+  await Promise.all(
+    Array.from({ length: SCORE_CONCURRENCY }, async () => {
+      for (let job = queue.shift(); job; job = queue.shift()) {
+        try {
+          const s = await scoreJob(client, system, job);
+          await must(
+            db
+              .from("jobs")
+              .update({
+                status: "scored",
+                score: s.score,
+                score_summary: s.summary,
+                score_pros: s.pros.slice(0, 4),
+                score_cons: s.cons.slice(0, 4),
+                scored_at: new Date().toISOString(),
+              })
+              .eq("id", job.id),
+          );
+          scored++;
+          console.log(`  scored ${s.score}: ${job.title} @ ${job.company}`);
+        } catch (e) {
+          errors++;
+          console.error(`  score failed for ${job.title} @ ${job.company}:`, e instanceof Error ? e.message : e);
+        }
+      }
+    }),
+  );
+  return { scored, score_errors: errors };
+}
+
+// ---------------------------------------------------------------------------
+// Modes
+// ---------------------------------------------------------------------------
+
+async function runFetch(mode: "watchlist" | "full") {
+  const ctx = await loadContext();
+  let q = db.from("sources").select("*").eq("enabled", true);
+  if (mode === "watchlist") q = q.eq("watchlist", true);
+  const sources = await must<Source[]>(q);
+  if (!sources.length) {
+    console.log(`No ${mode === "watchlist" ? "watchlist " : ""}sources configured.`);
+    return { sources: 0 };
+  }
+
+  const totals: Record<string, number> = { sources: sources.length };
+  for (const s of sources) {
+    const st = await syncSource(s, ctx.criteria);
+    for (const [k, v] of Object.entries(st)) totals[k] = (totals[k] ?? 0) + v;
+  }
+  Object.assign(totals, await scorePending(sources.map((s) => s.id), ctx));
+
+  if (mode === "watchlist") {
+    const strong = await must<Job[]>(
+      db
+        .from("jobs")
+        .select("*")
+        .eq("status", "scored")
+        .gte("score", ctx.criteria.score_threshold)
+        .is("notified_at", null)
+        .in("source_id", sources.map((s) => s.id))
+        .order("score", { ascending: false }),
+    );
+    if (strong.length) {
+      const { subject, html } = renderWatchlistAlert(strong);
+      await sendEmail(subject, html);
+      await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", strong.map((j) => j.id)));
+    }
+    totals.alerted = strong.length;
+  }
+  return totals;
+}
+
+async function runDigest() {
+  const { criteria } = await loadContext();
+  const now = Date.now();
+  const followCutoff = new Date(now - criteria.followup_days * 86_400_000).toISOString();
+  const dayAgo = new Date(now - 86_400_000).toISOString();
+
+  const newMatches = await must<Job[]>(
+    db
+      .from("jobs")
+      .select("*")
+      .eq("status", "scored")
+      .gte("score", criteria.score_threshold)
+      .is("notified_at", null)
+      .order("score", { ascending: false })
+      .limit(25),
+  );
+  const applied = await must<Job[]>(db.from("jobs").select("*").eq("status", "applied"));
+  const followUps = applied.filter((j) => (j.followed_up_at ?? j.applied_at ?? j.status_changed_at) < followCutoff);
+  const statusChanges = await must<Job[]>(
+    db
+      .from("jobs")
+      .select("*")
+      .in("status", ["applied", "interview", "offer", "rejected"])
+      .gte("status_changed_at", dayAgo)
+      .order("status_changed_at", { ascending: false }),
+  );
+
+  const stats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0 };
+  if (newMatches.length || followUps.length || statusChanges.length) {
+    const { subject, html } = renderDigest({ newMatches, followUps, statusChanges });
+    await sendEmail(subject, html);
+    stats.emailed = 1;
+    if (newMatches.length) {
+      await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", newMatches.map((j) => j.id)));
+    }
+  } else {
+    console.log("Nothing to report; no email sent.");
+  }
+  return stats;
+}
+
+async function main() {
+  const mode = process.argv[2] as Mode;
+  if (!["watchlist", "full", "digest"].includes(mode)) {
+    console.error("Usage: worker <watchlist|full|digest>");
+    process.exit(2);
+  }
+
+  const run = await must<{ id: string }>(db.from("runs").insert({ kind: mode }).select("id").single());
+  try {
+    const stats = mode === "digest" ? await runDigest() : await runFetch(mode);
+    await db.from("runs").update({ finished_at: new Date().toISOString(), stats }).eq("id", run.id);
+    console.log("Done:", stats);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : JSON.stringify(e);
+    await db.from("runs").update({ finished_at: new Date().toISOString(), error: msg }).eq("id", run.id);
+    throw e;
+  }
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

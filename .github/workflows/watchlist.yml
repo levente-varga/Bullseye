@@ -1,0 +1,32 @@
+name: Watchlist check
+
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly, off the top of the hour (GitHub delays :00 jobs most)
+  workflow_dispatch:
+
+concurrency:
+  group: headshot-worker
+  cancel-in-progress: false
+
+jobs:
+  watchlist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run worker -- watchlist
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCORING_MODEL: ${{ vars.SCORING_MODEL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
+          DIGEST_FROM: ${{ vars.DIGEST_FROM }}
+          APP_URL: ${{ vars.APP_URL }}
