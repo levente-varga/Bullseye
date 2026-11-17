@@ -117,37 +117,28 @@ export default async function ReportPage() {
         </div>
 
         <section>
-          <SectionHeader
-            title="Credits"
-            actions={
-              series && (
-                <span className="muted">
-                  <span className="mono text-[var(--fg)]">{formatUsd(series.current)}</span> left
-                  {series.perDay ? (
-                    <>
-                      {" "}· burning <span className="mono">{formatUsd(series.perDay)}</span>/day
-                      {series.zeroAt && (
-                        <>
-                          {" "}· runs out ≈{" "}
-                          <span className="mono text-[var(--fg)]">
-                            {new Date(series.zeroAt).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
-                          </span>
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    " · no spend recorded yet"
-                  )}
-                </span>
-              )
-            }
-          />
+          <SectionHeader title="Credits" />
           <div className="split">
             <Panel title="Remaining API credit" aside={series?.perDay ? `trend: last ${Math.round(series.windowDays)}d` : undefined}>
               {series ? (
-                <div className="px-2 pt-3 pb-1">
-                  <CreditChart points={series.points} zeroAt={series.zeroAt} now={now} />
-                </div>
+                <>
+                  <div className="px-2 pt-3 pb-1">
+                    <CreditChart points={series.points} zeroAt={series.zeroAt} now={now} />
+                  </div>
+                  <div className="grid grid-cols-3 divide-x divide-[var(--border)] border-t border-[var(--border)]">
+                    <Stat small label="Remaining" value={formatUsd(series.current)} />
+                    <Stat small label="Burn rate" value={series.perDay ? formatUsd(series.perDay) : "–"} unit={series.perDay ? "/ day" : undefined} />
+                    <Stat
+                      small
+                      label="Runs out"
+                      value={
+                        series.zeroAt
+                          ? `≈ ${new Date(series.zeroAt).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`
+                          : "–"
+                      }
+                    />
+                  </div>
+                </>
               ) : (
                 <Empty>Add your first top-up to start tracking.</Empty>
               )}
