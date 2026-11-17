@@ -43,7 +43,7 @@ export async function SidebarData() {
         </div>
         {watch.length === 0 ? (
           <Link href="/sources" className="faint block px-2 text-[12px] hover:text-[var(--fg)]">
-            Star a source to watch it hourly →
+            Click Watch on a source to check it hourly →
           </Link>
         ) : (
           <ul className="space-y-px">
