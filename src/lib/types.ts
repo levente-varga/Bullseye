@@ -78,7 +78,25 @@ export interface Criteria {
   score_threshold: number;
   followup_days: number;
   digest_email: string;
+  /** Watchlist check interval; 0 = off. */
+  watch_interval_minutes: number;
+  /** Local time ("HH:MM", in `timezone`) of the daily full search + digest. */
+  daily_time: string;
+  daily_enabled: boolean;
+  /** IANA timezone, e.g. "Europe/Budapest". */
+  timezone: string;
 }
+
+export const WATCH_INTERVALS: { minutes: number; label: string }[] = [
+  { minutes: 0, label: "Off" },
+  { minutes: 15, label: "Every 15 minutes" },
+  { minutes: 30, label: "Every 30 minutes" },
+  { minutes: 60, label: "Every hour" },
+  { minutes: 120, label: "Every 2 hours" },
+  { minutes: 240, label: "Every 4 hours" },
+  { minutes: 360, label: "Every 6 hours" },
+  { minutes: 720, label: "Every 12 hours" },
+];
 
 export interface Source {
   id: string;
