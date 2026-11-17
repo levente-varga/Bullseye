@@ -133,7 +133,7 @@ export default async function ReportPage() {
                       label="Runs out"
                       value={
                         series.zeroAt
-                          ? `≈ ${new Date(series.zeroAt).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`
+                          ? new Date(series.zeroAt).toLocaleDateString("en-GB", { month: "short", year: "numeric" })
                           : "–"
                       }
                     />
@@ -227,14 +227,7 @@ export default async function ReportPage() {
                                   : "Not recorded for this run"
                             }
                           >
-                            {typeof r.stats.cost_usd === "number" ? (
-                              <>
-                                {r.stats.cost_estimated ? <span className="faint">≈</span> : null}
-                                {formatUsd(r.stats.cost_usd)}
-                              </>
-                            ) : (
-                              <span className="faint">–</span>
-                            )}
+                            {typeof r.stats.cost_usd === "number" ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
                           </td>
                           <td className="text-[12px]">
                             {r.error ? (
