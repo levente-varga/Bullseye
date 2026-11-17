@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { detectSource } from "@/lib/detect-source";
 import { createClient } from "@/lib/supabase/server";
 import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobStatus } from "@/lib/types";
 
@@ -115,23 +116,43 @@ function normalizeSlug(ats: Ats, input: string): string {
 
 export async function addSource(form: FormData) {
   const supabase = await db();
-  const ats = str(form, "ats") as Ats;
-  if (!(ats in ATS_INFO)) return;
-  const slug = normalizeSlug(ats, str(form, "slug"));
-  if (!slug) return;
-  const fallbackName = ats === "swedengamejobs" ? "Sweden Game Jobs" : slug;
-  check(
-    (
-      await supabase.from("sources").insert({
-        ats,
-        slug,
-        company_name: str(form, "company_name") || fallbackName,
-        country: str(form, "country").toLowerCase() || null,
-        watchlist: form.get("watchlist") === "on",
-      })
-    ).error,
-  );
+  const chosen = str(form, "ats");
+  const back = (q: Record<string, string>) => redirect(`/sources?${new URLSearchParams(q)}#add`);
+
+  let ats: Ats;
+  let slug: string;
+  let name = str(form, "company_name");
+  let jobCount: number | null = null;
+
+  if (chosen === "auto") {
+    const found = await detectSource(str(form, "slug"));
+    if ("error" in found) back({ error: found.error });
+    else {
+      ({ ats, slug } = found);
+      name ||= found.companyGuess;
+      jobCount = found.jobCount;
+    }
+  } else {
+    if (!(chosen in ATS_INFO)) back({ error: "Pick a source type." });
+    ats = chosen as Ats;
+    slug = normalizeSlug(ats, str(form, "slug"));
+    if (!slug) back({ error: "Enter the board, domain or URL." });
+    name ||= ats === "swedengamejobs" ? "Sweden Game Jobs" : slug;
+  }
+
+  const { error } = await supabase.from("sources").insert({
+    ats: ats!,
+    slug: slug!,
+    company_name: name,
+    country: str(form, "country").toLowerCase() || null,
+    watchlist: form.get("watchlist") === "on",
+  });
+  if (error?.code === "23505") back({ error: `${name} is already one of your sources.` });
+  check(error);
   revalidatePath("/sources");
+  back({
+    added: `${name} · ${ATS_INFO[ats!].label}${jobCount !== null ? ` · ${jobCount} open ${jobCount === 1 ? "job" : "jobs"}` : ""}`,
+  });
 }
 
 export async function acceptSuggestion(form: FormData) {
