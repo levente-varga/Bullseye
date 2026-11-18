@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, currentUser } from "@/lib/supabase/server";
 import { ErrorDetails } from "@/components/ErrorDetails";
 import { PendingBar } from "@/components/PendingBar";
 import { Segmented } from "@/components/Segmented";
@@ -53,22 +53,27 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
     return `/report${p.size ? `?${p}` : ""}#runs`;
   };
   const supabase = await createClient();
-  let runsQuery = supabase.from("runs").select("*", { count: "exact" });
+  const me = await currentUser(supabase);
+  // Each run with the signed-in person's share of it (RLS: your own run_users rows).
+  let runsQuery = supabase.from("runs").select("*, run_users(user_id, stats)", { count: "exact" });
   if (runFilter === "daily") runsQuery = runsQuery.in("kind", ["full", "digest"]);
   if (runFilter === "watchlist") runsQuery = runsQuery.eq("kind", "watchlist");
   if (runFilter === "failed") runsQuery = runsQuery.not("error", "is", null);
   const counts = await Promise.all(
     FUNNEL.map(async (f) => {
-      const { count } = await supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", f.status);
+      const { count } = await supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", f.status);
       return [f.status, count ?? 0] as const;
     }),
   );
   const [{ data: runRows, count: runTotal, error }, { data: scores }] = await Promise.all([
     runsQuery.order("started_at", { ascending: false }).limit(runLimit),
-    supabase.from("jobs").select("score").not("score", "is", null).limit(10000),
+    supabase.from("my_jobs").select("score").not("score", "is", null).limit(10000),
   ]);
   if (error) throw new Error(error.message);
-  const runs = runRows as Run[];
+  // The admin sees each run as a whole (all spend is theirs); everyone else sees their own share.
+  const runs = (runRows as (Run & { run_users: { user_id: string; stats: Run["stats"] }[] })[]).map((r) =>
+    me.isAdmin ? r : { ...r, stats: r.run_users.find((u) => u.user_id === me.id)?.stats ?? {} },
+  ) as Run[];
   const moreRuns = (runTotal ?? 0) > runs.length;
 
   const c = Object.fromEntries(counts) as Record<JobStatus, number>;
@@ -152,6 +157,8 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
           </Panel>
         </div>
 
+        {/* Credit tracking is the admin's Anthropic balance. */}
+        {me.isAdmin && (
         <section>
           <SectionHeader title="Credits" />
           <div className="split">
@@ -209,6 +216,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
             </Panel>
           </div>
         </section>
+        )}
 
         <section id="runs" className="scroll-mt-6">
           <SectionHeader

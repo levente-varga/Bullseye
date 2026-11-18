@@ -7,7 +7,7 @@ import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, w
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, currentUser } from "@/lib/supabase/server";
 import {
   ATS_INFO,
   DEFAULT_SCORING_MODEL,
@@ -41,7 +41,7 @@ function check(error: { message: string } | null) {
 export async function approveJob(form: FormData) {
   const supabase = await db();
   const id = str(form, "id");
-  check((await supabase.from("jobs").update({ status: "approved" }).eq("id", id)).error);
+  check((await supabase.from("matches").update({ status: "approved" }).eq("job_id", id)).error);
   check((await supabase.from("feedback").insert({ job_id: id, decision: "approve", note: str(form, "note") || null })).error);
   revalidatePath("/");
 }
@@ -49,7 +49,7 @@ export async function approveJob(form: FormData) {
 /** The scorer's reasoning for one job, loaded when its Inbox row is opened. */
 export async function getJobDetails(id: string): Promise<JobDetails | null> {
   const supabase = await db();
-  const { data } = await supabase.from("jobs").select("url, score_summary, score_pros, score_cons").eq("id", id).single();
+  const { data } = await supabase.from("my_jobs").select("url, score_summary, score_pros, score_cons").eq("id", id).single();
   return (data as JobDetails | null) ?? null;
 }
 
@@ -59,7 +59,7 @@ export async function skipJob(form: FormData) {
   const reasons = form.getAll("reasons").map(String);
   const other = str(form, "other");
   if (other) reasons.push(other);
-  check((await supabase.from("jobs").update({ status: "skipped" }).eq("id", id)).error);
+  check((await supabase.from("matches").update({ status: "skipped" }).eq("job_id", id)).error);
   check((await supabase.from("feedback").insert({ job_id: id, decision: "skip", reasons, note: str(form, "note") || null })).error);
   revalidatePath("/");
 }
@@ -67,7 +67,7 @@ export async function skipJob(form: FormData) {
 export async function setStatus(form: FormData) {
   const supabase = await db();
   const status = str(form, "status") as JobStatus;
-  check((await supabase.from("jobs").update({ status }).eq("id", str(form, "id"))).error);
+  check((await supabase.from("matches").update({ status }).eq("job_id", str(form, "id"))).error);
   revalidatePath("/pipeline");
 }
 
@@ -80,7 +80,7 @@ export async function restoreToInbox(form: FormData) {
   const supabase = await db();
   const id = str(form, "id");
   check((await supabase.from("feedback").delete().eq("job_id", id)).error);
-  check((await supabase.from("jobs").update({ status: "scored" }).eq("id", id)).error);
+  check((await supabase.from("matches").update({ status: "scored" }).eq("job_id", id)).error);
   revalidatePath("/");
   revalidatePath("/pipeline");
 }
@@ -88,7 +88,7 @@ export async function restoreToInbox(form: FormData) {
 export async function markFollowedUp(form: FormData) {
   const supabase = await db();
   check(
-    (await supabase.from("jobs").update({ followed_up_at: new Date().toISOString() }).eq("id", str(form, "id"))).error,
+    (await supabase.from("matches").update({ followed_up_at: new Date().toISOString() }).eq("job_id", str(form, "id"))).error,
   );
   revalidatePath("/pipeline");
 }
@@ -97,6 +97,7 @@ export async function markFollowedUp(form: FormData) {
 
 export async function saveCriteria(form: FormData) {
   const supabase = await db();
+  const me = await currentUser(supabase);
   check(
     (
       await supabase
@@ -108,18 +109,47 @@ export async function saveCriteria(form: FormData) {
           include_keywords: list(form, "include_keywords"),
           exclude_keywords: list(form, "exclude_keywords"),
           preferences: str(form, "preferences"),
+          score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
+          followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
+          digest_email: str(form, "digest_email"),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", me.id)
+    ).error,
+  );
+  revalidatePath("/criteria");
+}
+
+/** Admin only (RLS enforces it too): the shared schedule, the scoring model, and spend caps. */
+export async function saveSettings(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return;
+  check(
+    (
+      await supabase
+        .from("settings")
+        .update({
           scoring_model: SCORING_MODELS.some((m) => m.id === str(form, "scoring_model"))
             ? str(form, "scoring_model")
             : DEFAULT_SCORING_MODEL,
-          score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
-          followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
-          digest_email: str(form, "digest_email"),
+          max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd"), 3),
           ...scheduleFields(form),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1)
+    ).error,
+  );
+  // The admin's own caps sit on their member row, like everyone's.
+  check(
+    (
+      await supabase
+        .from("members")
+        .update({
+          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
+        })
+        .eq("user_id", me.id)
     ).error,
   );
   revalidatePath("/criteria");
@@ -158,7 +188,7 @@ const RESET_SCORE = { score: null, score_summary: null, score_pros: null, score_
 export async function reevaluate(form: FormData) {
   const supabase = await db();
   const rescore = form.get("rescore") === "on";
-  const { data: c, error } = await supabase.from("criteria").select("*").eq("id", 1).single();
+  const { data: c, error } = await supabase.from("criteria").select("*").single();
   check(error);
   const criteria = c as Criteria;
 
@@ -169,7 +199,7 @@ export async function reevaluate(form: FormData) {
   const PAGE = 500;
   for (let from = 0; ; from += PAGE) {
     const { data, error: e } = await supabase
-      .from("jobs")
+      .from("my_jobs")
       .select("id, url, title, location, remote, description, thin, status, filter_reason")
       .in("status", ["new", "scored", "filtered"])
       .order("id")
@@ -200,11 +230,11 @@ export async function reevaluate(form: FormData) {
   const chunks = (ids: string[]) => Array.from({ length: Math.ceil(ids.length / 150) }, (_, i) => ids.slice(i * 150, i * 150 + 150));
   for (const [reason, ids] of toFiltered) {
     for (const part of chunks(ids)) {
-      check((await supabase.from("jobs").update({ status: "filtered", filter_reason: reason, ...RESET_SCORE }).in("id", part)).error);
+      check((await supabase.from("matches").update({ status: "filtered", filter_reason: reason, ...RESET_SCORE }).in("job_id", part)).error);
     }
   }
   for (const part of chunks(toWaiting)) {
-    check((await supabase.from("jobs").update({ status: "new", filter_reason: null, ...RESET_SCORE }).in("id", part)).error);
+    check((await supabase.from("matches").update({ status: "new", filter_reason: null, ...RESET_SCORE }).in("job_id", part)).error);
   }
 
   revalidatePath("/", "layout");
@@ -216,10 +246,11 @@ export async function addExcludeKeyword(form: FormData) {
   const supabase = await db();
   const kw = str(form, "keyword");
   if (!kw) return;
-  const { data, error } = await supabase.from("criteria").select("exclude_keywords").eq("id", 1).single();
+  const me = await currentUser(supabase);
+  const { data, error } = await supabase.from("criteria").select("exclude_keywords").single();
   check(error);
   const next = [...new Set([...(data!.exclude_keywords as string[]), kw])];
-  check((await supabase.from("criteria").update({ exclude_keywords: next }).eq("id", 1)).error);
+  check((await supabase.from("criteria").update({ exclude_keywords: next }).eq("user_id", me.id)).error);
   revalidatePath("/criteria");
 }
 
@@ -288,15 +319,15 @@ export async function addSource(form: FormData) {
     name ||= ATS_INFO[ats].defaultName ?? slug;
   }
 
-  const { error } = await supabase.from("sources").insert({
-    ats: ats!,
-    slug: slug!,
-    company_name: name,
-    country: str(form, "country").toLowerCase() || null,
-    watchlist: form.get("watchlist") === "on",
+  const { data: sub, error } = await supabase.rpc("subscribe_source", {
+    p_ats: ats!,
+    p_slug: slug!,
+    p_company_name: name,
+    p_country: str(form, "country").toLowerCase() || null,
+    p_watchlist: form.get("watchlist") === "on",
   });
-  if (error?.code === "23505") back({ error: `${name} is already one of your sources.` });
   check(error);
+  if ((sub as { already?: boolean } | null)?.already) back({ error: `${name} is already one of your sources.` });
   revalidatePath("/sources");
   back({
     added: `${name} · ${ATS_INFO[ats!].label}${jobCount !== null ? ` · ${jobCount} open ${jobCount === 1 ? "job" : "jobs"}` : ""}`,
@@ -309,11 +340,10 @@ export async function acceptSuggestion(form: FormData) {
   const { data: s, error } = await supabase.from("source_suggestions").select("*").eq("id", id).single();
   check(error);
   if (!s || !(s.ats in ATS_INFO)) return;
-  const insert = await supabase
-    .from("sources")
-    .insert({ ats: s.ats, slug: s.slug, company_name: s.company_name, watchlist: false });
-  // Already a source (unique ats+slug): still mark the suggestion handled.
-  if (insert.error && insert.error.code !== "23505") throw new Error(insert.error.message);
+  // Already followed: subscribe_source does nothing, and the suggestion is still marked handled.
+  check(
+    (await supabase.rpc("subscribe_source", { p_ats: s.ats, p_slug: s.slug, p_company_name: s.company_name })).error,
+  );
   check((await supabase.from("source_suggestions").update({ status: "added" }).eq("id", id)).error);
   revalidatePath("/sources");
 }
@@ -329,14 +359,16 @@ export async function updateSource(form: FormData) {
   const field = str(form, "field");
   if (field !== "watchlist" && field !== "enabled") return;
   check(
-    (await supabase.from("sources").update({ [field]: str(form, "value") === "true" }).eq("id", str(form, "id"))).error,
+    (await supabase.from("subscriptions").update({ [field]: str(form, "value") === "true" }).eq("source_id", str(form, "id"))).error,
   );
   revalidatePath("/sources");
 }
 
 export async function deleteSource(form: FormData) {
   const supabase = await db();
-  check((await supabase.from("sources").delete().eq("id", str(form, "id"))).error);
+  // Unfollow: drops the listings you haven't acted on; the Pipeline and skipped ones stay.
+  check((await supabase.rpc("unsubscribe_source", { p_source: str(form, "id") })).error);
+  revalidatePath("/", "layout");
   revalidatePath("/sources");
 }
 
@@ -344,6 +376,7 @@ export async function deleteSource(form: FormData) {
 
 export async function saveProfile(form: FormData) {
   const supabase = await db();
+  const me = await currentUser(supabase);
   check(
     (
       await supabase
@@ -360,7 +393,7 @@ export async function saveProfile(form: FormData) {
           links: list(form, "links").map(url),
           updated_at: new Date().toISOString(),
         })
-        .eq("id", 1)
+        .eq("user_id", me.id)
     ).error,
   );
   revalidatePath("/profile");
@@ -371,8 +404,9 @@ const url = (v: string) => (v && !/^https?:\/\//i.test(v) ? `https://${v}` : v);
 
 export async function saveCvText(form: FormData) {
   const supabase = await db();
+  const me = await currentUser(supabase);
   check(
-    (await supabase.from("profile").update({ cv_text: str(form, "cv_text"), updated_at: new Date().toISOString() }).eq("id", 1))
+    (await supabase.from("profile").update({ cv_text: str(form, "cv_text"), updated_at: new Date().toISOString() }).eq("user_id", me.id))
       .error,
   );
   revalidatePath("/profile");
@@ -396,8 +430,9 @@ export async function uploadCv(form: FormData) {
     back({ cv_error: "Couldn't read that PDF. Is it password-protected or damaged?" });
   }
 
-  const { data: before } = await supabase.from("profile").select("cv_file_path").eq("id", 1).single();
-  const path = `cv-${Date.now()}.pdf`;
+  const me = await currentUser(supabase);
+  const { data: before } = await supabase.from("profile").select("cv_file_path").single();
+  const path = `${me.id}/cv-${Date.now()}.pdf`;
   const up = await supabase.storage.from("cv").upload(path, bytes, { contentType: "application/pdf" });
   if (up.error) back({ cv_error: `Upload failed: ${up.error.message}` });
 
@@ -413,7 +448,7 @@ export async function uploadCv(form: FormData) {
           ...(text ? { cv_text: text } : {}),
           updated_at: new Date().toISOString(),
         })
-        .eq("id", 1)
+        .eq("user_id", me.id)
     ).error,
   );
   if (before?.cv_file_path) await supabase.storage.from("cv").remove([before.cv_file_path]);
@@ -423,10 +458,11 @@ export async function uploadCv(form: FormData) {
 
 export async function deleteCv() {
   const supabase = await db();
-  const { data } = await supabase.from("profile").select("cv_file_path").eq("id", 1).single();
+  const me = await currentUser(supabase);
+  const { data } = await supabase.from("profile").select("cv_file_path").single();
   if (data?.cv_file_path) await supabase.storage.from("cv").remove([data.cv_file_path]);
   check(
-    (await supabase.from("profile").update({ cv_file_path: null, cv_file_name: null, cv_uploaded_at: null }).eq("id", 1)).error,
+    (await supabase.from("profile").update({ cv_file_path: null, cv_file_name: null, cv_uploaded_at: null }).eq("user_id", me.id)).error,
   );
   revalidatePath("/profile");
 }
@@ -473,4 +509,52 @@ export async function signOut() {
   const supabase = await db();
   await supabase.auth.signOut();
   redirect("/login");
+}
+
+// --- Members (admin) ----------------------------------------------------------
+
+/** Queues an invite; the worker creates the account and emails the link within ~15 minutes. */
+export async function inviteMember(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return;
+  const email = str(form, "email").toLowerCase();
+  const back = (q: Record<string, string>) => redirect(`/admin?${new URLSearchParams(q)}`);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) back({ error: "That doesn't look like an email address." });
+  // Upsert: inviting again re-sends (clears an earlier failure).
+  check((await supabase.from("invites").upsert({ email, invited_at: new Date().toISOString(), sent_at: null, error: null })).error);
+  revalidatePath("/admin");
+  back({ invited: email });
+}
+
+export async function cancelInvite(form: FormData) {
+  const supabase = await db();
+  check((await supabase.from("invites").delete().eq("email", str(form, "email"))).error);
+  revalidatePath("/admin");
+}
+
+export async function updateMemberCaps(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return;
+  check(
+    (
+      await supabase
+        .from("members")
+        .update({
+          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
+        })
+        .eq("user_id", str(form, "user_id"))
+    ).error,
+  );
+  revalidatePath("/admin");
+}
+
+/** Deletes the member's account and everything personal; needs the confirm box ticked. */
+export async function removeMember(form: FormData) {
+  const supabase = await db();
+  if (form.get("confirm") !== "on") redirect("/admin?error=Tick the box to confirm removing a member.");
+  check((await supabase.rpc("remove_member", { p_user: str(form, "user_id") })).error);
+  revalidatePath("/admin");
 }

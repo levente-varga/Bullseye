@@ -14,7 +14,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   const addError = typeof sp.error === "string" ? sp.error : null;
   const supabase = await createClient();
   const [{ data, error }, { data: sugg }] = await Promise.all([
-    supabase.from("sources").select("*").order("company_name"),
+    supabase.from("my_sources").select("*").order("company_name"),
     supabase.from("source_suggestions").select("*").eq("status", "new").order("job_count", { ascending: false }),
   ]);
   if (error) throw new Error(error.message);
@@ -27,7 +27,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   const counts = await Promise.all(
     sources.map(async (s) => {
       const { count } = await supabase
-        .from("jobs")
+        .from("my_jobs")
         .select("id", { count: "exact", head: true })
         .eq("source_id", s.id)
         .not("status", "in", "(closed,filtered)");

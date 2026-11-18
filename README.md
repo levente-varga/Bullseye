@@ -28,17 +28,20 @@ Every 15 min (Supabase cron → GitHub Actions): worker tick → runs what the s
 
 Your personal data (CV, profile, answers) lives only in the database. Nothing personal is committed to this repo.
 
+**Friends.** One Bullseye can serve a few people. The admin invites them from the **Members** page. Each person has their own sources, criteria, CV, Inbox, Pipeline and Report, and nobody sees anyone else's. Postings and job boards are shared behind the scenes, so a board two people follow is fetched once. Scoring stays per person, against their own CV. The admin pays for everyone's AI scoring, within per-person spend caps and a cap across everyone. The admin also sets the schedule and the model.
+
 ## Setup
 
 ### 1. Supabase
 1. Create a project at [supabase.com](https://supabase.com).
-2. **SQL Editor** → paste and run [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql).
+2. Apply the migrations in [`supabase/migrations`](supabase/migrations) in order: `supabase link` then `supabase db push`, or paste each file into the SQL Editor.
 3. **Authentication → Users → Add user**: create your login (email + password, tick *Auto confirm*).
 4. Allow that email to see the data. In the SQL Editor:
    ```sql
    insert into allowed_users (email) values ('you@example.com');
    ```
 5. **Authentication → Sign In / Providers → turn off "Allow new users to sign up"**, so nobody else can register.
+   Then run `select backfill_multiuser();` once in the SQL Editor: the first allowed email becomes the admin member. Everyone after that is invited from the Members page. The worker creates their account and emails the link, so `APP_URL` and `RESEND_API_KEY` must be set for it.
 6. **Project Settings → API**: copy the URL, the `anon` key and the `service_role` key.
 
 ### 2. Local
