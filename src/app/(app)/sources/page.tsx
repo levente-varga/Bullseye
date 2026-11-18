@@ -56,7 +56,6 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {unchecked > 0 && <span className="inline-flex items-center gap-1.5"><Dot tone="warn" /><span className="mono text-[var(--fg)]">{unchecked}</span> not checked yet</span>}
             {failing > 0 && <span className="inline-flex items-center gap-1.5"><Dot tone="bad" /><span className="mono text-[var(--fg)]">{failing}</span> failing</span>}
             {paused > 0 && <span className="inline-flex items-center gap-1.5"><Dot /><span className="mono text-[var(--fg)]">{paused}</span> paused</span>}
-            <span className="faint">A posting found in two places is stored once; the company&apos;s own board wins.</span>
           </span>
         }
       />
@@ -185,8 +184,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {custom.length > 0 && (
               <p className="faint mt-3 text-[12px] leading-relaxed">
                 <span className="eyebrow mr-2">Aggregator only</span>
-                {custom.map((s) => `${s.company_name} (${s.job_count})`).join(" · ")}. These use custom career sites with
-                no adapter; their jobs still arrive through the aggregator.
+                {custom.map((s) => `${s.company_name} (${s.job_count})`).join(" · ")}
               </p>
             )}
           </section>
@@ -252,9 +250,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
               <summary className="faint cursor-pointer">How does this work?</summary>
               <p className="muted mt-2 leading-relaxed">
-                Companies publish their jobs through a job system (an ATS). Bullseye reads {Object.values(ATS_INFO).filter((i) => !i.aggregator).length} of them. With{" "}
-                <b>Auto-detect</b>, paste the company&apos;s careers page or any of its job postings; Bullseye finds the
-                system and the board itself. If it can&apos;t, pick the type by hand and enter the board:
+                With <b>Auto-detect</b>, paste a careers page or any job posting. Otherwise pick the type and enter:
               </p>
               <ul className="muted mt-2 grid gap-1 sm:grid-cols-2">
                 {(Object.keys(ATS_INFO) as Ats[]).map((a) => (

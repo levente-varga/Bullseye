@@ -47,8 +47,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         meta={
           <>
             <span className="mono text-[var(--fg)]">{above}</span> above your threshold of{" "}
-            <span className="mono">{threshold}</span> · <span className="mono">{scoredCount ?? 0}</span> scored and
-            waiting · approve or skip each one, and your skip reasons tune the scorer
+            <span className="mono">{threshold}</span> · <span className="mono">{scoredCount ?? 0}</span> scored
           </>
         }
         actions={
@@ -73,14 +72,13 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         </div>
         {jobs.length === 0 ? (
           view === "skipped" ? (
-            <Empty>Nothing skipped. Listings you skip here or drop from the Pipeline show up here, ready to restore.</Empty>
+            <Empty>Nothing skipped.</Empty>
           ) : (
             <Empty>
-              Nothing waiting. New listings arrive with the next run.{" "}
+              Nothing waiting.{" "}
               <Link href="/sources" className="link">
                 Add sources
-              </Link>{" "}
-              if you haven&apos;t yet.
+              </Link>
             </Empty>
           )
         ) : (
