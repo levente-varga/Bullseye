@@ -62,8 +62,14 @@ export async function describeFromPage(url: string): Promise<string> {
     }
   }
 
-  // Fallback: visible text of the main content.
-  const main = html.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? html.match(/<body[\s\S]*?<\/body>/i)?.[0] ?? html;
+  // A block marked as the job description (common on hand-built and Webflow sites),
+  // which skips banners and navigation; else the main content.
+  const block = innerDiv(html, /<div[^>]+class="[^"]*\bjob-description\b[^"]*"[^>]*>/i);
+  const main =
+    (block && htmlToText(block).length >= THIN_THRESHOLD ? block : null) ??
+    html.match(/<main[\s\S]*?<\/main>/i)?.[0] ??
+    html.match(/<body[\s\S]*?<\/body>/i)?.[0] ??
+    html;
   const text = htmlToText(
     main
       .replace(/<(script|style|noscript|svg|nav|header|footer|form)[\s\S]*?<\/\1>/gi, " ")
@@ -75,6 +81,21 @@ export async function describeFromPage(url: string): Promise<string> {
     .join("\n");
   if (text.length < 2000 && CLOSED_RE.test(text)) throw new PostingClosedError(`closed: ${url}`);
   return text.slice(0, MAX);
+}
+
+/** The inner HTML of the first <div> whose opening tag matches `open`, honoring nested divs. */
+function innerDiv(html: string, open: RegExp): string | null {
+  const m = open.exec(html);
+  if (!m) return null;
+  const start = m.index + m[0].length;
+  const tag = /<(\/?)div\b[^>]*>/gi;
+  tag.lastIndex = start;
+  let depth = 1;
+  for (let t = tag.exec(html); t; t = tag.exec(html)) {
+    depth += t[1] ? -1 : 1;
+    if (depth === 0) return html.slice(start, t.index);
+  }
+  return null;
 }
 
 type Json = null | string | number | boolean | Json[] | { [k: string]: Json };

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
-import { JOBTECH_DEFAULT_QUERY, workdayFromUrl } from "@/lib/ats";
+import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, workdayFromUrl } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
@@ -112,6 +112,8 @@ export async function saveCriteria(form: FormData) {
             ? str(form, "scoring_model")
             : DEFAULT_SCORING_MODEL,
           score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
           followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
           digest_email: str(form, "digest_email"),
           ...scheduleFields(form),
@@ -221,14 +223,27 @@ export async function addExcludeKeyword(form: FormData) {
   revalidatePath("/criteria");
 }
 
+/** A dollar amount from a form field: non-negative, two decimals; the fallback when empty or invalid. */
+function money(raw: string, fallback: number): number {
+  const n = Number(raw);
+  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : fallback;
+}
+
 // --- Sources ----------------------------------------------------------------
 
 /** Turns what the user typed (a URL or a bare value) into the slug each source type expects. */
 function normalizeSlug(ats: Ats, input: string): string {
   const raw = input.trim();
-  if (ats === "swedengamejobs") return "swedengamejobs.com";
-  // JobTech: search parameters (as in a jobsearch.api.jobtechdev.se URL); empty means the default search.
+  const fixed = ATS_INFO[ats].fixedSlug;
+  if (fixed) return fixed;
+  // JobTech and Himalayas: search parameters (bare, or from a URL); empty means the default search.
   if (ats === "jobtech") return raw.replace(/^.*\?/, "").trim() || JOBTECH_DEFAULT_QUERY;
+  if (ats === "himalayas") return raw.replace(/^.*\?/, "").trim() || HIMALAYAS_DEFAULT_QUERY;
+  // We Work Remotely: a category (bare, or from a category URL or feed), or "all".
+  if (ats === "weworkremotely") {
+    const m = raw.match(/categories\/([a-z0-9-]+)/i);
+    return (m ? m[1] : raw.replace(/\.rss$/, "")).toLowerCase() || WWR_DEFAULT_CATEGORY;
+  }
   const host = raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
   if (ats === "teamtailor") return host; // e.g. career.paradoxplaza.com
   // Career site hosts; a bare company name gets the default domain.
@@ -270,7 +285,7 @@ export async function addSource(form: FormData) {
     ats = chosen as Ats;
     slug = normalizeSlug(ats, str(form, "slug"));
     if (!slug) back({ error: "Enter the board, domain or URL." });
-    name ||= ats === "swedengamejobs" ? "Sweden Game Jobs" : ats === "jobtech" ? "Platsbanken (JobTech)" : slug;
+    name ||= ATS_INFO[ats].defaultName ?? slug;
   }
 
   const { error } = await supabase.from("sources").insert({
