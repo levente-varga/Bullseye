@@ -230,4 +230,10 @@ $$;
 revoke execute on function backfill_multiuser() from public, anon, authenticated;
 grant execute on function backfill_multiuser() to service_role;
 
-select backfill_multiuser();
+-- Only on an existing single-user install (a fresh one has nobody to backfill).
+do $$
+begin
+  if exists (select 1 from allowed_users a join auth.users u on lower(u.email) = lower(a.email)) then
+    perform backfill_multiuser();
+  end if;
+end $$;
