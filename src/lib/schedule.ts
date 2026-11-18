@@ -2,13 +2,13 @@
  * The run schedule, set on the Criteria page. GitHub Actions wakes the worker
  * every 15 minutes ("tick"); these functions decide what is due at that moment.
  */
-import type { Criteria } from "./types";
+import type { Settings } from "./types";
 
 const MIN = 60_000;
 /** Ticks drift by a few minutes; treat an interval as elapsed slightly early. */
 const TOLERANCE = 5 * MIN;
 
-type Schedule = Pick<Criteria, "watch_interval_minutes" | "daily_time" | "daily_enabled" | "timezone">;
+type Schedule = Pick<Settings, "watch_interval_minutes" | "daily_time" | "daily_enabled" | "timezone">;
 
 /** Calendar date ("YYYY-MM-DD") of `t` in `tz`. */
 export function localDate(t: number, tz: string): string {

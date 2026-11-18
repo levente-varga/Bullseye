@@ -7,13 +7,13 @@ export type NavCountValues = { inbox: number; pipeline: number; sources: string 
 
 /** The numbers next to Inbox, Pipeline and Sources in the sidebar. */
 export async function getNavCounts(supabase: Db): Promise<NavCountValues> {
-  const { data: criteria } = await supabase.from("criteria").select("score_threshold").eq("id", 1).single();
+  const { data: criteria } = await supabase.from("criteria").select("score_threshold").single();
   const threshold = criteria?.score_threshold ?? 60;
   const [inbox, pipeline, suggestions, enabled] = await Promise.all([
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
-    supabase.from("jobs").select("id", { count: "exact", head: true }).in("status", PIPELINE_STATUSES.filter((s) => s !== "rejected")),
+    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
+    supabase.from("my_jobs").select("id", { count: "exact", head: true }).in("status", PIPELINE_STATUSES.filter((s) => s !== "rejected")),
     supabase.from("source_suggestions").select("id", { count: "exact", head: true }).eq("status", "new").neq("ats", "custom"),
-    supabase.from("sources").select("id", { count: "exact", head: true }).eq("enabled", true),
+    supabase.from("my_sources").select("id", { count: "exact", head: true }).eq("enabled", true),
   ]);
   const sources = enabled.count ?? 0;
   return {

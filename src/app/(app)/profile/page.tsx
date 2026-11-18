@@ -10,7 +10,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
   const sp = await searchParams;
   const supabase = await createClient();
   const [{ data: p, error }, { data: answers }] = await Promise.all([
-    supabase.from("profile").select("*").eq("id", 1).single(),
+    supabase.from("profile").select("*").single(),
     supabase.from("answers").select("*").order("question"),
   ]);
   if (error) throw new Error(error.message);

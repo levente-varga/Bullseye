@@ -75,3 +75,20 @@ export async function sendEmail(subject: string, html: string, to?: string): Pro
   });
   if (error) throw new Error(`Resend: ${error.message}`);
 }
+
+/** The invite (or password reset) email: a link that signs the person in and asks for a password. */
+export function renderInvite(link: string, reset = false): { subject: string; html: string } {
+  return {
+    subject: reset ? "Set your Bullseye password" : "You're invited to Bullseye",
+    html: wrap(`<h1 style="font-size:20px">${reset ? "Set your password" : "You're invited to Bullseye"}</h1>
+      <p style="color:#333">${
+        reset
+          ? "Use the link below to set a new password."
+          : "Bullseye finds job listings that fit you and scores them against your CV. Use the link below to set a password and get started."
+      }</p>
+      <p style="margin:20px 0"><a href="${esc(link)}" style="background:#9e4c03;color:#fff;padding:10px 16px;text-decoration:none;font-weight:600">${
+        reset ? "Set password" : "Accept the invite"
+      }</a></p>
+      <p style="color:#777;font-size:13px">The link works once and expires in 24 hours.</p>`),
+  };
+}

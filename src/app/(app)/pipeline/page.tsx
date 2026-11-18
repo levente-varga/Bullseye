@@ -34,8 +34,8 @@ const NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
 export default async function PipelinePage() {
   const supabase = await createClient();
   const [{ data, error }, { data: criteria }] = await Promise.all([
-    supabase.from("jobs").select(JOB_LIST_COLUMNS).in("status", PIPELINE_STATUSES).order("status_changed_at", { ascending: false }),
-    supabase.from("criteria").select("followup_days").eq("id", 1).single(),
+    supabase.from("my_jobs").select(JOB_LIST_COLUMNS).in("status", PIPELINE_STATUSES).order("status_changed_at", { ascending: false }),
+    supabase.from("criteria").select("followup_days").single(),
   ]);
   if (error) throw new Error(error.message);
   const jobs = data as unknown as Job[];

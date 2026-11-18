@@ -55,6 +55,13 @@ export const IconUser = (p: SVGProps<SVGSVGElement>) => (
     <path d="M2.5 14c.6-2.8 2.8-4.25 5.5-4.25S12.9 11.2 13.5 14" />
   </svg>
 );
+export const IconUsers = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="6" cy="5.5" r="2.5" />
+    <path d="M1.5 14c.5-2.6 2.3-4 4.5-4s4 1.4 4.5 4" />
+    <path d="M10.5 3.2a2.5 2.5 0 0 1 0 4.6M12 10.3c1.3.5 2.2 1.7 2.5 3.7" />
+  </svg>
+);
 export const IconChart = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M2 2v12h12" />

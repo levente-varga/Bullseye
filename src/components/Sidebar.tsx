@@ -8,10 +8,11 @@ import { Dot } from "./ui";
 /** Sidebar contents that need data: nav counts, watchlist, last-run status. */
 export async function SidebarData() {
   const supabase = await createClient();
-  const [counts, sources, run] = await Promise.all([
+  const [counts, sources, run, member] = await Promise.all([
     getNavCounts(supabase),
-    supabase.from("sources").select("id, company_name, watchlist, enabled, last_error").order("company_name"),
+    supabase.from("my_sources").select("id, company_name, watchlist, enabled, last_error").order("company_name"),
     supabase.from("runs").select("kind, started_at, finished_at, error").order("started_at", { ascending: false }).limit(1),
+    supabase.rpc("is_admin"),
   ]);
 
   const list = sources.data ?? [];
@@ -22,7 +23,7 @@ export async function SidebarData() {
 
   return (
     <>
-      <SidebarNav counts={counts} />
+      <SidebarNav counts={counts} admin={member.data === true} />
 
       <div className="rule mt-5 pt-4">
         <div className="eyebrow mb-2 flex items-center justify-between px-2">

@@ -186,27 +186,42 @@ export interface Profile {
   cv_uploaded_at: string | null;
 }
 
+/** One person's search criteria (the shared schedule and model are in Settings). */
 export interface Criteria {
+  user_id: string;
   roles: string[];
   locations: string[];
   remote_ok: boolean;
   include_keywords: string[];
   exclude_keywords: string[];
   preferences: string;
-  scoring_model: ScoringModel;
   score_threshold: number;
   followup_days: number;
   digest_email: string;
+}
+
+/** App-wide settings, admin-only: the shared schedule, the scoring model, a global spend cap. */
+export interface Settings {
   /** Watchlist check interval; 0 = off. */
   watch_interval_minutes: number;
-  /** Local time ("HH:MM", in `timezone`) of the daily full search + digest. */
+  /** Local time ("HH:MM", in `timezone`) of the daily full search + digests. */
   daily_time: string;
   daily_enabled: boolean;
   /** IANA timezone, e.g. "Europe/Budapest". */
   timezone: string;
-  /** AI scoring spend caps in USD: per run, and per rolling 24 hours. 0 = no scoring. */
+  scoring_model: ScoringModel;
+  /** AI spend across everyone per rolling 24 hours (USD): a backstop over the per-person caps. */
+  max_total_daily_cost_usd: number;
+}
+
+/** Someone who may use the app. Their AI spend caps (USD; 0 = no scoring) are set by the admin. */
+export interface Member {
+  user_id: string;
+  email: string;
+  is_admin: boolean;
   max_run_cost_usd: number;
   max_daily_cost_usd: number;
+  created_at: string;
 }
 
 export const WATCH_INTERVALS: { minutes: number; label: string }[] = [
@@ -291,7 +306,7 @@ export interface JobDetails {
 
 export interface Run {
   id: string;
-  kind: "watchlist" | "full" | "digest";
+  kind: "watchlist" | "full" | "score" | "digest";
   started_at: string;
   finished_at: string | null;
   stats: Record<string, number>;
