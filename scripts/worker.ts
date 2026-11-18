@@ -4,6 +4,7 @@
  *   tick       every 15 minutes: run whatever the schedule (Criteria page) says is due
  *   watchlist  poll watchlist companies only; email an alert for strong new matches
  *   full       poll every enabled source; score new listings
+ *   score      describe and score jobs already waiting (after a re-evaluation); no fetching
  *   digest     send the daily email: new matches, follow-ups due, status changes
  */
 import "./env";
@@ -19,7 +20,12 @@ import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from 
 import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
 import { ATS_INFO, type Criteria, type FetchedJob, type Job, type Profile, type Source } from "../src/lib/types";
 
-type Mode = "watchlist" | "full" | "digest";
+/**
+ * watchlist / full: fetch sources, then describe and score what's new.
+ * score: no fetching; describe and score jobs waiting from earlier (re-evaluation, overflow).
+ * digest: the daily email.
+ */
+type Mode = "watchlist" | "full" | "score" | "digest";
 
 const MAX_SCORE_PER_RUN = Number(process.env.MAX_SCORE_PER_RUN || 60);
 const SCORE_CONCURRENCY = 4;
@@ -318,6 +324,57 @@ async function discoverSources(jobs: FetchedJob[]) {
 // Scoring
 // ---------------------------------------------------------------------------
 
+/**
+ * Fetches descriptions for waiting jobs that never got one: jobs a re-evaluation
+ * moved back from "filtered", which were filtered before their description was
+ * fetched. Then applies the full filter again (keywords, real Workday location).
+ */
+async function describePending(sources: Source[], criteria: Criteria) {
+  const byId = new Map(sources.map((s) => [s.id, s]));
+  const pending = await must<Job[]>(
+    db
+      .from("jobs")
+      .select("*")
+      .eq("status", "new")
+      .eq("description", "")
+      .eq("thin", false)
+      .in("source_id", [...byId.keys()])
+      .limit(MAX_SCORE_PER_RUN * 2),
+  );
+  let described = 0;
+  let filtered = 0;
+  await pool(pending, DESCRIBE_CONCURRENCY, async (job) => {
+    const source = byId.get(job.source_id)!;
+    let found: { text: string; location?: string } = { text: "" };
+    try {
+      found = await describe(source, job);
+      described++;
+    } catch (e) {
+      if (e instanceof PostingClosedError) {
+        await must(db.from("jobs").update({ status: "closed" }).eq("id", job.id));
+        return;
+      }
+      console.warn(`  no description for ${job.title} @ ${job.company}: ${e instanceof Error ? e.message : e}`);
+    }
+    const updated = { ...job, description: found.text, location: found.location ?? job.location };
+    const thin = updated.description.length < THIN_THRESHOLD;
+    const reason = thin ? null : hardFilter(updated, criteria);
+    if (reason) filtered++;
+    await must(
+      db
+        .from("jobs")
+        .update({
+          description: updated.description,
+          location: updated.location,
+          thin,
+          ...(reason ? { status: "filtered", filter_reason: reason } : {}),
+        })
+        .eq("id", job.id),
+    );
+  });
+  return pending.length ? { described_later: described, filtered_later: filtered } : {};
+}
+
 async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof loadContext>>) {
   const pending = await must<Job[]>(
     db
@@ -414,6 +471,7 @@ async function runFetch(mode: "watchlist" | "full") {
     }
     for (const [k, v] of Object.entries(st)) totals[k] = (totals[k] ?? 0) + v;
   }
+  Object.assign(totals, await describePending(sources, ctx.criteria));
   Object.assign(totals, await scorePending(sources.map((s) => s.id), ctx));
 
   if (mode === "watchlist") {
@@ -435,6 +493,16 @@ async function runFetch(mode: "watchlist" | "full") {
     totals.alerted = strong.length;
   }
   return totals;
+}
+
+/** Describes and scores jobs already waiting, across all sources, without fetching anything. */
+async function runScore() {
+  const ctx = await loadContext();
+  const sources = await must<Source[]>(db.from("sources").select("*"));
+  return {
+    ...(await describePending(sources, ctx.criteria)),
+    ...(await scorePending(sources.map((s) => s.id), ctx)),
+  };
 }
 
 async function runDigest() {
@@ -483,7 +551,7 @@ async function runDigest() {
 async function record(mode: Mode) {
   const run = await must<{ id: string }>(db.from("runs").insert({ kind: mode }).select("id").single());
   try {
-    const stats = mode === "digest" ? await runDigest() : await runFetch(mode);
+    const stats = mode === "digest" ? await runDigest() : mode === "score" ? await runScore() : await runFetch(mode);
     await db.from("runs").update({ finished_at: new Date().toISOString(), stats }).eq("id", run.id);
     console.log(`${mode} done:`, stats);
   } catch (e) {
@@ -499,6 +567,22 @@ async function lastStarted(kind: Mode): Promise<number | null> {
     db.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1),
   );
   return rows[0] ? Date.parse(rows[0].started_at) : null;
+}
+
+/**
+ * Jobs waiting to be scored (after a re-evaluation, or more than one run's cap) are
+ * scored at the next quiet tick, 60 at a time. If the last scoring run scored nothing
+ * (e.g. the API key stopped working), it waits 6 hours instead of retrying every tick.
+ */
+async function scoringDue(): Promise<boolean> {
+  const { count } = await db.from("jobs").select("id", { count: "exact", head: true }).eq("status", "new");
+  if (!count) return false;
+  const [last] = await must<{ started_at: string; stats: Record<string, number>; error: string | null }[]>(
+    db.from("runs").select("started_at, stats, error").eq("kind", "score").order("started_at", { ascending: false }).limit(1),
+  );
+  if (!last) return true;
+  const stuck = Boolean(last.error) || !(last.stats?.scored > 0);
+  return !stuck || Date.now() - Date.parse(last.started_at) > 6 * 3_600_000;
 }
 
 /** Called every 15 minutes by GitHub Actions: runs whatever the schedule on the Criteria page says is due. */
@@ -517,14 +601,16 @@ async function tick() {
     const { count } = await db.from("sources").select("id", { count: "exact", head: true }).eq("watchlist", true).eq("enabled", true);
     if (count) await record("watchlist");
     else console.log("No watched sources; nothing to check.");
+  } else if (await scoringDue()) {
+    await record("score");
   }
 }
 
 async function main() {
   const mode = process.argv[2];
   if (mode === "tick") return tick();
-  if (!["watchlist", "full", "digest"].includes(mode)) {
-    console.error("Usage: worker <tick|watchlist|full|digest>");
+  if (!["watchlist", "full", "score", "digest"].includes(mode)) {
+    console.error("Usage: worker <tick|watchlist|full|score|digest>");
     process.exit(2);
   }
   await record(mode as Mode);
