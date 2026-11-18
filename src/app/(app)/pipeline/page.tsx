@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/SubmitButton";
 import { IconExternal } from "@/components/icons";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
 import { agoText, nowMs } from "@/lib/time";
@@ -98,16 +99,16 @@ export default async function PipelinePage() {
                         {status === "applied" && (
                           <form action={markFollowedUp}>
                             <input type="hidden" name="id" value={job.id} />
-                            <button className="btn">Followed up</button>
+                            <SubmitButton className="btn">Followed up</SubmitButton>
                           </form>
                         )}
                         {(NEXT[status] ?? []).map((to) => (
                           <form key={to} action={setStatus}>
                             <input type="hidden" name="id" value={job.id} />
                             <input type="hidden" name="status" value={to} />
-                            <button className={to === "rejected" || to === "skipped" ? "btn" : "btn-primary"}>
+                            <SubmitButton className={to === "rejected" || to === "skipped" ? "btn" : "btn-primary"}>
                               {to === "skipped" ? "Drop" : `→ ${LABEL[to]}`}
-                            </button>
+                            </SubmitButton>
                           </form>
                         ))}
                       </div>

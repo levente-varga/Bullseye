@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/SubmitButton";
 import { Dot, Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
 import type { Profile } from "@/lib/types";
@@ -63,7 +64,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
             </div>
           </Panel>
 
-          <button className="btn-primary">Save details & links</button>
+          <SubmitButton className="btn-primary" done="Saved">Save details & links</SubmitButton>
         </form>
 
         <section id="cv" className="scroll-mt-6">
@@ -89,7 +90,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                       </a>
                     )}
                     <form action={deleteCv}>
-                      <button className="btn btn-danger">Remove file</button>
+                      <SubmitButton className="btn btn-danger">Remove file</SubmitButton>
                     </form>
                   </span>
                 </div>
@@ -102,7 +103,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                   required
                   className="text-[13px] file:mr-3 file:cursor-pointer file:border file:border-[var(--border-strong)] file:bg-[var(--surface)] file:px-2.5 file:py-1 file:text-[13px] file:text-[var(--fg)]"
                 />
-                <button className="btn-primary ml-auto">{profile.cv_file_path ? "Replace PDF" : "Upload PDF"}</button>
+                <SubmitButton className="btn-primary ml-auto">{profile.cv_file_path ? "Replace PDF" : "Upload PDF"}</SubmitButton>
                 <p className="hint w-full">Uploading extracts the text into the box below, replacing what&apos;s there.</p>
               </form>
             </Panel>
@@ -119,7 +120,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                   />
                 </div>
                 <div className="border-t border-[var(--border)] px-3 py-2.5">
-                  <button className="btn-primary">Save CV text</button>
+                  <SubmitButton className="btn-primary" done="Saved">Save CV text</SubmitButton>
                 </div>
               </Panel>
             </form>
@@ -147,8 +148,8 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                         <textarea name="answer" defaultValue={a.answer} rows={2} className="input" />
                       </div>
                       <div className="flex gap-1.5 sm:flex-col">
-                        <button className="btn">Save</button>
-                        <button formAction={deleteAnswer} className="btn btn-danger">Delete</button>
+                        <SubmitButton className="btn" done="Saved">Save</SubmitButton>
+                        <SubmitButton formAction={deleteAnswer} className="btn btn-danger">Delete</SubmitButton>
                       </div>
                     </form>
                   </li>
@@ -162,7 +163,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                 <textarea name="answer" required rows={2} className="input" placeholder="Your answer" />
               </div>
               <div>
-                <button className="btn-primary">Add</button>
+                <SubmitButton className="btn-primary" done="Added">Add</SubmitButton>
               </div>
             </form>
           </Panel>

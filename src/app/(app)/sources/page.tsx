@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
@@ -100,7 +101,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                             <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
                             <form action={deleteSource}>
                               <input type="hidden" name="id" value={s.id} />
-                              <button className="btn btn-danger">Remove</button>
+                              <SubmitButton className="btn btn-danger">Remove</SubmitButton>
                             </form>
                           </div>
                         </td>
@@ -142,11 +143,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                           <div className="flex justify-end gap-1.5">
                             <form action={acceptSuggestion}>
                               <input type="hidden" name="id" value={s.id} />
-                              <button className="btn-primary">Add</button>
+                              <SubmitButton className="btn-primary">Add</SubmitButton>
                             </form>
                             <form action={dismissSuggestion}>
                               <input type="hidden" name="id" value={s.id} />
-                              <button className="btn">Dismiss</button>
+                              <SubmitButton className="btn">Dismiss</SubmitButton>
                             </form>
                           </div>
                         </td>
@@ -207,7 +208,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 <input type="checkbox" name="watchlist" />
                 <span className="muted">Watchlist (hourly + instant email)</span>
               </label>
-              <button className="btn-primary ml-auto">Add source</button>
+              <SubmitButton className="btn-primary ml-auto">Add source</SubmitButton>
             </div>
             <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
               <summary className="faint cursor-pointer">How does this work?</summary>
@@ -239,7 +240,7 @@ function Toggle(props: { id: string; field: string; on: boolean; onLabel: string
       <input type="hidden" name="id" value={props.id} />
       <input type="hidden" name="field" value={props.field} />
       <input type="hidden" name="value" value={String(!props.on)} />
-      <button className="btn">{props.on ? props.onLabel : props.offLabel}</button>
+      <SubmitButton className="btn">{props.on ? props.onLabel : props.offLabel}</SubmitButton>
     </form>
   );
 }
