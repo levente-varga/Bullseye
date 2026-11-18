@@ -5,8 +5,8 @@ import { Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
-import { DEFAULT_CAPS, type Member } from "@/lib/types";
-import { cancelInvite, inviteMember, removeMember, updateMemberCaps } from "../actions";
+import type { Member, Settings } from "@/lib/types";
+import { cancelInvite, inviteMember, removeMember, saveMemberDefaults, updateMemberCaps } from "../actions";
 
 /** Admin only: invite friends, set their AI spend caps, remove them. */
 export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
@@ -16,13 +16,15 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   if (!me.isAdmin) notFound();
 
   const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
-  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }] = await Promise.all([
+  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }, { data: st }] = await Promise.all([
     supabase.from("members").select("*").order("created_at"),
     supabase.from("invites").select("*").order("invited_at", { ascending: false }),
     // Everyone's spend in the last 24 hours (admin sees all run shares).
     supabase.from("run_users").select("user_id, stats, runs!inner(started_at)").gte("runs.started_at", dayAgo),
     supabase.from("subscriptions").select("user_id"),
+    supabase.from("settings").select("*").single(),
   ]);
+  const settings = st as Settings;
   const members = (m ?? []) as Member[];
   const memberEmails = new Set(members.map((x) => x.email.toLowerCase()));
   // An invite is done once its person is a member and has signed in (or it failed).
@@ -64,10 +66,20 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             </SubmitButton>
           </form>
           <p className="faint mt-2 text-[12px] leading-relaxed">
-            They get an email with a link to set a password. New members start with spend caps of{" "}
-            {formatUsd(DEFAULT_CAPS.run)} per run and {formatUsd(DEFAULT_CAPS.daily)} per 24 hours (raise them below), no
-            sources and an empty profile.
+            They get an email with a link to set a password. They start with no sources, an empty profile, and the
+            default spend caps below.
           </p>
+          <form action={saveMemberDefaults} className="panel mt-3 flex flex-wrap items-end gap-3 p-3">
+            <div className="w-full text-[13px]">
+              Defaults for new members
+              <span className="hint">
+                The caps someone starts with when they accept an invite. Existing members keep theirs; change them below.
+              </span>
+            </div>
+            <Money name="default_run_cost_usd" label="Per run" value={settings.default_run_cost_usd} />
+            <Money name="default_daily_cost_usd" label="Per 24 hours" value={settings.default_daily_cost_usd} />
+            <SubmitButton className="btn" done="Saved">Save defaults</SubmitButton>
+          </form>
           {invites.length > 0 && (
             <Panel title="Pending invites" aside={String(invites.length)}>
               <ul className="divide">
