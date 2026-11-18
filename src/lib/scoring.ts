@@ -12,8 +12,8 @@ import { SCORING_MODELS, type Criteria, type FetchedJob, type Profile, type Scor
 export const ScoreSchema = z.object({
   score: z.number().int().min(0).max(100),
   summary: z.string().describe("One or two sentences on why this score."),
-  pros: z.array(z.string()).describe("Up to 4 short reasons this is a good fit."),
-  cons: z.array(z.string()).describe("Up to 4 short concerns or mismatches."),
+  pros: z.array(z.string()).describe("Short reasons this is a good fit: only the ones that matter, however many that is (can be none). Never pad."),
+  cons: z.array(z.string()).describe("Short concerns or mismatches: only the real ones, however many that is (can be none). Never pad."),
 });
 export type Score = z.infer<typeof ScoreSchema>;
 
@@ -48,6 +48,7 @@ Scale: 85+ = apply right away; 60-84 = worth a look; 40-59 = weak fit; below 40 
 Weigh role and seniority match, skills overlap with the CV, location/remote fit, and the candidate's stated preferences. Treat the candidate's past decisions as the strongest signal of their taste: if they repeatedly skipped jobs for a reason, penalize listings with that trait.
 A remote role restricted to a country or region the candidate is not in is a location mismatch, not a remote fit.
 Be concrete in pros and cons (name the skill, the location, the seniority gap). Do not invent facts that are not in the listing.
+List only the pros and cons that actually bear on the decision. Their number should follow the listing: a clear match may have one con or none, a thin listing may have one pro. Do not aim for a fixed or balanced count, and do not restate one point in different words to fill the list.
 
 <criteria>
 Target roles: ${list(criteria.roles)}

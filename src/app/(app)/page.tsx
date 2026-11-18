@@ -118,7 +118,7 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
       <ExpandableJobRow
         id={job.id}
         url={job.url}
-        side={skipped ? undefined : <SkipForm id={job.id} />}
+        side={skipped ? undefined : <DecisionPanel id={job.id} />}
         summaryClassName={`grid cursor-pointer list-none grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[28px_72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
         summary={
           <>
@@ -126,7 +126,7 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
           <ScoreMeter score={job.score} width="w-[72px]" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="font-medium">{job.title}</span>
+              <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
               {job.remote && <Pill tone="accent">Remote</Pill>}
               {job.thin && <Pill tone="warn">Limited info</Pill>}
             </div>
@@ -140,10 +140,12 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
           </div>
           <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(skipped ? job.status_changed_at : job.first_seen_at)}</span>
           <div className="col-start-3 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
-            <form action={skipped ? restoreToInbox : approveJob}>
-              <input type="hidden" name="id" value={job.id} />
-              <SubmitButton className={skipped ? "btn" : "btn-primary"}>{skipped ? "Restore" : "Approve"}</SubmitButton>
-            </form>
+            {skipped && (
+              <form action={restoreToInbox}>
+                <input type="hidden" name="id" value={job.id} />
+                <SubmitButton className="btn">Restore</SubmitButton>
+              </form>
+            )}
             <span className="btn">
               <span className="group-open:hidden">Details</span>
               <span className="hidden group-open:inline">Close</span>
@@ -153,5 +155,21 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
         }
       />
     </li>
+  );
+}
+
+/** The opened row's right column: approve, or skip with reasons. Approving needs the row open, so the reasoning gets read first. */
+function DecisionPanel({ id }: { id: string }) {
+  return (
+    <div className="space-y-4">
+      <form action={approveJob} className="space-y-2.5">
+        <input type="hidden" name="id" value={id} />
+        <div className="eyebrow">Worth applying?</div>
+        <SubmitButton className="btn-primary">Approve</SubmitButton>
+      </form>
+      <div className="border-t border-[var(--border)] pt-4">
+        <SkipForm id={id} />
+      </div>
+    </div>
   );
 }
