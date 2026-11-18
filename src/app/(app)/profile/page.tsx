@@ -56,7 +56,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
               <Field name="website_url" label="Portfolio / website" value={profile.website_url} placeholder="leventevarga.com" mono />
             </div>
             <div className="border-t border-[var(--border)] p-3">
-              <label className="space-y-1">
+              <label className="field">
                 <span className="label">Other links</span>
                 <textarea name="links" defaultValue={profile.links.join("\n")} rows={2} className="input mono" placeholder="One per line" />
                 <span className="hint">Kept separate so application forms can be pre-filled field by field later.</span>
@@ -175,7 +175,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
 
 function Field(props: { name: string; label: string; value: string; type?: string; placeholder?: string; mono?: boolean }) {
   return (
-    <label className="space-y-1">
+    <label className="field">
       <span className="label">{props.label}</span>
       <input
         name={props.name}

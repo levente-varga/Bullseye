@@ -27,11 +27,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           <p className="faint mt-2 text-[12px]">Sign in to your job search.</p>
         </div>
         <div className="space-y-3 px-5 py-5">
-          <label className="space-y-1">
+          <label className="field">
             <span className="label">Email</span>
             <input name="email" type="email" required autoComplete="email" className="input" />
           </label>
-          <label className="space-y-1">
+          <label className="field">
             <span className="label">Password</span>
             <input name="password" type="password" required autoComplete="current-password" className="input" />
           </label>

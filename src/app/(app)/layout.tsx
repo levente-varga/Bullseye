@@ -18,8 +18,9 @@ function Wordmark() {
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar (desktop) */}
-      <aside className="sticky top-0 hidden h-screen w-[232px] shrink-0 flex-col border-r border-[var(--border)] px-3 py-5 md:flex">
+      {/* Sidebar (desktop). Fixed rather than sticky: Safari re-positions sticky elements while
+          scrolling and rounds the inner scroll area separately, so parts of it jittered by a pixel. */}
+      <aside className="fixed inset-y-0 left-0 z-10 hidden w-[232px] flex-col border-r border-[var(--border)] bg-[var(--bg)] px-3 py-5 md:flex">
         <div className="mb-6 px-2">
           <Wordmark />
         </div>
@@ -36,7 +37,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 md:pl-[232px]">
         {/* Top bar (mobile) */}
         <header className="border-b border-[var(--border)] px-4 pt-3 pb-2 md:hidden">
           <div className="mb-2 flex items-center justify-between">

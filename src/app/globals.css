@@ -205,6 +205,8 @@ input[type="radio"]:checked:hover {
   .input::placeholder { color: var(--faint); }
   .label { @apply block text-[12px] font-medium; color: var(--muted); }
   .hint { @apply block text-[12px]; color: var(--faint); }
+  /* A label above its input. Block-level, so the parent's spacing (space-y-*, gap) applies to it. */
+  .field { @apply grid gap-1.5; }
 
   .btn {
     @apply inline-flex cursor-pointer items-center justify-center gap-1.5 px-2.5 py-1 text-[13px] font-medium whitespace-nowrap;

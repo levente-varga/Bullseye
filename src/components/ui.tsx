@@ -27,12 +27,14 @@ export function SectionHeader(props: { title: string; count?: number | string; a
 
 /** A bordered panel; `title` adds a small uppercase header row. */
 export function Panel(props: { title?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string }) {
+  // `!= null`, not truthiness: a count of 0 is a real value (and `{0 && …}` would render a bare "0").
+  const hasAside = props.aside != null && props.aside !== false && props.aside !== "";
   return (
     <section className={`panel ${props.className ?? ""}`}>
-      {(props.title || props.aside) && (
+      {(props.title || hasAside) && (
         <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2">
           <span className="eyebrow">{props.title}</span>
-          {props.aside && <span className="mono faint text-[11px]">{props.aside}</span>}
+          {hasAside && <span className="mono faint text-[11px]">{props.aside}</span>}
         </div>
       )}
       {props.children}
