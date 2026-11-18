@@ -213,7 +213,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
               <summary className="faint cursor-pointer">How does this work?</summary>
               <p className="muted mt-2 leading-relaxed">
-                Companies publish their jobs through a job system (an ATS). Bullseye reads five of them. With{" "}
+                Companies publish their jobs through a job system (an ATS). Bullseye reads nine of them. With{" "}
                 <b>Auto-detect</b>, paste the company&apos;s careers page or any of its job postings; Bullseye finds the
                 system and the board itself. If it can&apos;t, pick the type by hand and enter the board:
               </p>

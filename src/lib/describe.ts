@@ -1,9 +1,9 @@
-import { USER_AGENT, fetchSmartRecruitersDescription, htmlToText } from "./ats";
+import { USER_AGENT, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
  * Finds a description for listings whose source doesn't include one
- * (SmartRecruiters lists, aggregator entries). Only runs for new listings
+ * (SmartRecruiters and Workday lists, aggregator entries). Only runs for new listings
  * that passed the title/location filters, so each posting is fetched once.
  */
 
@@ -17,14 +17,25 @@ export class PostingClosedError extends Error {}
 const CLOSED_RE =
   /(position|job|vacancy|role|posting)( is| has been)? (no longer|not) (available|active|open)|no longer accepting applications|this job (has )?(expired|closed)/i;
 
+/**
+ * The posting's text, plus its real location when the list didn't have it
+ * (Workday lists say "Best" or "3 Locations"; the detail gives "Best, Netherlands").
+ */
 export async function describe(
   source: Pick<Source, "ats" | "slug">,
   job: { external_id: string; url: string },
-): Promise<string> {
+): Promise<{ text: string; location?: string }> {
   if (source.ats === "smartrecruiters") {
-    return fetchSmartRecruitersDescription(source.slug, job.external_id);
+    return { text: await fetchSmartRecruitersDescription(source.slug, job.external_id) };
   }
-  return describeFromPage(job.url);
+  // Workday pages render in the browser, so the page itself has no text: use its API.
+  // Also for Workday links found on an aggregator.
+  const wd = source.ats === "workday" ? { slug: source.slug, path: job.external_id } : workdayFromUrl(job.url);
+  if (wd) {
+    const { text, location } = await fetchWorkdayPosting(wd.slug, wd.path);
+    return { text, location: location || undefined };
+  }
+  return { text: await describeFromPage(job.url) };
 }
 
 /** Fetches a posting page and extracts its text: schema.org JobPosting first, then the page body. */

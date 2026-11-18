@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
+import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { createClient } from "@/lib/supabase/server";
 import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, WATCH_INTERVALS, type Ats, type JobDetails, type JobStatus } from "@/lib/types";
@@ -145,12 +146,19 @@ export async function addExcludeKeyword(form: FormData) {
 function normalizeSlug(ats: Ats, input: string): string {
   const raw = input.trim();
   if (ats === "swedengamejobs") return "swedengamejobs.com";
-  if (ats === "teamtailor") {
-    // The career site's host, e.g. career.paradoxplaza.com
-    return raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
+  const host = raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
+  if (ats === "teamtailor") return host; // e.g. career.paradoxplaza.com
+  // Career site hosts; a bare company name gets the default domain.
+  if (ats === "personio") return host.includes(".") ? host : `${host}.jobs.personio.de`;
+  if (ats === "recruitee") return host.includes(".") ? host : `${host}.recruitee.com`;
+  if (ats === "workday") {
+    // "<tenant>.wd<N>.myworkdayjobs.com/<site>", from a careers site or posting URL.
+    const d = detectAts(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return d.ats === "workday" ? d.slug : "";
   }
-  // Board slug: the first path segment of a board URL, or the bare value.
-  const value = raw.replace(/^https?:\/\/[^/]+\//, "").split(/[/?#]/)[0];
+  // Board slug: the first path segment of a board URL (with or without https://), or the bare value.
+  const parts = raw.replace(/^https?:\/\//, "").split(/[?#]/)[0].split("/").filter(Boolean);
+  const value = (parts.length > 1 && parts[0].includes(".") ? parts[1] : parts[0]) ?? "";
   // SmartRecruiters company identifiers keep their case (e.g. Ubisoft2).
   return ats === "smartrecruiters" ? value : value.toLowerCase();
 }

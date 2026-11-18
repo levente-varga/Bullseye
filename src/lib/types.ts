@@ -1,4 +1,14 @@
-export type Ats = "greenhouse" | "lever" | "ashby" | "teamtailor" | "smartrecruiters" | "swedengamejobs";
+export type Ats =
+  | "greenhouse"
+  | "lever"
+  | "ashby"
+  | "teamtailor"
+  | "smartrecruiters"
+  | "personio"
+  | "recruitee"
+  | "workable"
+  | "workday"
+  | "swedengamejobs";
 
 /** How each source type is configured on the Sources page. */
 export const ATS_INFO: Record<Ats, { label: string; slugLabel: string; slugExample: string; aggregator?: boolean }> = {
@@ -7,6 +17,10 @@ export const ATS_INFO: Record<Ats, { label: string; slugLabel: string; slugExamp
   ashby: { label: "Ashby", slugLabel: "Board slug or URL", slugExample: "jobs.ashbyhq.com/voodoo" },
   teamtailor: { label: "Teamtailor", slugLabel: "Career site domain", slugExample: "career.paradoxplaza.com" },
   smartrecruiters: { label: "SmartRecruiters", slugLabel: "Company identifier or URL", slugExample: "jobs.smartrecruiters.com/Ubisoft2" },
+  personio: { label: "Personio", slugLabel: "Career site URL", slugExample: "personio.jobs.personio.de" },
+  recruitee: { label: "Recruitee", slugLabel: "Career site URL", slugExample: "bunq.recruitee.com" },
+  workable: { label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
+  workday: { label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
   swedengamejobs: { label: "Sweden Game Jobs (aggregator)", slugLabel: "—", slugExample: "swedengamejobs.com", aggregator: true },
 };
 
