@@ -92,11 +92,28 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
 type Existing = { id: string; source_id: string; dedupe_key: string; status: string; thin: boolean };
 
 /** Jobs from any source sharing one of these dedupe keys. */
+/**
+ * Keys travel in the request URL, which the API caps at ~16 KB. Batches are sized
+ * by length, not count: URL-based keys (aggregators like JobTech) can be 100+ chars.
+ */
+const KEY_BATCH_CHARS = 6000;
+
 async function findByKeys(keys: string[]): Promise<Map<string, Existing>> {
   const out = new Map<string, Existing>();
-  for (let i = 0; i < keys.length; i += 200) {
+  const batches: string[][] = [[]];
+  let size = 0;
+  for (const k of keys) {
+    const cost = encodeURIComponent(k).length + 3; // quotes and comma
+    if (size + cost > KEY_BATCH_CHARS && batches.at(-1)!.length) {
+      batches.push([]);
+      size = 0;
+    }
+    batches.at(-1)!.push(k);
+    size += cost;
+  }
+  for (const batch of batches.filter((b) => b.length)) {
     const rows = await must<Existing[]>(
-      db.from("jobs").select("id, source_id, dedupe_key, status, thin").in("dedupe_key", keys.slice(i, i + 200)),
+      db.from("jobs").select("id, source_id, dedupe_key, status, thin").in("dedupe_key", batch),
     );
     for (const r of rows) out.set(r.dedupe_key, r);
   }
@@ -385,7 +402,16 @@ async function runFetch(mode: "watchlist" | "full") {
 
   const totals: Record<string, number> = { sources: sources.length };
   for (const s of sources) {
-    const st = await syncSource(s, ctx.criteria, aggregatorIds);
+    // One broken source must not stop the others (or the scoring after them).
+    let st: Record<string, number>;
+    try {
+      st = await syncSource(s, ctx.criteria, aggregatorIds);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : typeof e === "object" && e && "message" in e ? String(e.message) : String(e);
+      await db.from("sources").update({ last_error: msg, last_checked_at: new Date().toISOString() }).eq("id", s.id);
+      console.error(`[${s.company_name}] failed: ${msg}`);
+      st = { errors: 1 };
+    }
     for (const [k, v] of Object.entries(st)) totals[k] = (totals[k] ?? 0) + v;
   }
   Object.assign(totals, await scorePending(sources.map((s) => s.id), ctx));
