@@ -46,7 +46,7 @@ export function SubmitButton({ className, children, done, ...rest }: Props) {
   return (
     <button
       {...rest}
-      className={`${className} ${pending ? "cursor-wait opacity-60" : ""}`}
+      className={`${className} ${pending ? "opacity-60" : ""}`}
       disabled={pending || rest.disabled}
       aria-busy={pending}
     >
