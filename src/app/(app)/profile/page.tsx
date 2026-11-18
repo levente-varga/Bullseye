@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
-import { Dot, Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
+import { Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
 import type { Profile } from "@/lib/types";
 import { deleteAnswer, deleteCv, saveAnswer, saveCvText, saveProfile, uploadCv } from "../actions";
@@ -70,12 +71,10 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
         <section id="cv" className="scroll-mt-6">
           <SectionHeader title="CV" actions={<span className="faint">{cvWords ? `${cvWords} words for the scorer` : "not added yet"}</span>} />
           {cvNotice && (
-            <div
-              className="mb-3 flex items-start gap-2 border border-[var(--border)] px-3 py-2 text-[13px]"
-              style={{ background: `var(--${cvNotice.tone}-tint)` }}
-            >
-              <span className="flex h-[1lh] items-center"><Dot tone={cvNotice.tone} /></span> {cvNotice.text}
-            </div>
+            // The upload note asks for a check of the extracted text, so it stays a little longer.
+            <Notice key={crypto.randomUUID()} tone={cvNotice.tone} params={["cv", "cv_error"]} autoHideMs={cvNotice.tone === "ok" ? 15000 : 0}>
+              {cvNotice.text}
+            </Notice>
           )}
           <div className="space-y-6">
             <Panel title="PDF" aside="private · 5 MB max">
