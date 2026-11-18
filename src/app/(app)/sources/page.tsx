@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ErrorDetails } from "@/components/ErrorDetails";
+import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
@@ -190,14 +191,14 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         <section id="add" className="scroll-mt-6">
           <SectionHeader title="Add a source" />
           {added && (
-            <div className="mb-3 flex items-center gap-2 border border-[var(--border)] bg-[var(--ok-tint)] px-3 py-2 text-[13px]">
-              <Dot tone="ok" /> Added {added}
-            </div>
+            <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
+              Added {added}
+            </Notice>
           )}
           {addError && (
-            <div className="mb-3 flex items-start gap-2 border border-[var(--border)] bg-[var(--bad-tint)] px-3 py-2 text-[13px]">
-              <span className="flex h-[1lh] items-center"><Dot tone="bad" /></span> {addError}
-            </div>
+            <Notice key={crypto.randomUUID()} tone="bad" params={["added", "error"]}>
+              {addError}
+            </Notice>
           )}
           <form action={addSource} className="panel">
             <div className="grid gap-3 p-3 sm:grid-cols-[200px_1fr_220px]">
