@@ -112,9 +112,9 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   font-size: 14px;
 }
-/* Checkboxes and radios: square like everything else, pixel-aligned so they stay crisp.
-   A checked checkbox fills with the accent and shows a check; a selected radio shows
-   an accent square inside, with a small gap to the border. */
+/* Checkboxes (square) and radios (round) share one look: a 1px box that, when on,
+   gets an accent border and a solid accent shape inside, with a small gap to the
+   border. The gap is transparent, so it matches any background. */
 input[type="checkbox"],
 input[type="radio"] {
   appearance: none;
@@ -123,18 +123,16 @@ input[type="radio"] {
   height: 14px;
   margin: 0;
   border: 1px solid var(--border-strong);
-  background: var(--bg) center / 10px 10px no-repeat;
+  background-color: var(--bg);
   cursor: pointer;
   vertical-align: -2px;
 }
-input[type="checkbox"]:checked {
-  background-color: var(--accent);
-  border-color: var(--accent);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.6 2.4' fill='none' stroke='white' stroke-width='1.7' stroke-linecap='square'/%3E%3C/svg%3E");
+input[type="radio"] {
+  border-radius: 9999px;
 }
+input[type="checkbox"]:checked,
 input[type="radio"]:checked {
   border-color: var(--accent);
-  /* An 8px accent square; the 2px gap around it is transparent, so it matches any background. */
   padding: 2px;
   background-color: var(--accent);
   background-clip: content-box;
@@ -148,6 +146,7 @@ input[type="checkbox"]:hover,
 input[type="radio"]:hover {
   border-color: var(--muted);
 }
+input[type="checkbox"]:checked:hover,
 input[type="radio"]:checked:hover {
   border-color: var(--accent);
 }

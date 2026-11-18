@@ -1,0 +1,58 @@
+name: Scheduler
+
+# A heartbeat: every 15 minutes the worker checks the schedule set on the Criteria
+# page (watchlist interval, daily time, timezone) and runs whatever is due. When
+# nothing is due it exits within seconds. GitHub may start scheduled runs a few
+# minutes late; run it by hand from the Actions tab to force a specific mode.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What to run
+        type: choice
+        default: tick
+        options:
+          - tick
+          - daily
+          - watchlist
+          - full
+          - digest
+
+concurrency:
+  group: bullseye-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SCORING_MODEL: ${{ vars.SCORING_MODEL }}
+      MAX_SCORE_PER_RUN: ${{ vars.MAX_SCORE_PER_RUN }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DIGEST_TO: ${{ vars.DIGEST_TO }}
+      DIGEST_FROM: ${{ vars.DIGEST_FROM }}
+      DIGEST_REPLY_TO: ${{ vars.DIGEST_REPLY_TO }}
+      APP_URL: ${{ vars.APP_URL }}
+      MODE: ${{ inputs.mode || 'tick' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run
+        run: |
+          if [ "$MODE" = "daily" ]; then
+            npm run worker -- full || status=$?
+            npm run worker -- digest
+            exit ${status:-0}
+          else
+            npm run worker -- "$MODE"
+          fi

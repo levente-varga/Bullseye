@@ -1,6 +1,7 @@
 /**
  * Bullseye worker. Runs in GitHub Actions (or locally with `npm run worker -- <mode>`).
  *
+ *   tick       every 15 minutes: run whatever the schedule (Criteria page) says is due
  *   watchlist  poll watchlist companies only; email an alert for strong new matches
  *   full       poll every enabled source; score new listings
  *   digest     send the daily email: new matches, follow-ups due, status changes
@@ -13,6 +14,7 @@ import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
 import { costUsd } from "../src/lib/pricing";
+import { dueNow } from "../src/lib/schedule";
 import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "../src/lib/scoring";
 import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
 import { ATS_INFO, type Criteria, type FetchedJob, type Job, type Profile, type Source } from "../src/lib/types";
@@ -435,23 +437,55 @@ async function runDigest() {
   return stats;
 }
 
-async function main() {
-  const mode = process.argv[2] as Mode;
-  if (!["watchlist", "full", "digest"].includes(mode)) {
-    console.error("Usage: worker <watchlist|full|digest>");
-    process.exit(2);
-  }
-
+/** Runs one mode and logs it in the runs table (the Report's run log). */
+async function record(mode: Mode) {
   const run = await must<{ id: string }>(db.from("runs").insert({ kind: mode }).select("id").single());
   try {
     const stats = mode === "digest" ? await runDigest() : await runFetch(mode);
     await db.from("runs").update({ finished_at: new Date().toISOString(), stats }).eq("id", run.id);
-    console.log("Done:", stats);
+    console.log(`${mode} done:`, stats);
   } catch (e) {
     const msg = e instanceof Error ? e.message : JSON.stringify(e);
     await db.from("runs").update({ finished_at: new Date().toISOString(), error: msg }).eq("id", run.id);
     throw e;
   }
+}
+
+/** When each mode last started (failed runs count too, so a failure isn't retried every tick). */
+async function lastStarted(kind: Mode): Promise<number | null> {
+  const rows = await must<{ started_at: string }[]>(
+    db.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1),
+  );
+  return rows[0] ? Date.parse(rows[0].started_at) : null;
+}
+
+/** Called every 15 minutes by GitHub Actions: runs whatever the schedule on the Criteria page says is due. */
+async function tick() {
+  const criteria = await must<Criteria>(db.from("criteria").select("*").eq("id", 1).single());
+  const last = { watchlist: await lastStarted("watchlist"), full: await lastStarted("full") };
+  const due = dueNow(criteria, last, Date.now());
+  console.log(`Tick (${criteria.timezone}): daily ${due.daily ? "due" : "not due"}, watchlist ${due.watchlist ? "due" : "not due"}`);
+  if (due.daily) {
+    try {
+      await record("full");
+    } finally {
+      await record("digest"); // the digest goes out even if some sources failed
+    }
+  } else if (due.watchlist) {
+    const { count } = await db.from("sources").select("id", { count: "exact", head: true }).eq("watchlist", true).eq("enabled", true);
+    if (count) await record("watchlist");
+    else console.log("No watched sources; nothing to check.");
+  }
+}
+
+async function main() {
+  const mode = process.argv[2];
+  if (mode === "tick") return tick();
+  if (!["watchlist", "full", "digest"].includes(mode)) {
+    console.error("Usage: worker <tick|watchlist|full|digest>");
+    process.exit(2);
+  }
+  await record(mode as Mode);
 }
 
 main().catch((e) => {

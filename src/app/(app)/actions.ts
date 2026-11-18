@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import { detectSource } from "@/lib/detect-source";
 import { createClient } from "@/lib/supabase/server";
-import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, type Ats, type JobDetails, type JobStatus } from "@/lib/types";
+import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, WATCH_INTERVALS, type Ats, type JobDetails, type JobStatus } from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 /** Splits a textarea on newlines or commas into a clean list. */
@@ -87,12 +87,31 @@ export async function saveCriteria(form: FormData) {
           score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
           followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
           digest_email: str(form, "digest_email"),
+          ...scheduleFields(form),
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1)
     ).error,
   );
   revalidatePath("/criteria");
+}
+
+/** Schedule fields from the Criteria form, validated so a bad value can't stop the worker. */
+function scheduleFields(form: FormData) {
+  const interval = Number(str(form, "watch_interval_minutes"));
+  const time = str(form, "daily_time");
+  const tz = str(form, "timezone");
+  let validTz = false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    validTz = tz.length > 0;
+  } catch {}
+  return {
+    ...(WATCH_INTERVALS.some((w) => w.minutes === interval) ? { watch_interval_minutes: interval } : {}),
+    ...(/^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? { daily_time: time } : {}),
+    ...(validTz ? { timezone: tz } : {}),
+    daily_enabled: form.get("daily_enabled") === "on",
+  };
 }
 
 export async function addExcludeKeyword(form: FormData) {
