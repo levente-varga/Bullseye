@@ -37,6 +37,10 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   const open = Object.fromEntries(counts);
 
   // Healthy means fetched successfully; a source that hasn't been fetched yet is unknown, not healthy.
+  // Aggregators not added yet: one click each, with their default search.
+  const missingAggregators = (Object.keys(ATS_INFO) as Ats[]).filter(
+    (a) => ATS_INFO[a].aggregator && !sources.some((s) => s.ats === a),
+  );
   const ok = sources.filter((s) => s.enabled && !s.last_error && s.last_checked_at).length;
   const unchecked = sources.filter((s) => s.enabled && !s.last_error && !s.last_checked_at).length;
   const failing = sources.filter((s) => s.enabled && s.last_error).length;
@@ -99,7 +103,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                             {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
                             {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
                           </div>
-                          {!ATS_INFO[s.ats]?.aggregator && (
+                          {(!ATS_INFO[s.ats]?.aggregator || (!ATS_INFO[s.ats]?.fixedSlug && s.ats !== "jobtech")) && (
                             <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
                               {s.slug}
                               {s.country && ` · ${s.country.toUpperCase()} only`}
@@ -190,6 +194,20 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
         <section id="add" className="scroll-mt-6">
           <SectionHeader title="Add a source" />
+          {missingAggregators.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[13px]">
+              <span className="eyebrow mr-1">Aggregators</span>
+              {missingAggregators.map((a) => (
+                <form key={a} action={addSource}>
+                  <input type="hidden" name="ats" value={a} />
+                  <input type="hidden" name="slug" value="" />
+                  <SubmitButton className="btn" done="Added">
+                    <span title={ATS_INFO[a].blurb}>+ {ATS_INFO[a].defaultName}</span>
+                  </SubmitButton>
+                </form>
+              ))}
+            </div>
+          )}
           {added && (
             <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
               Added {added}
@@ -242,12 +260,14 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
                   <li key={a}>
                     {ATS_INFO[a].label}:{" "}
-                    {a === "swedengamejobs" ? (
+                    {ATS_INFO[a].fixedSlug ? (
                       <span className="faint">leave empty</span>
                     ) : (
                       <>
                         <code className="mono faint">{ATS_INFO[a].slugExample}</code>
                         {a === "jobtech" && <span className="faint"> (or leave empty for IT + design jobs)</span>}
+                        {a === "himalayas" && <span className="faint"> (or leave empty for “developer”)</span>}
+                        {a === "weworkremotely" && <span className="faint"> (or empty for full-stack, “all” for everything)</span>}
                       </>
                     )}
                   </li>

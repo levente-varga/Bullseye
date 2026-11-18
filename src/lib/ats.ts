@@ -22,6 +22,11 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“",
+  bull: "•", middot: "·", euro: "€", pound: "£",
+};
+
 function decodeEntities(s: string): string {
   return s
     .replace(/&lt;/g, "<")
@@ -29,7 +34,9 @@ function decodeEntities(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&nbsp;/g, " ")
+    .replace(/&(mdash|ndash|hellip|rsquo|lsquo|rdquo|ldquo|bull|middot|euro|pound);/g, (_, n: string) => NAMED_ENTITIES[n])
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
     .replace(/&amp;/g, "&");
 }
 
@@ -644,6 +651,244 @@ async function fetchSwedenGameJobs(): Promise<FetchedJob[]> {
     });
 }
 
+// --- Remote and international aggregators ------------------------------------------
+// Public, free feeds. Each is "partial" (it only shows recent ads), so ads that drop out
+// aren't closed. Fetching costs nothing; only scoring does, and that has its own caps.
+
+const fromEpoch = (v: unknown): string | null => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toISOString() : null;
+};
+
+function salary(min: unknown, max: unknown, currency?: string | null, period?: string | null): string | null {
+  const lo = Number(min) || 0;
+  const hi = Number(max) || 0;
+  if (!lo && !hi) return null;
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  const range = lo && hi && lo !== hi ? `${fmt(lo)}–${fmt(hi)}` : fmt(lo || hi);
+  return [range, currency || "USD", period && period !== "annual" ? `/ ${period}` : null].filter(Boolean).join(" ");
+}
+
+/** "Remote" plus where it's open to: "Remote, worldwide" or "Remote (Sweden, Germany)". */
+function remoteWhere(places: string[]): string {
+  const p = places.map((x) => x.trim()).filter(Boolean);
+  return p.length ? `Remote (${p.join(", ")})` : "Remote, worldwide";
+}
+
+// Himalayas: remote jobs worldwide (100k+), read through its search API so only matching
+// ads come in. Slug: search parameters, e.g. "q=developer&country=SE"; empty means
+// "q=developer". Newest first, at most 10 pages of 20 per run.
+export const HIMALAYAS_DEFAULT_QUERY = "q=developer";
+const HIMALAYAS_MAX_PAGES = 10;
+
+interface HimalayasJob {
+  title: string;
+  companyName?: string;
+  description?: string;
+  excerpt?: string;
+  minSalary?: number | string | null;
+  maxSalary?: number | string | null;
+  currency?: string | null;
+  salaryPeriod?: string | null;
+  locationRestrictions?: string[];
+  pubDate?: number | string;
+  applicationLink?: string;
+  guid: string;
+}
+
+async function fetchHimalayas(query: string): Promise<FetchedJob[]> {
+  const params = new URLSearchParams(query || HIMALAYAS_DEFAULT_QUERY);
+  if (!params.has("sort")) params.set("sort", "recent");
+  const out = new Map<string, FetchedJob>();
+  for (let page = 1; page <= HIMALAYAS_MAX_PAGES; page++) {
+    params.set("page", String(page));
+    const data = await getJson<{ totalCount?: number; jobs?: HimalayasJob[] }>(
+      `https://himalayas.app/jobs/api/search?${params}`,
+    );
+    const jobs = data.jobs ?? [];
+    for (const j of jobs) {
+      if (!j.guid || !j.title || out.has(j.guid)) continue;
+      out.set(j.guid, {
+        external_id: j.guid,
+        title: j.title.trim(),
+        company: j.companyName?.trim() || "Unknown company",
+        location: remoteWhere(j.locationRestrictions ?? []),
+        remote: true,
+        url: j.guid,
+        description: clip(htmlToText(j.description || j.excerpt || "")),
+        compensation: salary(j.minSalary, j.maxSalary, j.currency, j.salaryPeriod),
+        posted_at: fromEpoch(j.pubDate),
+      });
+    }
+    if (jobs.length < 20 || page * 20 >= (data.totalCount ?? 0)) break;
+  }
+  return [...out.values()];
+}
+
+// Working Nomads: a small curated remote board; its public feed is the latest ~40 ads.
+interface WorkingNomadsJob {
+  url: string;
+  title: string;
+  description?: string;
+  company_name?: string;
+  location?: string;
+  pub_date?: string;
+}
+
+async function fetchWorkingNomads(): Promise<FetchedJob[]> {
+  const jobs = await getJson<WorkingNomadsJob[]>("https://www.workingnomads.com/api/exposed_jobs/");
+  return jobs
+    .filter((j) => j.url && j.title)
+    .map((j) => ({
+      external_id: j.url,
+      title: j.title.trim(),
+      company: j.company_name?.trim() || "Unknown company",
+      location: remoteWhere((j.location ?? "").split(/,\s*/)),
+      remote: true,
+      url: j.url,
+      description: clip(htmlToText(j.description ?? "")),
+      compensation: null,
+      posted_at: j.pub_date ? new Date(j.pub_date).toISOString() : null,
+    }));
+}
+
+// Remote OK: remote jobs, mostly US companies; the feed is the latest ~100 ads.
+// Its terms ask for a link back to the Remote OK posting, which is the URL we store.
+interface RemoteOkJob {
+  id?: string;
+  position?: string;
+  company?: string;
+  location?: string;
+  description?: string;
+  url?: string;
+  epoch?: number;
+  salary_min?: number;
+  salary_max?: number;
+}
+
+async function fetchRemoteOk(): Promise<FetchedJob[]> {
+  const data = await getJson<RemoteOkJob[]>("https://remoteok.com/api");
+  return data
+    .filter((j) => j.id && j.position && j.url) // the first entry is the legal notice
+    .map((j) => ({
+      external_id: String(j.id),
+      title: j.position!.trim(),
+      company: j.company?.trim() || "Unknown company",
+      location: remoteWhere(j.location ? [j.location] : []),
+      remote: true,
+      url: j.url!,
+      description: clip(htmlToText(j.description ?? "")),
+      compensation: salary(j.salary_min, j.salary_max),
+      posted_at: fromEpoch(j.epoch),
+    }));
+}
+
+// We Work Remotely: remote jobs, mostly US; RSS of the latest ads. Slug: a category feed
+// (e.g. "remote-full-stack-programming-jobs"), or "all" for every category.
+export const WWR_DEFAULT_CATEGORY = "remote-full-stack-programming-jobs";
+
+async function fetchWeWorkRemotely(category: string): Promise<FetchedJob[]> {
+  const cat = category || WWR_DEFAULT_CATEGORY;
+  const url = cat === "all" ? "https://weworkremotely.com/remote-jobs.rss" : `https://weworkremotely.com/categories/${encodeURIComponent(cat)}.rss`;
+  const xml = await (await get(url, "application/rss+xml")).text();
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) ?? [];
+  return items.map((item) => {
+    const link = xmlTag(item, "link");
+    // Titles read "Company: Role".
+    const full = decodeEntities(xmlTag(item, "title"));
+    const i = full.indexOf(": ");
+    const region = decodeEntities(xmlTag(item, "region"));
+    const country = decodeEntities(xmlTag(item, "country"));
+    const pub = xmlTag(item, "pubDate");
+    return {
+      external_id: xmlTag(item, "guid") || link,
+      title: (i > 0 ? full.slice(i + 2) : full).trim(),
+      company: i > 0 ? full.slice(0, i).trim() : "Unknown company",
+      location: remoteWhere([country || region].filter((x) => x && !/anywhere in the world/i.test(x))),
+      remote: true,
+      url: link,
+      description: clip(htmlToText(decodeEntities(xmlTag(item, "description")))),
+      compensation: null,
+      posted_at: pub ? new Date(pub).toISOString() : null,
+    };
+  });
+}
+
+// Arbeitnow: jobs in Europe, mostly Germany (on-site and remote), 300 a page, newest
+// first. Reads up to 5 pages, stopping at ads older than two weeks.
+const ARBEITNOW_MAX_PAGES = 5;
+const ARBEITNOW_MAX_AGE_DAYS = 14;
+
+interface ArbeitnowJob {
+  slug: string;
+  company_name?: string;
+  title: string;
+  description?: string;
+  remote?: boolean;
+  url: string;
+  location?: string;
+  created_at?: number;
+}
+
+async function fetchArbeitnow(): Promise<FetchedJob[]> {
+  const cutoff = Date.now() / 1000 - ARBEITNOW_MAX_AGE_DAYS * 86_400;
+  const out: FetchedJob[] = [];
+  for (let page = 1; page <= ARBEITNOW_MAX_PAGES; page++) {
+    // Pages are ~2MB, so give them longer than the default.
+    const data = await getJson<{ data?: ArbeitnowJob[]; links?: { next?: string | null } }>(
+      `https://www.arbeitnow.com/api/job-board-api?page=${page}`,
+      45_000,
+    );
+    const jobs = data.data ?? [];
+    for (const j of jobs) {
+      if ((j.created_at ?? 0) < cutoff) continue;
+      const place = j.location?.trim() ?? "";
+      out.push({
+        external_id: j.slug,
+        title: j.title.trim(),
+        company: j.company_name?.trim() || "Unknown company",
+        location: j.remote ? [place, "Remote"].filter(Boolean).join(" / ") : place,
+        remote: Boolean(j.remote),
+        url: j.url,
+        description: clip(htmlToText(j.description ?? "")),
+        compensation: null,
+        posted_at: fromEpoch(j.created_at),
+      });
+    }
+    if (!data.links?.next || jobs.some((j) => (j.created_at ?? 0) < cutoff)) break;
+  }
+  return out;
+}
+
+// Work With Indies: jobs at indie game studios worldwide. No API: the job cards are in
+// the home page's HTML (all of them, ~100). Descriptions come from each posting page.
+async function fetchWorkWithIndies(): Promise<FetchedJob[]> {
+  const html = await (await get("https://www.workwithindies.com/", "text/html")).text();
+  const cards = [...html.matchAll(/<a[^>]+href="(\/careers\/[^"]+)"[^>]*class="job-card[^"]*"[^>]*>([\s\S]*?)<\/a>/g)];
+  if (!cards.length) throw new Error("Work With Indies: no job cards found (site layout changed?)");
+  const text = (s: string) => decodeEntities(s.replace(/<[^>]+>/g, "")).trim();
+  return cards.map(([, path, body]) => {
+    const mobile = body.match(/class="job-link-mobile">([\s\S]*)/)?.[1] ?? body;
+    const title = text(mobile.match(/class="text-block-14">([\s\S]*?)<\/div>/)?.[1] ?? "");
+    const small = [...mobile.matchAll(/class="job-card-text-smol">([\s\S]*?)<\/div>/g)].map((m) => text(m[1])).filter((t) => t !== "|");
+    const [company = "Unknown studio", place = ""] = small;
+    // The card says "to work from <place>" for remote roles, "to join their team in <place>" otherwise.
+    const remote = /class="job-card-text">to work from/.test(body) || looksRemote(place);
+    const url = `https://www.workwithindies.com${path}`;
+    return {
+      external_id: path.replace("/careers/", ""),
+      title,
+      company,
+      location: remote ? remoteWhere([place]) : place,
+      remote,
+      url,
+      description: "", // fetched from the posting page later
+      compensation: null,
+      posted_at: null,
+    };
+  }).filter((j) => j.title);
+}
+
 export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" | "country">): Promise<FetchedJob[]> {
   const { ats, slug, company_name: company } = source;
   switch (ats) {
@@ -671,6 +916,18 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchJobTech(slug);
     case "swedengamejobs":
       return fetchSwedenGameJobs();
+    case "himalayas":
+      return fetchHimalayas(slug);
+    case "workingnomads":
+      return fetchWorkingNomads();
+    case "remoteok":
+      return fetchRemoteOk();
+    case "weworkremotely":
+      return fetchWeWorkRemotely(slug);
+    case "arbeitnow":
+      return fetchArbeitnow();
+    case "workwithindies":
+      return fetchWorkWithIndies();
   }
 }
 
@@ -687,6 +944,13 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   pinpoint: (s) => `https://${s}`,
   jobtech: () => "https://arbetsformedlingen.se/platsbanken/",
   swedengamejobs: () => "https://www.swedengamejobs.com/",
+  himalayas: (q) => `https://himalayas.app/jobs?${new URLSearchParams(q)}`,
+  workingnomads: () => "https://www.workingnomads.com/jobs",
+  remoteok: () => "https://remoteok.com/",
+  weworkremotely: (c) =>
+    c === "all" ? "https://weworkremotely.com/" : `https://weworkremotely.com/categories/${c || WWR_DEFAULT_CATEGORY}`,
+  arbeitnow: () => "https://www.arbeitnow.com/",
+  workwithindies: () => "https://www.workwithindies.com/",
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */
