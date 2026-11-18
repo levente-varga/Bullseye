@@ -145,9 +145,7 @@ export default async function PipelinePage() {
         })}
       </div>
       <p className="faint mt-4 text-[12px]">
-        &quot;Follow-up due&quot; means an application has had no reply for <span className="mono">{followupDays}</span>{" "}
-        days: a reminder to write to the company. Click Followed up afterwards to restart the timer (set on the
-        Criteria page). Dropped jobs move to Inbox → Skipped, where you can restore them.
+        Follow-up due: no reply after <span className="mono">{followupDays}</span> days.
       </p>
     </>
   );

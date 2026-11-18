@@ -40,7 +40,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
     <>
       <PageHeader
         title="Members"
-        meta="Who can use this Bullseye. Each person has their own sources, criteria, CV and Inbox; you pay for everyone's AI scoring, within the caps set here."
+        meta="Invite friends and set their AI spend caps. Everyone's data stays private."
       />
 
       <div className="space-y-10">
@@ -65,16 +65,11 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               Send invite
             </SubmitButton>
           </form>
-          <p className="faint mt-2 text-[12px] leading-relaxed">
-            They get an email with a link to set a password. They start with no sources, an empty profile, and the
-            default spend caps below.
-          </p>
+          <p className="faint mt-2 text-[12px]">They get a link to set a password.</p>
           <form action={saveMemberDefaults} className="panel mt-3 flex flex-wrap items-end gap-3 p-3">
             <div className="w-full text-[13px]">
               Defaults for new members
-              <span className="hint">
-                The caps someone starts with when they accept an invite. Existing members keep theirs; change them below.
-              </span>
+              <span className="hint">Existing members keep theirs.</span>
             </div>
             <Money name="default_run_cost_usd" label="Per run" value={settings.default_run_cost_usd} />
             <Money name="default_daily_cost_usd" label="Per 24 hours" value={settings.default_daily_cost_usd} />
@@ -148,9 +143,6 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               </ul>
             )}
           </Panel>
-          <p className="faint mt-2 text-[12px] leading-relaxed">
-            The schedule, the scoring model and the cap across everyone are on the Criteria page.
-          </p>
         </section>
       </div>
     </>
