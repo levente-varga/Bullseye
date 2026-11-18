@@ -77,7 +77,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
   const tracked = Object.values(c).reduce((a, b) => a + b, 0);
   // API spend is recorded per run from the first run that tracks it; older runs show "–".
   const COST_KEYS = new Set(["cost_usd", "tokens_in", "tokens_out", "cost_estimated"]);
-  const costed = runs.filter((r) => typeof r.stats.cost_usd === "number");
+  const costed = runs.filter((r) => r.stats.cost_usd > 0);
   const totalCost = costed.reduce((a, r) => a + r.stats.cost_usd, 0);
   const funnelMax = Math.max(1, ...FUNNEL.map((f) => c[f.status]));
   const scoreList = (scores ?? []).map((s) => s.score as number);
@@ -259,12 +259,19 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                             title={
                               r.stats.cost_estimated
                                 ? "Estimated: this run predates cost tracking"
-                                : typeof r.stats.cost_usd === "number"
+                                : r.stats.cost_usd > 0
                                   ? `${r.stats.tokens_in ?? 0} tokens in, ${r.stats.tokens_out ?? 0} out`
-                                  : "Not recorded for this run"
+                                  : !r.finished_at
+                                    ? "Still running"
+                                    : r.kind === "digest"
+                                      ? "Digests don't use AI"
+                                      : typeof r.stats.cost_usd === "number"
+                                        ? "Nothing new to score, so no AI was used"
+                                        : "Not recorded for this run"
                             }
                           >
-                            {typeof r.stats.cost_usd === "number" ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
+                            {/* Only runs that used AI show a cost; the rest (digests, nothing to score) a dash. */}
+                            {r.stats.cost_usd > 0 ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
                           </td>
                           <td className="max-w-0 text-[12px]">
                             {r.error ? (
