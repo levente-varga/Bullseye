@@ -188,17 +188,18 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   }
 
   // Filter on title/location first, fetch descriptions only for survivors, then filter fully.
+  // Every row sets the same columns: a bulk upsert sends missing ones as null, which `thin` rejects.
   const rows: Record<string, unknown>[] = [];
   const needDescription: (typeof candidates)[number][] = [];
   for (const j of candidates) {
     const reason = hardFilter(j, criteria, { skipKeywordCheck: !j.description });
     if (reason) {
       stats.filtered++;
-      rows.push({ ...j, source_id: source.id, status: "filtered", filter_reason: reason });
+      rows.push({ ...j, source_id: source.id, thin: false, status: "filtered", filter_reason: reason });
     } else if (!j.description) {
       needDescription.push(j);
     } else {
-      rows.push({ ...j, source_id: source.id, status: "new", filter_reason: null });
+      rows.push({ ...j, source_id: source.id, thin: false, status: "new", filter_reason: null });
     }
   }
   await pool(needDescription, DESCRIBE_CONCURRENCY, async (j) => {
