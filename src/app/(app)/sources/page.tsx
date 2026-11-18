@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { ErrorDetails } from "@/components/ErrorDetails";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
@@ -81,6 +82,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                               {s.company_name}
                             </a>
                             {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
+                            {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
                           </div>
                           {!ATS_INFO[s.ats]?.aggregator && (
                             <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
@@ -88,7 +90,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                               {s.country && ` · ${s.country.toUpperCase()} only`}
                             </div>
                           )}
-                          {s.last_error && <div className="mt-1 pl-3.5 text-[12px] text-[var(--bad)]">{s.last_error}</div>}
+                          {s.last_error && (
+                            <div className="mt-1 max-w-[520px] pl-3.5 text-[12px]">
+                              <ErrorDetails error={s.last_error} />
+                            </div>
+                          )}
                         </td>
                         <td>
                           <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>

@@ -143,6 +143,8 @@ export interface Source {
   enabled: boolean;
   last_checked_at: string | null;
   last_error: string | null;
+  /** Listings returned by the last successful check (an aggregator dropping to 0 is flagged). */
+  last_job_count: number | null;
   /** Optional ISO country code filter (SmartRecruiters). */
   country: string | null;
 }
