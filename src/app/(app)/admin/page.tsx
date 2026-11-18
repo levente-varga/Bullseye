@@ -61,7 +61,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               <span className="label">Email</span>
               <input name="email" type="email" required placeholder="friend@example.com" className="input" />
             </label>
-            <SubmitButton className="btn-primary" done="Queued">
+            <SubmitButton className="btn-primary btn-field" done="Queued">
               Send invite
             </SubmitButton>
           </form>
@@ -78,7 +78,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             </div>
             <Money name="default_run_cost_usd" label="Per run" value={settings.default_run_cost_usd} />
             <Money name="default_daily_cost_usd" label="Per 24 hours" value={settings.default_daily_cost_usd} />
-            <SubmitButton className="btn" done="Saved">Save defaults</SubmitButton>
+            <SubmitButton className="btn btn-field" done="Saved">Save defaults</SubmitButton>
           </form>
           {invites.length > 0 && (
             <Panel title="Pending invites" aside={String(invites.length)}>
@@ -130,7 +130,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                         <input type="hidden" name="user_id" value={x.user_id} />
                         <Money name="max_run_cost_usd" label="Per run" value={x.max_run_cost_usd} />
                         <Money name="max_daily_cost_usd" label="Per 24 hours" value={x.max_daily_cost_usd} />
-                        <SubmitButton className="btn" done="Saved">Save caps</SubmitButton>
+                        <SubmitButton className="btn btn-field" done="Saved">Save caps</SubmitButton>
                       </form>
                       {!x.is_admin && x.user_id !== me.id && (
                         <form action={removeMember} className="ml-auto flex flex-wrap items-center gap-2 text-[12px]">

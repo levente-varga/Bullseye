@@ -162,7 +162,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                 <textarea name="answer" required rows={2} className="input" placeholder="Your answer" />
               </div>
               <div>
-                <SubmitButton className="btn-primary" done="Added">Add</SubmitButton>
+                <SubmitButton className="btn-primary btn-field" done="Added">Add</SubmitButton>
               </div>
             </form>
           </Panel>
