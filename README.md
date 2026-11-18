@@ -7,7 +7,7 @@ An automated job search that runs itself. Bullseye polls company job boards on a
 ## How it works
 
 ```
-GitHub Actions, every 15 min: worker tick → runs what the schedule (Criteria page) says is due
+Every 15 min (Supabase cron → GitHub Actions): worker tick → runs what the schedule (Criteria page) says is due
   ├─ watchlist (e.g. hourly)  → poll watched companies → score → instant email alert
   └─ daily (e.g. 07:00 local) → poll all companies → filter → score
               worker digest     → email: new matches · follow-ups due · status changes
@@ -68,6 +68,14 @@ The service-role and API keys never go to Vercel.
 | | `DIGEST_TO` (fallback recipient; normally set on the Criteria page) |
 
 Then run **Actions → Scheduler → Run workflow** with mode `daily` once to test. The schedule itself (daily time, watchlist interval, timezone) is set on the Criteria page.
+
+### 5. Reliable heartbeat (Supabase cron)
+GitHub's own cron is best-effort for public repos and can skip hours. Supabase starts the workflow every 15 minutes instead (migration `*_scheduler_cron.sql`, using `pg_cron` + `pg_net`):
+1. Create a fine-grained GitHub token at [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new): this repository only, **Actions: Read and write**.
+2. Supabase → **Project Settings → Vault** → add a secret named `github_dispatch_token` with the token.
+3. Check: `select public.dispatch_scheduler();` starts a run; `select status_code from net._http_response order by created desc limit 1;` should be `204`.
+
+When the token expires, runs stop: replace the Vault secret with a new token.
 
 ## Costs
 
