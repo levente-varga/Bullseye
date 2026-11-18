@@ -3,10 +3,11 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { createClient } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
+import { formatUsd } from "@/lib/pricing";
 import { nextRuns, timezones } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
 import { SCORING_MODELS, WATCH_INTERVALS, type Criteria } from "@/lib/types";
-import { addExcludeKeyword, saveCriteria } from "../actions";
+import { addExcludeKeyword, reevaluate, saveCriteria } from "../actions";
 
 /** "Today 07:00", "Tomorrow 07:00", "Off", in the schedule's timezone. */
 function fmtRun(t: number | null, tz: string): string {
@@ -19,16 +20,28 @@ function fmtRun(t: number | null, tz: string): string {
   return `${label} ${time}`;
 }
 
-export default async function CriteriaPage() {
+export default async function CriteriaPage({ searchParams }: PageProps<"/criteria">) {
+  const done = await searchParams; // set after a re-evaluation
   const supabase = await createClient();
   const lastRun = (kind: string) =>
     supabase.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1);
-  const [{ data: c, error }, { data: skips }, { data: lastWatch }, { data: lastFull }] = await Promise.all([
-    supabase.from("criteria").select("*").eq("id", 1).single(),
-    supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
-    lastRun("watchlist"),
-    lastRun("full"),
-  ]);
+  const [{ data: c, error }, { data: skips }, { data: lastWatch }, { data: lastFull }, { count: openCount }, { count: scoredCount }, { data: scoredRuns }] =
+    await Promise.all([
+      supabase.from("criteria").select("*").eq("id", 1).single(),
+      supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
+      lastRun("watchlist"),
+      lastRun("full"),
+      supabase.from("jobs").select("id", { count: "exact", head: true }).in("status", ["new", "scored", "filtered"]),
+      supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
+      // Recent runs that scored something: their cost per job prices a re-score.
+      supabase.from("runs").select("stats").gt("stats->scored", 0).order("started_at", { ascending: false }).limit(20),
+    ]);
+  const spent = (scoredRuns ?? []).reduce(
+    (a, r) => ({ cost: a.cost + (Number(r.stats.cost_usd) || 0), jobs: a.jobs + (Number(r.stats.scored) || 0) }),
+    { cost: 0, jobs: 0 },
+  );
+  const perJob = spent.jobs ? spent.cost / spent.jobs : 0.0005;
+  const rescoreCost = (scoredCount ?? 0) * perJob;
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
   const ms = (rows: { started_at: string }[] | null) => (rows?.[0] ? Date.parse(rows[0].started_at) : null);
@@ -180,6 +193,39 @@ export default async function CriteriaPage() {
           <p className="faint text-[12px] leading-relaxed">
             The scorer already reads your recent decisions. Turn frequent skip reasons into filters to save scoring cost.
           </p>
+
+          <div id="reevaluate" className="scroll-mt-6">
+            <Panel title="Re-evaluate">
+              <form action={reevaluate} className="space-y-3 p-3 text-[13px]">
+                <p className="muted leading-relaxed">
+                  Changes here only apply to new listings. Re-evaluate applies the <b>saved</b> criteria to the{" "}
+                  <span className="mono text-[var(--fg)]">{openCount ?? 0}</span> listings you haven&apos;t acted on: listings
+                  that now fail move to Filtered, filtered ones that now pass get scored. Free.
+                </p>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" name="rescore" className="mt-0.5" />
+                  <span className="muted">
+                    Also re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones against the new
+                    criteria, about <span className="mono text-[var(--fg)]">{formatUsd(rescoreCost)}</span>
+                  </span>
+                </label>
+                <SubmitButton className="btn" done="Done">
+                  Re-evaluate
+                </SubmitButton>
+                {done.filtered !== undefined && (
+                  <p className="border-t border-[var(--border)] pt-2.5 text-[12px] leading-relaxed">
+                    <span className="mono">{done.filtered}</span> moved to Filtered ·{" "}
+                    <span className="mono">{done.waiting}</span> waiting to be scored ·{" "}
+                    <span className="mono">{done.kept}</span> unchanged.
+                    {Number(done.waiting) > 0 && (
+                      <span className="faint"> Scoring runs in the background, 60 every 15 minutes.</span>
+                    )}
+                  </p>
+                )}
+                <p className="faint text-[12px] leading-relaxed">Approved, skipped and applied listings are never touched.</p>
+              </form>
+            </Panel>
+          </div>
         </aside>
       </div>
     </>
