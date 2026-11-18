@@ -5,7 +5,7 @@ import { createClient, currentUser } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { formatUsd } from "@/lib/pricing";
-import { nextRuns, timezones } from "@/lib/schedule";
+import { dailySlots, nextRuns, timezones } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
 import { SCORING_MODELS, WATCH_INTERVALS, type Criteria, type Member, type Settings } from "@/lib/types";
 import { addExcludeKeyword, reevaluate, saveCriteria, saveSettings } from "../actions";
@@ -69,7 +69,10 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
   const ms = (rows: { started_at: string }[] | null) => (rows?.[0] ? Date.parse(rows[0].started_at) : null);
-  const next = nextRuns(settings, { watchlist: ms(lastWatch), full: ms(lastFull) }, nowMs());
+  // Run history is private to the admin, so others get the next slot from the schedule alone.
+  const next = me.isAdmin
+    ? nextRuns(settings, { watchlist: ms(lastWatch), full: ms(lastFull) }, nowMs())
+    : { daily: settings.daily_enabled ? dailySlots(settings, nowMs()).next : null, watchlist: null };
 
   const counts = new Map<string, number>();
   for (const s of skips ?? []) for (const r of s.reasons as string[]) counts.set(r, (counts.get(r) ?? 0) + 1);
@@ -257,7 +260,7 @@ function SettingsForm(props: {
                   </option>
                 ))}
               </select>
-              <p className="hint mt-1.5">Next: {fmtRun(next.watchlist, settings.timezone)}</p>
+              {isAdmin && <p className="hint mt-1.5">Next: {fmtRun(next.watchlist, settings.timezone)}</p>}
             </Row>
             {isAdmin && (
               <Row label="Timezone" hint="The daily time above is in this timezone.">
