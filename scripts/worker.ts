@@ -412,8 +412,8 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
                 status: "scored",
                 score: s.score,
                 score_summary: s.summary,
-                score_pros: s.pros.slice(0, 4),
-                score_cons: s.cons.slice(0, 4),
+                score_pros: s.pros.slice(0, 6), // a sanity cap, not a target
+                score_cons: s.cons.slice(0, 6),
                 scored_at: new Date().toISOString(),
               })
               .eq("id", job.id),
