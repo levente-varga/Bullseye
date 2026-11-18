@@ -181,7 +181,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           )}
           <form action={addSource} className="panel">
             <div className="grid gap-3 p-3 sm:grid-cols-[200px_1fr_220px]">
-              <label className="space-y-1">
+              <label className="field">
                 <span className="label">Type</span>
                 <select name="ats" className="input" defaultValue="auto">
                   <option value="auto">Auto-detect from URL</option>
@@ -190,11 +190,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                   ))}
                 </select>
               </label>
-              <label className="space-y-1">
+              <label className="field">
                 <span className="label">Careers page, job posting or board</span>
                 <input name="slug" className="input mono" placeholder="https://career.paradoxplaza.com" />
               </label>
-              <label className="space-y-1">
+              <label className="field">
                 <span className="label">Company name</span>
                 <input name="company_name" className="input" placeholder="Guessed if empty" />
               </label>

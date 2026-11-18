@@ -1,4 +1,7 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { PendingBar } from "@/components/PendingBar";
+import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
 import { CreditChart } from "@/components/CreditChart";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
@@ -28,19 +31,44 @@ const BUCKETS: { label: string; min: number; max: number; tone: Tone }[] = [
   { label: "0–39", min: 0, max: 39, tone: "muted" },
 ];
 
-export default async function ReportPage() {
+/** Run-log filters. "Daily" covers the daily search and its digest. */
+const RUN_FILTERS = {
+  all: "All",
+  daily: "Daily",
+  watchlist: "Watchlist",
+  failed: "Failed",
+} as const;
+type RunFilter = keyof typeof RUN_FILTERS;
+const RUNS_PAGE = 20;
+
+export default async function ReportPage({ searchParams }: PageProps<"/report">) {
+  const { runs: runsParam, rn } = await searchParams;
+  const runFilter: RunFilter = typeof runsParam === "string" && runsParam in RUN_FILTERS ? (runsParam as RunFilter) : "all";
+  const runLimit = Math.min(500, Math.max(RUNS_PAGE, Number(rn) || RUNS_PAGE));
+  const runsHref = (q: { runs?: RunFilter; rn?: number }) => {
+    const p = new URLSearchParams();
+    if (q.runs && q.runs !== "all") p.set("runs", q.runs);
+    if (q.rn) p.set("rn", String(q.rn));
+    return `/report${p.size ? `?${p}` : ""}#runs`;
+  };
   const supabase = await createClient();
+  let runsQuery = supabase.from("runs").select("*", { count: "exact" });
+  if (runFilter === "daily") runsQuery = runsQuery.in("kind", ["full", "digest"]);
+  if (runFilter === "watchlist") runsQuery = runsQuery.eq("kind", "watchlist");
+  if (runFilter === "failed") runsQuery = runsQuery.not("error", "is", null);
   const counts = await Promise.all(
     FUNNEL.map(async (f) => {
       const { count } = await supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", f.status);
       return [f.status, count ?? 0] as const;
     }),
   );
-  const [{ data: runs, error }, { data: scores }] = await Promise.all([
-    supabase.from("runs").select("*").order("started_at", { ascending: false }).limit(30),
+  const [{ data: runRows, count: runTotal, error }, { data: scores }] = await Promise.all([
+    runsQuery.order("started_at", { ascending: false }).limit(runLimit),
     supabase.from("jobs").select("score").not("score", "is", null).limit(10000),
   ]);
   if (error) throw new Error(error.message);
+  const runs = runRows as Run[];
+  const moreRuns = (runTotal ?? 0) > runs.length;
 
   const c = Object.fromEntries(counts) as Record<JobStatus, number>;
   const applied = c.applied + c.interview + c.offer + c.rejected;
@@ -48,7 +76,7 @@ export default async function ReportPage() {
   const tracked = Object.values(c).reduce((a, b) => a + b, 0);
   // API spend is recorded per run from the first run that tracks it; older runs show "–".
   const COST_KEYS = new Set(["cost_usd", "tokens_in", "tokens_out", "cost_estimated"]);
-  const costed = (runs as Run[]).filter((r) => typeof r.stats.cost_usd === "number");
+  const costed = runs.filter((r) => typeof r.stats.cost_usd === "number");
   const totalCost = costed.reduce((a, r) => a + r.stats.cost_usd, 0);
   const funnelMax = Math.max(1, ...FUNNEL.map((f) => c[f.status]));
   const scoreList = (scores ?? []).map((s) => s.score as number);
@@ -61,7 +89,13 @@ export default async function ReportPage() {
   const topUps: TopUp[] = (entryRows ?? []).map((e) => ({ id: e.id, entered_at: e.entered_at, amount_usd: Number(e.balance_usd) }));
   const firstTopUp = topUps.at(-1)?.entered_at;
   const { data: spendRows } = firstTopUp
-    ? await supabase.from("runs").select("finished_at, stats").gte("finished_at", new Date(dayStart(firstTopUp)).toISOString()).limit(5000)
+    ? // Only runs that cost something: most watchlist checks cost $0, so this stays small as runs pile up.
+      await supabase
+        .from("runs")
+        .select("finished_at, stats")
+        .gte("finished_at", new Date(dayStart(firstTopUp)).toISOString())
+        .gt("stats->cost_usd", 0)
+        .limit(10000)
     : { data: [] };
   const costedRuns = (spendRows ?? [])
     .filter((r) => r.finished_at && typeof r.stats?.cost_usd === "number")
@@ -78,7 +112,7 @@ export default async function ReportPage() {
           <>
             <span className="mono text-[var(--fg)]">{tracked}</span> listings tracked ·{" "}
             <span className="mono text-[var(--fg)]">{scoreList.length}</span> scored ·{" "}
-            <span className="mono text-[var(--fg)]">{(runs as Run[]).length}</span> recent runs
+            <span className="mono text-[var(--fg)]">{runTotal ?? 0}</span> {runFilter === "all" ? "runs" : `${RUN_FILTERS[runFilter].toLowerCase()} runs`}
           </>
         }
       />
@@ -175,22 +209,23 @@ export default async function ReportPage() {
           </div>
         </section>
 
-        <section>
+        <section id="runs" className="scroll-mt-6">
           <SectionHeader
             title="Runs"
-            count={(runs as Run[]).length}
+            count={runTotal ?? 0}
             actions={
-              costed.length > 0 && (
-                <span className="muted">
-                  API spend <span className="mono text-[var(--fg)]">{formatUsd(totalCost)}</span> over{" "}
-                  <span className="mono">{costed.length}</span> {costed.length === 1 ? "run" : "runs"}
-                </span>
-              )
+              <Segmented
+                options={(Object.keys(RUN_FILTERS) as RunFilter[]).map((f) => ({
+                  href: runsHref({ runs: f }),
+                  label: RUN_FILTERS[f],
+                  active: f === runFilter,
+                }))}
+              />
             }
           />
           <Panel>
-            {(runs as Run[]).length === 0 ? (
-              <Empty>No runs yet. The worker logs here every time it runs.</Empty>
+            {runs.length === 0 ? (
+              <Empty>{runFilter === "all" ? "No runs yet. The worker logs here every time it runs." : "No runs match this filter."}</Empty>
             ) : (
               <div className="overflow-x-auto">
                 <table className="table min-w-[640px]">
@@ -204,7 +239,7 @@ export default async function ReportPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(runs as Run[]).map((r) => {
+                    {runs.map((r) => {
                       const took = r.finished_at ? Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000) : null;
                       return (
                         <tr key={r.id}>
@@ -230,9 +265,9 @@ export default async function ReportPage() {
                           >
                             {typeof r.stats.cost_usd === "number" ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
                           </td>
-                          <td className="text-[12px]">
+                          <td className="max-w-0 text-[12px]">
                             {r.error ? (
-                              <span className="text-[var(--bad)]">{r.error}</span>
+                              <RunError error={r.error} />
                             ) : !r.finished_at ? (
                               <span className="muted">running…</span>
                             ) : (
@@ -251,9 +286,50 @@ export default async function ReportPage() {
                 </table>
               </div>
             )}
+            {(moreRuns || costed.length > 0) && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
+                <span className="faint">
+                  Showing <span className="mono">{runs.length}</span> of <span className="mono">{runTotal ?? 0}</span>
+                  {costed.length > 0 && (
+                    <>
+                      {" "}
+                      · API spend <span className="mono text-[var(--fg)]">{formatUsd(totalCost)}</span> across these
+                    </>
+                  )}
+                </span>
+                {moreRuns && (
+                  <Link href={runsHref({ runs: runFilter, rn: runLimit + RUNS_PAGE })} scroll={false} className="btn">
+                    Show {RUNS_PAGE} more
+                    <PendingBar />
+                  </Link>
+                )}
+              </div>
+            )}
           </Panel>
         </section>
       </div>
     </>
+  );
+}
+
+/** A failed run's error: one truncated line (the message, if it's a JSON error), the full text on click. */
+function RunError({ error }: { error: string }) {
+  let message = error;
+  try {
+    const parsed = JSON.parse(error);
+    if (parsed && typeof parsed.message === "string") message = parsed.message;
+  } catch {}
+  const headline = message.split("\n")[0];
+  return (
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-[var(--bad)] [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1 truncate">{headline}</span>
+        <span className="faint shrink-0 group-open:hidden">Details</span>
+        <span className="faint hidden shrink-0 group-open:inline">Hide</span>
+      </summary>
+      <pre className="mono muted mt-2 max-h-64 overflow-auto border border-[var(--border)] bg-[var(--bg)] p-2 text-[11px] break-all whitespace-pre-wrap">
+        {error}
+      </pre>
+    </details>
   );
 }

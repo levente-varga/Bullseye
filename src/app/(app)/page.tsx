@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ExpandableJobRow } from "@/components/ExpandableJobRow";
 import { PendingBar } from "@/components/PendingBar";
+import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
 import { ago, pad2 } from "@/lib/time";
@@ -48,16 +49,12 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
           </>
         }
         actions={
-          <div className="inline-flex border border-[var(--border-strong)] text-[12px]">
-            <Link href="/" className={`px-2.5 py-1 ${!showAll ? "bg-[var(--surface-2)]" : "muted"}`}>
-              Above threshold
-              <PendingBar />
-            </Link>
-            <Link href="/?all=1" className={`border-l border-[var(--border-strong)] px-2.5 py-1 ${showAll ? "bg-[var(--surface-2)]" : "muted"}`}>
-              All scored
-              <PendingBar />
-            </Link>
-          </div>
+          <Segmented
+            options={[
+              { href: "/", label: "Above threshold", active: !showAll },
+              { href: "/?all=1", label: "All scored", active: showAll },
+            ]}
+          />
         }
       />
 
