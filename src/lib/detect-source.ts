@@ -87,6 +87,7 @@ export async function detectSource(input: string): Promise<Detected | { error: s
   }
 
   // Confirm by fetching the board; first one that works wins.
+  const failures: string[] = [];
   for (const c of candidates) {
     try {
       // A big Workday site lists hundreds of jobs 20 at a time: one request for the count is enough.
@@ -95,11 +96,16 @@ export async function detectSource(input: string): Promise<Detected | { error: s
           ? await workdayTotal(c.slug)
           : (await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null })).length;
       return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount };
-    } catch {
-      // try the next candidate
+    } catch (e) {
+      // Keep the reason (timeout, 403, bad JSON…) for the message and the logs, then try the next candidate.
+      const reason = e instanceof Error ? (e.name === "TimeoutError" ? "timed out" : e.message) : String(e);
+      console.error(`detectSource: ${c.ats} "${c.slug}" failed: ${reason}`);
+      failures.push(reason);
     }
   }
-  return { error: `Found what looks like a ${candidates[0].ats} board ("${candidates[0].slug}"), but it didn't respond.` };
+  return {
+    error: `Found what looks like a ${ATS_INFO[candidates[0].ats].label} board ("${candidates[0].slug}"), but fetching it failed: ${failures[0]}.`,
+  };
 }
 
 async function fetchText(url: string): Promise<string | null> {
