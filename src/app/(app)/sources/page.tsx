@@ -37,6 +37,9 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   const open = Object.fromEntries(counts);
 
   // Healthy means fetched successfully; a source that hasn't been fetched yet is unknown, not healthy.
+  // Company boards (one employer each) and aggregators (many employers) are listed apart.
+  const boards = sources.filter((s) => !ATS_INFO[s.ats]?.aggregator);
+  const aggregators = sources.filter((s) => ATS_INFO[s.ats]?.aggregator);
   // Aggregators not added yet: one click each, with their default search.
   const missingAggregators = (Object.keys(ATS_INFO) as Ats[]).filter(
     (a) => ATS_INFO[a].aggregator && !sources.some((s) => s.ats === a),
@@ -62,80 +65,38 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
       <div className="space-y-10">
         <section>
+          <SectionHeader title="Company boards" count={boards.length} />
           <Panel>
-            {sources.length === 0 ? (
-              <Empty>No sources yet. Add one below, or pick from the suggestions.</Empty>
+            {boards.length === 0 ? (
+              <Empty>No company boards yet. Add one below, or pick from the suggestions.</Empty>
             ) : (
-              <div className="md:overflow-x-auto">
-                <table className="table table-stack max-md:block md:min-w-[720px]">
-                  <thead>
-                    <tr>
-                      <th className="w-10">#</th>
-                      <th>Source</th>
-                      <th className="w-40">Type</th>
-                      <th className="w-20 text-right">Open</th>
-                      <th className="w-28">Checked</th>
-                      <th className="w-64" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sources.map((s, i) => (
-                      <tr key={s.id} className={s.enabled ? "" : "opacity-55"}>
-                        <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
-                        <td className="max-md:w-full">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Dot
-                              tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
-                              title={
-                                !s.enabled
-                                  ? "Paused"
-                                  : s.last_error
-                                    ? "Last fetch failed"
-                                    : s.last_checked_at
-                                      ? "Last fetch succeeded"
-                                      : "Not checked yet: fetched with the next daily run"
-                              }
-                            />
-                            <a href={ATS_BOARD_URL[s.ats](s.slug)} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-                              {s.company_name}
-                            </a>
-                            {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
-                            {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
-                          </div>
-                          {(!ATS_INFO[s.ats]?.aggregator || (!ATS_INFO[s.ats]?.fixedSlug && s.ats !== "jobtech")) && (
-                            <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
-                              {s.slug}
-                              {s.country && ` · ${s.country.toUpperCase()} only`}
-                            </div>
-                          )}
-                          {s.last_error && (
-                            <div className="mt-1 max-w-[520px] min-w-0 pl-3.5 text-[12px]">
-                              <ErrorDetails error={s.last_error} />
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
-                        </td>
-                        <td className="mono text-right" data-label="Open">{open[s.id]}</td>
-                        <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
-                        <td className="max-md:w-full">
-                          <div className="flex flex-wrap gap-1.5 md:justify-end">
-                            <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />
-                            <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
-                            <form action={deleteSource}>
-                              <input type="hidden" name="id" value={s.id} />
-                              <SubmitButton className="btn btn-danger">Remove</SubmitButton>
-                            </form>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <SourceTable rows={boards} open={open} />
             )}
           </Panel>
+        </section>
+
+        <section>
+          <SectionHeader title="Aggregators" count={aggregators.length} />
+          <Panel>
+            {aggregators.length === 0 ? (
+              <Empty>No aggregators yet.</Empty>
+            ) : (
+              <SourceTable rows={aggregators} open={open} aggregators />
+            )}
+          </Panel>
+          {missingAggregators.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[13px]">
+              {missingAggregators.map((a) => (
+                <form key={a} action={addSource}>
+                  <input type="hidden" name="ats" value={a} />
+                  <input type="hidden" name="slug" value="" />
+                  <SubmitButton className="btn" done="Added">
+                    <span title={ATS_INFO[a].blurb}>+ {ATS_INFO[a].defaultName}</span>
+                  </SubmitButton>
+                </form>
+              ))}
+            </div>
+          )}
         </section>
 
         {addable.length > 0 && (
@@ -192,20 +153,6 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
         <section id="add" className="scroll-mt-6">
           <SectionHeader title="Add a source" />
-          {missingAggregators.length > 0 && (
-            <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[13px]">
-              <span className="eyebrow mr-1">Aggregators</span>
-              {missingAggregators.map((a) => (
-                <form key={a} action={addSource}>
-                  <input type="hidden" name="ats" value={a} />
-                  <input type="hidden" name="slug" value="" />
-                  <SubmitButton className="btn" done="Added">
-                    <span title={ATS_INFO[a].blurb}>+ {ATS_INFO[a].defaultName}</span>
-                  </SubmitButton>
-                </form>
-              ))}
-            </div>
-          )}
           {added && (
             <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
               Added {added}
@@ -275,6 +222,83 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         </section>
       </div>
     </>
+  );
+}
+
+/** One table of sources (company boards or aggregators), with health, counts and actions. */
+function SourceTable(props: { rows: Source[]; open: Record<string, number>; aggregators?: boolean }) {
+  return (
+    <div className="md:overflow-x-auto">
+      <table className="table table-stack max-md:block md:min-w-[720px]">
+        <thead>
+          <tr>
+            <th className="w-10">#</th>
+            <th>Source</th>
+            {/* An aggregator's type is its name: no column for it. */}
+            {!props.aggregators && <th className="w-40">Type</th>}
+            <th className="w-20 text-right">Open</th>
+            <th className="w-28">Checked</th>
+            <th className="w-64" />
+          </tr>
+        </thead>
+        <tbody>
+          {props.rows.map((s, i) => (
+            <tr key={s.id} className={s.enabled ? "" : "opacity-55"}>
+              <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
+              <td className="max-md:w-full">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Dot
+                    tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
+                    title={
+                      !s.enabled
+                        ? "Paused"
+                        : s.last_error
+                          ? "Last fetch failed"
+                          : s.last_checked_at
+                            ? "Last fetch succeeded"
+                            : "Not checked yet: fetched with the next daily run"
+                    }
+                  />
+                  <a href={ATS_BOARD_URL[s.ats](s.slug)} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+                    {s.company_name}
+                  </a>
+                  {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
+                  {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
+                </div>
+                {(!ATS_INFO[s.ats]?.aggregator || (!ATS_INFO[s.ats]?.fixedSlug && s.ats !== "jobtech")) && (
+                  <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
+                    {s.slug}
+                    {s.country && ` · ${s.country.toUpperCase()} only`}
+                  </div>
+                )}
+                {s.last_error && (
+                  <div className="mt-1 max-w-[520px] min-w-0 pl-3.5 text-[12px]">
+                    <ErrorDetails error={s.last_error} />
+                  </div>
+                )}
+              </td>
+              {!props.aggregators && (
+                <td>
+                  <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{(ATS_INFO[s.ats]?.label ?? s.ats).replace(" (aggregator)", "")}</Pill>
+                </td>
+              )}
+              <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
+              <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
+              <td className="max-md:w-full">
+                <div className="flex flex-wrap gap-1.5 md:justify-end">
+                  <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />
+                  <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
+                  <form action={deleteSource}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <SubmitButton className="btn btn-danger">Remove</SubmitButton>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
