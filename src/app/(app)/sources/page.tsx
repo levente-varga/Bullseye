@@ -35,7 +35,9 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   );
   const open = Object.fromEntries(counts);
 
-  const ok = sources.filter((s) => s.enabled && !s.last_error).length;
+  // Healthy means fetched successfully; a source that hasn't been fetched yet is unknown, not healthy.
+  const ok = sources.filter((s) => s.enabled && !s.last_error && s.last_checked_at).length;
+  const unchecked = sources.filter((s) => s.enabled && !s.last_error && !s.last_checked_at).length;
   const failing = sources.filter((s) => s.enabled && s.last_error).length;
   const paused = sources.filter((s) => !s.enabled).length;
 
@@ -46,6 +48,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         meta={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex items-center gap-1.5"><Dot tone="ok" /><span className="mono text-[var(--fg)]">{ok}</span> healthy</span>
+            {unchecked > 0 && <span className="inline-flex items-center gap-1.5"><Dot tone="warn" /><span className="mono text-[var(--fg)]">{unchecked}</span> not checked yet</span>}
             {failing > 0 && <span className="inline-flex items-center gap-1.5"><Dot tone="bad" /><span className="mono text-[var(--fg)]">{failing}</span> failing</span>}
             {paused > 0 && <span className="inline-flex items-center gap-1.5"><Dot /><span className="mono text-[var(--fg)]">{paused}</span> paused</span>}
             <span className="faint">A posting found in two places is stored once; the company&apos;s own board wins.</span>
@@ -77,7 +80,18 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                         <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
                         <td className="max-md:w-full">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Dot tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"} />
+                            <Dot
+                              tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
+                              title={
+                                !s.enabled
+                                  ? "Paused"
+                                  : s.last_error
+                                    ? "Last fetch failed"
+                                    : s.last_checked_at
+                                      ? "Last fetch succeeded"
+                                      : "Not checked yet: fetched with the next daily run"
+                              }
+                            />
                             <a href={ATS_BOARD_URL[s.ats](s.slug)} target="_blank" rel="noreferrer" className="font-medium hover:underline">
                               {s.company_name}
                             </a>
