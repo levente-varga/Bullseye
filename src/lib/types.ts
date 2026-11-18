@@ -8,10 +8,19 @@ export type Ats =
   | "recruitee"
   | "workable"
   | "workday"
+  | "jobtech"
   | "swedengamejobs";
 
 /** How each source type is configured on the Sources page. */
-export const ATS_INFO: Record<Ats, { label: string; slugLabel: string; slugExample: string; aggregator?: boolean }> = {
+/**
+ * aggregator: lists other companies' jobs (runs after direct sources, never overrides them).
+ * suggests: its links are mined for direct sources to suggest.
+ * partial: only shows recent ads, so ads missing from it aren't closed.
+ */
+export const ATS_INFO: Record<
+  Ats,
+  { label: string; slugLabel: string; slugExample: string; aggregator?: boolean; suggests?: boolean; partial?: boolean }
+> = {
   greenhouse: { label: "Greenhouse", slugLabel: "Board slug or URL", slugExample: "job-boards.greenhouse.io/mojangab" },
   lever: { label: "Lever", slugLabel: "Board slug or URL", slugExample: "jobs.lever.co/avalanchestudios" },
   ashby: { label: "Ashby", slugLabel: "Board slug or URL", slugExample: "jobs.ashbyhq.com/voodoo" },
@@ -21,7 +30,20 @@ export const ATS_INFO: Record<Ats, { label: string; slugLabel: string; slugExamp
   recruitee: { label: "Recruitee", slugLabel: "Career site URL", slugExample: "bunq.recruitee.com" },
   workable: { label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
   workday: { label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
-  swedengamejobs: { label: "Sweden Game Jobs (aggregator)", slugLabel: "—", slugExample: "swedengamejobs.com", aggregator: true },
+  jobtech: {
+    label: "JobTech / Platsbanken (aggregator)",
+    slugLabel: "Search parameters (optional)",
+    slugExample: "occupation-field=apaJ_2ja_LuF",
+    aggregator: true,
+    partial: true,
+  },
+  swedengamejobs: {
+    label: "Sweden Game Jobs (aggregator)",
+    slugLabel: "—",
+    slugExample: "swedengamejobs.com",
+    aggregator: true,
+    suggests: true,
+  },
 };
 
 export type JobStatus =

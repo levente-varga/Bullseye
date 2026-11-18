@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
+import { JOBTECH_DEFAULT_QUERY } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { createClient } from "@/lib/supabase/server";
@@ -146,6 +147,8 @@ export async function addExcludeKeyword(form: FormData) {
 function normalizeSlug(ats: Ats, input: string): string {
   const raw = input.trim();
   if (ats === "swedengamejobs") return "swedengamejobs.com";
+  // JobTech: search parameters (as in a jobsearch.api.jobtechdev.se URL); empty means the default search.
+  if (ats === "jobtech") return raw.replace(/^.*\?/, "").trim() || JOBTECH_DEFAULT_QUERY;
   const host = raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
   if (ats === "teamtailor") return host; // e.g. career.paradoxplaza.com
   // Career site hosts; a bare company name gets the default domain.
@@ -186,7 +189,7 @@ export async function addSource(form: FormData) {
     ats = chosen as Ats;
     slug = normalizeSlug(ats, str(form, "slug"));
     if (!slug) back({ error: "Enter the board, domain or URL." });
-    name ||= ats === "swedengamejobs" ? "Sweden Game Jobs" : slug;
+    name ||= ats === "swedengamejobs" ? "Sweden Game Jobs" : ats === "jobtech" ? "Platsbanken (JobTech)" : slug;
   }
 
   const { error } = await supabase.from("sources").insert({
