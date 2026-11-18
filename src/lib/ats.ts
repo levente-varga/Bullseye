@@ -2,7 +2,7 @@ import type { Ats, FetchedJob, Source } from "./types";
 
 /**
  * Adapters for job sources. The ATS ones (Greenhouse, Lever, Ashby,
- * Teamtailor, SmartRecruiters, Personio, Recruitee, Workable, Workday) are
+ * Teamtailor, SmartRecruiters, Personio, Recruitee, Workable, Workday, Pinpoint) are
  * public endpoints companies publish for exactly this purpose. Sweden Game Jobs is an aggregator read from its page
  * data; it only gives titles and links, so descriptions are fetched later.
  */
@@ -471,6 +471,64 @@ export async function workdayTotal(slug: string): Promise<number> {
   return ((await res.json()) as { total?: number }).total ?? 0;
 }
 
+// --- Pinpoint (JSON feed) -----------------------------------------------------------
+// Slug: the career site host, "<company>.pinpointhq.com".
+
+interface PinpointPosting {
+  id: string;
+  title: string;
+  url: string;
+  description?: string | null;
+  key_responsibilities?: string | null;
+  key_responsibilities_header?: string | null;
+  skills_knowledge_expertise?: string | null;
+  skills_knowledge_expertise_header?: string | null;
+  benefits?: string | null;
+  benefits_header?: string | null;
+  workplace_type?: string | null;
+  location?: { city?: string | null; name?: string | null; province?: string | null } | null;
+  compensation_visible?: boolean;
+  compensation_minimum?: number | null;
+  compensation_maximum?: number | null;
+  compensation_currency?: string | null;
+  compensation_frequency?: string | null;
+}
+
+async function fetchPinpoint(host: string, company: string): Promise<FetchedJob[]> {
+  const data = await getJson<{ data: PinpointPosting[] }>(`https://${host}/postings.json`);
+  return data.data.map((j) => {
+    const l = j.location ?? {};
+    // `name` is the location's label: a country or region, or just "Remote".
+    const location = [l.city, l.name && l.name !== l.city ? l.name : null].filter(Boolean).join(", ");
+    const section = (header: string | null | undefined, html: string | null | undefined) =>
+      html ? `${header ? `${header}\n` : ""}${htmlToText(html)}` : "";
+    const pay =
+      j.compensation_visible && (j.compensation_minimum || j.compensation_maximum)
+        ? `${j.compensation_minimum ?? "?"}–${j.compensation_maximum ?? "?"} ${j.compensation_currency ?? ""} ${j.compensation_frequency ?? ""}`.trim()
+        : null;
+    return {
+      external_id: String(j.id),
+      title: j.title.trim(),
+      company,
+      location,
+      remote: j.workplace_type === "remote" || j.workplace_type === "hybrid" || looksRemote(location),
+      url: j.url,
+      description: clip(
+        [
+          section(null, j.description),
+          section(j.key_responsibilities_header, j.key_responsibilities),
+          section(j.skills_knowledge_expertise_header, j.skills_knowledge_expertise),
+          section(j.benefits_header, j.benefits),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      ),
+      compensation: pay,
+      posted_at: null, // the feed has no publish date
+    };
+  });
+}
+
 // --- JobTech / Platsbanken (aggregator) -------------------------------------------
 // Sweden's public employment service publishes every job ad in Platsbanken through an
 // open API (jobtechdev.se), most of them in Swedish. Slug: search parameters, e.g.
@@ -604,6 +662,8 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchWorkable(slug, company);
     case "workday":
       return fetchWorkday(slug, company);
+    case "pinpoint":
+      return fetchPinpoint(slug, company);
     case "jobtech":
       return fetchJobTech(slug);
     case "swedengamejobs":
@@ -621,6 +681,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   recruitee: (s) => `https://${s}`,
   workable: (s) => `https://apply.workable.com/${s}`,
   workday: (s) => `https://${s}`,
+  pinpoint: (s) => `https://${s}`,
   jobtech: () => "https://arbetsformedlingen.se/platsbanken/",
   swedengamejobs: () => "https://www.swedengamejobs.com/",
 };

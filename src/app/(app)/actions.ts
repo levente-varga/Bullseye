@@ -154,6 +154,7 @@ function normalizeSlug(ats: Ats, input: string): string {
   // Career site hosts; a bare company name gets the default domain.
   if (ats === "personio") return host.includes(".") ? host : `${host}.jobs.personio.de`;
   if (ats === "recruitee") return host.includes(".") ? host : `${host}.recruitee.com`;
+  if (ats === "pinpoint") return host.includes(".") ? host : `${host}.pinpointhq.com`;
   if (ats === "workday") {
     // "<tenant>.wd<N>.myworkdayjobs.com/<site>", from a careers site or posting URL.
     const d = detectAts(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
