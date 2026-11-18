@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isJobylonPosting, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -35,11 +35,18 @@ export async function describe(
     const { text, location } = await fetchWorkdayPosting(wd.slug, wd.path);
     return { text, location: location || undefined };
   }
+  // Jobylon lists name the city only; the posting's structured data adds the country.
+  if (isJobylonPosting(job.url)) return describePage(job.url);
   return { text: await describeFromPage(job.url) };
 }
 
 /** Fetches a posting page and extracts its text: schema.org JobPosting first, then the page body. */
 export async function describeFromPage(url: string): Promise<string> {
+  return (await describePage(url)).text;
+}
+
+/** The posting's text, and its location ("City, Country") when its structured data has one. */
+async function describePage(url: string): Promise<{ text: string; location?: string }> {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     redirect: "follow",
@@ -55,7 +62,7 @@ export async function describeFromPage(url: string): Promise<string> {
       const found = findJobPosting(JSON.parse(m[1]));
       if (found?.description) {
         const text = htmlToText(String(found.description));
-        if (text.length >= THIN_THRESHOLD) return text.slice(0, MAX);
+        if (text.length >= THIN_THRESHOLD) return { text: text.slice(0, MAX), location: postingLocation(found) };
       }
     } catch {
       // malformed JSON-LD: ignore and keep looking
@@ -80,7 +87,26 @@ export async function describeFromPage(url: string): Promise<string> {
     .filter((l) => l.length > 1)
     .join("\n");
   if (text.length < 2000 && CLOSED_RE.test(text)) throw new PostingClosedError(`closed: ${url}`);
-  return text.slice(0, MAX);
+  return { text: text.slice(0, MAX) };
+}
+
+/** "Helsinki, Finland" from a JobPosting's jobLocation (one place or several), if it has a country. */
+function postingLocation(posting: { jobLocation?: Json }): string | undefined {
+  const places = Array.isArray(posting.jobLocation) ? posting.jobLocation : posting.jobLocation ? [posting.jobLocation] : [];
+  const names = places
+    .map((pl) => {
+      const a = (pl && typeof pl === "object" && !Array.isArray(pl) ? pl.address : null) as Record<string, Json> | null;
+      if (!a || typeof a !== "object") return "";
+      const country = typeof a.addressCountry === "object" && a.addressCountry ? (a.addressCountry as Record<string, Json>).name : a.addressCountry;
+      if (typeof country === "string" && country.trim()) {
+        return [a.addressLocality, country].filter((x) => typeof x === "string" && x.trim()).join(", ");
+      }
+      // Some (Jobylon) put "Helsinki, Finland" in streetAddress and leave out the country.
+      const street = typeof a.streetAddress === "string" ? a.streetAddress.trim() : "";
+      return street.includes(",") ? street : "";
+    })
+    .filter((n) => n.includes(","));
+  return names.length ? [...new Set(names)].join(" | ") : undefined;
 }
 
 /** The inner HTML of the first <div> whose opening tag matches `open`, honoring nested divs. */
@@ -100,7 +126,7 @@ function innerDiv(html: string, open: RegExp): string | null {
 
 type Json = null | string | number | boolean | Json[] | { [k: string]: Json };
 
-function findJobPosting(node: Json): { description?: Json } | null {
+function findJobPosting(node: Json): { description?: Json; jobLocation?: Json } | null {
   if (Array.isArray(node)) {
     for (const n of node) {
       const f = findJobPosting(n);

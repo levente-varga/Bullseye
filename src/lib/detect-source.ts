@@ -31,6 +31,13 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
     re: /([a-z0-9-]+\.wd\d+\.myworkdayjobs\.com)\/(?:[a-z]{2}-[A-Z]{2}\/)?([A-Za-z0-9_-]+)/,
     slug: (m) => `${m[1].toLowerCase()}/${m[2]}`,
   },
+  // Jobylon: the widget on a careers page (jbl_company_id = 2986), a posting page
+  // (company_id = 2986;), or a company/embed link.
+  {
+    ats: "jobylon",
+    re: /(?:\bjbl_company_id\s*=\s*|\bcompany_id = |(?:emp|cdn)\.jobylon\.com\/(?:jobs\/)?companies\/)(\d+)/,
+    slug: (m) => m[1],
+  },
 ];
 
 /** "Greenhouse, Lever, …": every company job system (aggregators excluded). */
@@ -91,11 +98,11 @@ export async function detectSource(input: string): Promise<Detected | { error: s
   for (const c of candidates) {
     try {
       // A big Workday site lists hundreds of jobs 20 at a time: one request for the count is enough.
-      const jobCount =
-        c.ats === "workday"
-          ? await workdayTotal(c.slug)
-          : (await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null })).length;
-      return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount };
+      if (c.ats === "workday") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await workdayTotal(c.slug) };
+      const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
+      // Jobylon's slug is a number; its listings carry the company's name.
+      const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
+      return { ...c, companyGuess, jobCount: jobs.length };
     } catch (e) {
       // Keep the reason (timeout, 403, bad JSON…) for the message and the logs, then try the next candidate.
       const reason = e instanceof Error ? (e.name === "TimeoutError" ? "timed out" : e.message) : String(e);

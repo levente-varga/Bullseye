@@ -5,8 +5,8 @@ import { Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
-import type { Member } from "@/lib/types";
-import { cancelInvite, inviteMember, removeMember, updateMemberCaps } from "../actions";
+import type { Member, Settings } from "@/lib/types";
+import { cancelInvite, inviteMember, removeMember, saveMemberDefaults, updateMemberCaps } from "../actions";
 
 /** Admin only: invite friends, set their AI spend caps, remove them. */
 export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
@@ -16,13 +16,15 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   if (!me.isAdmin) notFound();
 
   const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
-  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }] = await Promise.all([
+  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }, { data: st }] = await Promise.all([
     supabase.from("members").select("*").order("created_at"),
     supabase.from("invites").select("*").order("invited_at", { ascending: false }),
     // Everyone's spend in the last 24 hours (admin sees all run shares).
     supabase.from("run_users").select("user_id, stats, runs!inner(started_at)").gte("runs.started_at", dayAgo),
     supabase.from("subscriptions").select("user_id"),
+    supabase.from("settings").select("*").single(),
   ]);
+  const settings = st as Settings;
   const members = (m ?? []) as Member[];
   const memberEmails = new Set(members.map((x) => x.email.toLowerCase()));
   // An invite is done once its person is a member and has signed in (or it failed).
@@ -59,14 +61,25 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
               <span className="label">Email</span>
               <input name="email" type="email" required placeholder="friend@example.com" className="input" />
             </label>
-            <SubmitButton className="btn-primary" done="Queued">
+            <SubmitButton className="btn-primary btn-field" done="Queued">
               Send invite
             </SubmitButton>
           </form>
           <p className="faint mt-2 text-[12px] leading-relaxed">
-            They get an email with a link to set a password. New members start with default spend caps ($0.25 per run, $1 per
-            24 hours), no sources and an empty profile.
+            They get an email with a link to set a password. They start with no sources, an empty profile, and the
+            default spend caps below.
           </p>
+          <form action={saveMemberDefaults} className="panel mt-3 flex flex-wrap items-end gap-3 p-3">
+            <div className="w-full text-[13px]">
+              Defaults for new members
+              <span className="hint">
+                The caps someone starts with when they accept an invite. Existing members keep theirs; change them below.
+              </span>
+            </div>
+            <Money name="default_run_cost_usd" label="Per run" value={settings.default_run_cost_usd} />
+            <Money name="default_daily_cost_usd" label="Per 24 hours" value={settings.default_daily_cost_usd} />
+            <SubmitButton className="btn btn-field" done="Saved">Save defaults</SubmitButton>
+          </form>
           {invites.length > 0 && (
             <Panel title="Pending invites" aside={String(invites.length)}>
               <ul className="divide">
@@ -117,7 +130,7 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                         <input type="hidden" name="user_id" value={x.user_id} />
                         <Money name="max_run_cost_usd" label="Per run" value={x.max_run_cost_usd} />
                         <Money name="max_daily_cost_usd" label="Per 24 hours" value={x.max_daily_cost_usd} />
-                        <SubmitButton className="btn" done="Saved">Save caps</SubmitButton>
+                        <SubmitButton className="btn btn-field" done="Saved">Save caps</SubmitButton>
                       </form>
                       {!x.is_admin && x.user_id !== me.id && (
                         <form action={removeMember} className="ml-auto flex flex-wrap items-center gap-2 text-[12px]">
@@ -150,7 +163,7 @@ function Money(props: { name: string; label: string; value: number }) {
       <span className="hint">{props.label}</span>
       <span className="flex items-center gap-1.5">
         <span className="faint mono">$</span>
-        <input name={props.name} type="number" min={0} step={0.05} defaultValue={props.value} className="input mono w-24" />
+        <input name={props.name} type="number" min={0} step={0.01} defaultValue={props.value} className="input mono w-24" />
       </span>
     </label>
   );

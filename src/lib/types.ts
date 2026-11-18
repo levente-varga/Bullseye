@@ -9,6 +9,7 @@ export type Ats =
   | "workable"
   | "workday"
   | "pinpoint"
+  | "jobylon"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -51,6 +52,7 @@ export const ATS_INFO: Record<
   workable: { label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
   workday: { label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
   pinpoint: { label: "Pinpoint", slugLabel: "Career site URL", slugExample: "workwithus.pinpointhq.com" },
+  jobylon: { label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
   jobtech: {
     label: "JobTech / Platsbanken (aggregator)",
     slugLabel: "Search parameters (optional)",
@@ -212,6 +214,9 @@ export interface Settings {
   scoring_model: ScoringModel;
   /** AI spend across everyone per rolling 24 hours (USD): a backstop over the per-person caps. */
   max_total_daily_cost_usd: number;
+  /** The caps (USD) a new member starts with. */
+  default_run_cost_usd: number;
+  default_daily_cost_usd: number;
 }
 
 /** Someone who may use the app. Their AI spend caps (USD; 0 = no scoring) are set by the admin. */

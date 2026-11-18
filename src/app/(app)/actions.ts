@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
-import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, workdayFromUrl } from "@/lib/ats";
+import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
@@ -133,7 +133,7 @@ export async function saveSettings(form: FormData) {
           scoring_model: SCORING_MODELS.some((m) => m.id === str(form, "scoring_model"))
             ? str(form, "scoring_model")
             : DEFAULT_SCORING_MODEL,
-          max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd"), 3),
+          max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd")),
           ...scheduleFields(form),
           updated_at: new Date().toISOString(),
         })
@@ -146,8 +146,8 @@ export async function saveSettings(form: FormData) {
       await supabase
         .from("members")
         .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
         })
         .eq("user_id", me.id)
     ).error,
@@ -210,7 +210,7 @@ export async function reevaluate(form: FormData) {
       const noText = !j.description || j.thin;
       const reason = hardFilter(j as unknown as FetchedJob, criteria, {
         skipKeywordCheck: noText,
-        locationPending: !j.description && workdayFromUrl(j.url) !== null,
+        locationPending: !j.description && locationNeedsDetail(j.url),
       });
       if (reason) {
         // Still filtered with a different reason: the reason is updated, but it isn't a move.
@@ -254,10 +254,10 @@ export async function addExcludeKeyword(form: FormData) {
   revalidatePath("/criteria");
 }
 
-/** A dollar amount from a form field: non-negative, two decimals; the fallback when empty or invalid. */
-function money(raw: string, fallback: number): number {
+/** A dollar amount from a form field: non-negative, in cents; undefined when empty or invalid (the value stays as it was). */
+function money(raw: string): number | undefined {
   const n = Number(raw);
-  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : fallback;
+  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : undefined;
 }
 
 // --- Sources ----------------------------------------------------------------
@@ -275,6 +275,8 @@ function normalizeSlug(ats: Ats, input: string): string {
     const m = raw.match(/categories\/([a-z0-9-]+)/i);
     return (m ? m[1] : raw.replace(/\.rss$/, "")).toLowerCase() || WWR_DEFAULT_CATEGORY;
   }
+  // Jobylon: the company id, bare or from a company/embed URL (a posting URL needs Auto-detect).
+  if (ats === "jobylon") return raw.match(/companies\/(\d+)/)?.[1] ?? (/^\d+$/.test(raw) ? raw : "");
   const host = raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
   if (ats === "teamtailor") return host; // e.g. career.paradoxplaza.com
   // Career site hosts; a bare company name gets the default domain.
@@ -316,6 +318,10 @@ export async function addSource(form: FormData) {
     ats = chosen as Ats;
     slug = normalizeSlug(ats, str(form, "slug"));
     if (!slug) back({ error: "Enter the board, domain or URL." });
+    // A Jobylon id says nothing about the company: take the name from its listings.
+    if (!name && ats === "jobylon") {
+      name = (await fetchBoard({ ats, slug: slug!, company_name: "", country: null }).catch(() => []))[0]?.company ?? "";
+    }
     name ||= ATS_INFO[ats].defaultName ?? slug;
   }
 
@@ -542,8 +548,8 @@ export async function updateMemberCaps(form: FormData) {
       await supabase
         .from("members")
         .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
         })
         .eq("user_id", str(form, "user_id"))
     ).error,
@@ -556,5 +562,25 @@ export async function removeMember(form: FormData) {
   const supabase = await db();
   if (form.get("confirm") !== "on") redirect("/admin?error=Tick the box to confirm removing a member.");
   check((await supabase.rpc("remove_member", { p_user: str(form, "user_id") })).error);
+  revalidatePath("/admin");
+}
+
+/** The caps new members start with (admin only; RLS enforces it too). */
+export async function saveMemberDefaults(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return;
+  check(
+    (
+      await supabase
+        .from("settings")
+        .update({
+          default_run_cost_usd: money(str(form, "default_run_cost_usd")),
+          default_daily_cost_usd: money(str(form, "default_daily_cost_usd")),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", 1)
+    ).error,
+  );
   revalidatePath("/admin");
 }

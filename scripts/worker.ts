@@ -15,7 +15,7 @@
 import "./env";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchBoard, probeHost, workdayFromUrl } from "../src/lib/ats";
+import { fetchBoard, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
@@ -197,8 +197,8 @@ function verdict(job: Pick<JobRow, "url" | "title" | "location" | "remote" | "de
   const noText = !job.description || job.thin;
   return hardFilter(job as unknown as FetchedJob, c, {
     skipKeywordCheck: noText,
-    // Workday lists lack countries ("Best", "3 Locations"): judge the location once the detail is in.
-    locationPending: !job.description && !job.thin && workdayFromUrl(job.url) !== null,
+    // Workday and Jobylon lists lack countries: judge the location once the detail is in.
+    locationPending: !job.description && !job.thin && locationNeedsDetail(job.url),
   });
 }
 
@@ -836,6 +836,8 @@ async function scoringDue(settings: Settings): Promise<boolean> {
  */
 async function processInvites() {
   const pending = await must<{ email: string }[]>(db.from("invites").select("email").is("sent_at", null).is("error", null));
+  if (!pending.length) return;
+  const settings = await loadSettings();
   const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
   for (const { email } of pending) {
     try {
@@ -847,7 +849,18 @@ async function processInvites() {
         link = await db.auth.admin.generateLink({ type: "recovery", email });
       }
       if (link.error || !link.data.user) throw new Error(link.error?.message ?? "no user returned");
-      await must(db.from("members").upsert({ user_id: link.data.user.id, email }, { onConflict: "user_id", ignoreDuplicates: true }));
+      // New members start with the admin's default caps; an existing member keeps theirs.
+      await must(
+        db.from("members").upsert(
+          {
+            user_id: link.data.user.id,
+            email,
+            max_run_cost_usd: settings.default_run_cost_usd,
+            max_daily_cost_usd: settings.default_daily_cost_usd,
+          },
+          { onConflict: "user_id", ignoreDuplicates: true },
+        ),
+      );
       const url = `${appUrl}/auth/confirm?${new URLSearchParams({ token_hash: link.data.properties.hashed_token, type: reset ? "recovery" : "invite" })}`;
       const { subject, html } = renderInvite(url, reset);
       await sendEmail(subject, html, email);
