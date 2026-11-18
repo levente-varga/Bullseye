@@ -23,9 +23,13 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const signedIn = Boolean(data?.claims);
   const onLogin = request.nextUrl.pathname.startsWith("/login");
+  // Invite and password-reset links arrive signed out; /auth/confirm signs them in.
+  const onAuth = request.nextUrl.pathname.startsWith("/auth/");
 
-  if (!signedIn && !onLogin) return NextResponse.redirect(new URL("/login", request.url));
-  if (signedIn && onLogin) return NextResponse.redirect(new URL("/", request.url));
+  if (!signedIn && !onLogin && !onAuth) return NextResponse.redirect(new URL("/login", request.url));
+  // A signed-in visitor on /login goes to the app, unless the app sent them there with an error
+  // (e.g. an account that isn't a member), which would otherwise loop.
+  if (signedIn && onLogin && !request.nextUrl.searchParams.has("error")) return NextResponse.redirect(new URL("/", request.url));
   return response;
 }
 

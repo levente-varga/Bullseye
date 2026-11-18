@@ -1,11 +1,16 @@
 /**
  * Bullseye worker. Runs in GitHub Actions (or locally with `npm run worker -- <mode>`).
  *
- *   tick       every 15 minutes: run whatever the schedule (Criteria page) says is due
- *   watchlist  poll watchlist companies only; email an alert for strong new matches
- *   full       poll every enabled source; score new listings
- *   score      describe and score jobs already waiting (after a re-evaluation); no fetching
- *   digest     send the daily email: new matches, follow-ups due, status changes
+ *   tick       every 15 minutes: run whatever the schedule (Settings) says is due
+ *   watchlist  poll watched sources only; email alerts for strong new matches
+ *   full       poll every followed source; score new listings
+ *   score      describe and score listings already waiting (after a re-evaluation); no fetching
+ *   digest     send each member's daily email: new matches, follow-ups due, status changes
+ *
+ * Several people can use one Bullseye. Postings (jobs) and boards (sources) are shared
+ * and fetched once; each person has their own matches (status and score for a posting),
+ * subscriptions (the sources they follow), criteria, CV and spend caps. A posting
+ * reaches someone when a source they follow lists it, filtered by their own criteria.
  */
 import "./env";
 import Anthropic from "@anthropic-ai/sdk";
@@ -17,20 +22,25 @@ import { hardFilter } from "../src/lib/filters";
 import { costUsd } from "../src/lib/pricing";
 import { dueNow } from "../src/lib/schedule";
 import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "../src/lib/scoring";
-import { renderDigest, renderWatchlistAlert, sendEmail } from "../src/lib/email";
-import { ATS_INFO, type Criteria, type FetchedJob, type Job, type Profile, type Source } from "../src/lib/types";
+import { renderDigest, renderInvite, renderWatchlistAlert, sendEmail } from "../src/lib/email";
+import {
+  ATS_INFO,
+  type Criteria,
+  type FetchedJob,
+  type Job,
+  type JobStatus,
+  type Member,
+  type Profile,
+  type Settings,
+  type Source,
+} from "../src/lib/types";
 
-/**
- * watchlist / full: fetch sources, then describe and score what's new.
- * score: no fetching; describe and score jobs waiting from earlier (re-evaluation, overflow).
- * digest: the daily email.
- */
 type Mode = "watchlist" | "full" | "score" | "digest";
 
 const MAX_SCORE_PER_RUN = Number(process.env.MAX_SCORE_PER_RUN || 60);
 const SCORE_CONCURRENCY = 4;
 const DESCRIBE_CONCURRENCY = 4;
-const OPEN_STATUSES = ["new", "filtered", "scored"];
+const OPEN_STATUSES: JobStatus[] = ["new", "filtered", "scored"];
 
 function env(name: string): string {
   const v = process.env[name];
@@ -65,27 +75,8 @@ async function must<T = unknown>(p: Result): Promise<T> {
   return data as T;
 }
 
-async function loadContext() {
-  const criteria = await must<Criteria>(db.from("criteria").select("*").eq("id", 1).single());
-  const profile = await must<Profile>(db.from("profile").select("*").eq("id", 1).single());
-  const rows = await must<
-    { decision: "approve" | "skip"; reasons: string[]; note: string | null; jobs: { title: string; company: string } | null }[]
-  >(
-    db
-      .from("feedback")
-      .select("decision, reasons, note, jobs(title, company)")
-      .order("created_at", { ascending: false })
-      .limit(40),
-  );
-  const feedback: FeedbackExample[] = rows
-    .filter((r) => r.jobs)
-    .map((r) => ({ ...r.jobs!, decision: r.decision, reasons: r.reasons, note: r.note }));
-  return { criteria, profile, feedback };
-}
-
-// ---------------------------------------------------------------------------
-// Fetch + filter
-// ---------------------------------------------------------------------------
+/** Splits a list into chunks (ids travel in the request URL, which is capped at ~16 KB). */
+const chunks = <T>(xs: T[], n = 150): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
 /** Runs `fn` over `items` with at most `n` in flight. */
 async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
@@ -95,12 +86,86 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>) {
   }));
 }
 
-type Existing = { id: string; source_id: string; dedupe_key: string; status: string; thin: boolean };
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
 
-/** Jobs from any source sharing one of these dedupe keys. */
+interface Subscription {
+  user_id: string;
+  source_id: string;
+  watchlist: boolean;
+  enabled: boolean;
+}
+
+interface Person {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  runCap: number;
+  dayCap: number;
+  criteria: Criteria;
+  /** Enabled subscriptions only. */
+  subs: Subscription[];
+}
+
+async function loadSettings(): Promise<Settings> {
+  return must<Settings>(db.from("settings").select("*").eq("id", 1).single());
+}
+
+async function loadPeople(): Promise<Person[]> {
+  const [members, criteria, subs] = await Promise.all([
+    must<Member[]>(db.from("members").select("*")),
+    must<Criteria[]>(db.from("criteria").select("*")),
+    selectAll<Subscription>((a, b) => db.from("subscriptions").select("user_id, source_id, watchlist, enabled").eq("enabled", true).range(a, b)),
+  ]);
+  const byUser = new Map(criteria.map((c) => [c.user_id, c]));
+  return members
+    .filter((m) => byUser.has(m.user_id))
+    .map((m) => ({
+      id: m.user_id,
+      email: m.email,
+      isAdmin: m.is_admin,
+      runCap: Number(m.max_run_cost_usd),
+      dayCap: Number(m.max_daily_cost_usd),
+      criteria: byUser.get(m.user_id)!,
+      subs: subs.filter((s) => s.user_id === m.user_id),
+    }));
+}
+
+/** The people who follow a source (enabled subscriptions). */
+const followers = (people: Person[], sourceId: string) => people.filter((p) => p.subs.some((s) => s.source_id === sourceId));
+
 /**
- * Keys travel in the request URL, which the API caps at ~16 KB. Batches are sized
- * by length, not count: URL-based keys (aggregators like JobTech) can be 100+ chars.
+ * Per-person stats for this run (what was matched, filtered and scored for them, and
+ * what it cost), saved to run_users: each person's Report and spend caps read these.
+ */
+class PerPerson {
+  private m = new Map<string, Record<string, number>>();
+  add(userId: string, key: string, n = 1) {
+    if (!n) return;
+    const s = this.m.get(userId) ?? {};
+    s[key] = (s[key] ?? 0) + n;
+    this.m.set(userId, s);
+  }
+  set(userId: string, stats: Record<string, number>) {
+    const s = this.m.get(userId) ?? {};
+    for (const [k, v] of Object.entries(stats)) s[k] = (s[k] ?? 0) + v;
+    this.m.set(userId, s);
+  }
+  entries() {
+    return [...this.m.entries()];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch
+// ---------------------------------------------------------------------------
+
+type Existing = { id: string; source_id: string; dedupe_key: string; thin: boolean };
+
+/**
+ * Jobs from any source sharing one of these dedupe keys. Keys travel in the request
+ * URL, so batches are sized by length: URL-based keys can be 100+ characters.
  */
 const KEY_BATCH_CHARS = 6000;
 
@@ -118,22 +183,76 @@ async function findByKeys(keys: string[]): Promise<Map<string, Existing>> {
     size += cost;
   }
   for (const batch of batches.filter((b) => b.length)) {
-    const rows = await must<Existing[]>(
-      db.from("jobs").select("id, source_id, dedupe_key, status, thin").in("dedupe_key", batch),
-    );
+    const rows = await must<Existing[]>(db.from("jobs").select("id, source_id, dedupe_key, thin").in("dedupe_key", batch));
     for (const r of rows) out.set(r.dedupe_key, r);
   }
   return out;
 }
 
+/** What a filter needs to know about a stored posting. */
+type JobRow = { id: string; url: string; title: string; location: string; remote: boolean; description: string; thin: boolean; closed_at: string | null };
+
+/** One person's filter verdict on a posting; null passes. Descriptions that aren't in yet skip the keyword check. */
+function verdict(job: Pick<JobRow, "url" | "title" | "location" | "remote" | "description" | "thin">, c: Criteria): string | null {
+  const noText = !job.description || job.thin;
+  return hardFilter(job as unknown as FetchedJob, c, {
+    skipKeywordCheck: noText,
+    // Workday lists lack countries ("Best", "3 Locations"): judge the location once the detail is in.
+    locationPending: !job.description && !job.thin && workdayFromUrl(job.url) !== null,
+  });
+}
+
 /**
- * Fetches one source and stores what's new. Direct sources (company ATSes)
- * run before aggregators: an aggregator only adds postings no other source
- * has, and a direct source "adopts" a posting an aggregator found first, so
- * your decisions on it are kept and it gets the full description.
+ * Gives each of `people` a match for each posting they don't have one for yet, filtered
+ * by their own criteria: "new" (to be described if needed, then scored) or "filtered".
+ * Closed postings are skipped.
  */
-async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set<string>) {
-  const stats = { fetched: 0, inserted: 0, filtered: 0, closed: 0, duplicates: 0, adopted: 0, described: 0, stale: 0 };
+async function fanOut(jobIds: string[], people: Person[], acc: PerPerson) {
+  if (!jobIds.length || !people.length) return;
+  const ids = [...new Set(jobIds)];
+  const have = new Set<string>();
+  for (const part of chunks(ids)) {
+    const rows = await must<{ user_id: string; job_id: string }[]>(
+      db.from("matches").select("user_id, job_id").in("job_id", part).in("user_id", people.map((p) => p.id)),
+    );
+    rows.forEach((r) => have.add(`${r.user_id}:${r.job_id}`));
+  }
+  const needed = ids.filter((id) => people.some((p) => !have.has(`${p.id}:${id}`)));
+  if (!needed.length) return;
+  const jobs: JobRow[] = [];
+  for (const part of chunks(needed)) {
+    jobs.push(...(await must<JobRow[]>(db.from("jobs").select("id, url, title, location, remote, description, thin, closed_at").in("id", part))));
+  }
+  const rows: Record<string, unknown>[] = [];
+  for (const p of people) {
+    for (const j of jobs) {
+      if (j.closed_at || have.has(`${p.id}:${j.id}`)) continue;
+      const reason = verdict(j, p.criteria);
+      rows.push({ user_id: p.id, job_id: j.id, status: reason ? "filtered" : "new", filter_reason: reason });
+      acc.add(p.id, "matched");
+      if (reason) acc.add(p.id, "filtered");
+    }
+  }
+  for (const part of chunks(rows, 500)) {
+    await must(db.from("matches").upsert(part, { onConflict: "user_id,job_id", ignoreDuplicates: true }));
+  }
+}
+
+/**
+ * Fetches one source, stores postings that are new, and gives its followers matches
+ * for what it lists. Direct sources (company ATSes) run before aggregators: an
+ * aggregator only adds postings no other source has, and a direct source "adopts" a
+ * posting an aggregator found first, so it gets the full description.
+ */
+async function syncSource(
+  source: Source,
+  people: Person[],
+  aggregatorIds: Set<string>,
+  direct: Set<string>,
+  acc: PerPerson,
+) {
+  const stats = { fetched: 0, inserted: 0, closed: 0, duplicates: 0, adopted: 0, described: 0, stale: 0 };
+  const subscribers = followers(people, source.id);
   const isAggregator = Boolean(ATS_INFO[source.ats]?.aggregator);
   let fetched: (FetchedJob & { dedupe_key: string })[];
   try {
@@ -153,49 +272,38 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   }
   stats.fetched = fetched.length;
 
-  const existing = await selectAll<{ id: string; external_id: string; status: string }>((a, b) =>
-    db.from("jobs").select("id, external_id, status").eq("source_id", source.id).range(a, b),
+  const existing = await selectAll<{ id: string; external_id: string; closed_at: string | null }>((a, b) =>
+    db.from("jobs").select("id, external_id, closed_at").eq("source_id", source.id).range(a, b),
   );
-  const known = new Set(existing.map((j) => j.external_id));
+  const byExternal = new Map(existing.map((j) => [j.external_id, j]));
   const live = new Set(fetched.map((j) => j.external_id));
+  // The postings this source lists right now, as stored jobs: its followers get these.
+  const listed = new Set(existing.filter((j) => live.has(j.external_id)).map((j) => j.id));
 
-  // An aggregator skips companies you follow directly: their own board is the source of
-  // truth, and aggregator entries missing from it are usually already-closed postings.
-  const direct = new Set<string>();
-  if (isAggregator) {
-    const rows = await must<{ ats: string; slug: string }[]>(db.from("sources").select("ats, slug").eq("enabled", true));
-    rows.forEach((r) => direct.add(`${r.ats}:${r.slug.toLowerCase()}`));
-  }
+  // An aggregator skips postings of companies someone follows directly: their own board
+  // is the source of truth, and entries missing from it are usually already closed.
   const coveredByDirect = (url: string) => {
     const d = detectAts(url);
     const slug = d.slug.toLowerCase();
-    // A custom career domain could be either; a source on that host covers it.
     if (d.ats === "probe?") return direct.has(`teamtailor:${slug}`) || direct.has(`recruitee:${slug}`);
     return direct.has(`${d.ats}:${slug}`);
   };
 
   // New to this source, and unique within this fetch.
   const seenKeys = new Set<string>();
-  const fresh = fetched.filter((j) => {
-    if (known.has(j.external_id) || seenKeys.has(j.dedupe_key)) return false;
-    if (isAggregator && coveredByDirect(j.url)) {
-      stats.duplicates++;
-      return false;
-    }
+  const unknown = fetched.filter((j) => {
+    if (byExternal.has(j.external_id) || seenKeys.has(j.dedupe_key)) return false;
     seenKeys.add(j.dedupe_key);
     return true;
   });
 
-  // Cross-source duplicates.
-  const matches = await findByKeys(fresh.map((j) => j.dedupe_key));
-  const candidates: typeof fresh = [];
-  for (const j of fresh) {
-    const m = matches.get(j.dedupe_key);
-    if (!m) {
-      candidates.push(j);
-    } else if (!isAggregator && aggregatorIds.has(m.source_id)) {
-      // Adopt: move the aggregator's row to this direct source with full data.
-      const rescore = m.thin && m.status === "scored";
+  // Already stored by another source (cross-source duplicates)?
+  const elsewhere = await findByKeys(unknown.map((j) => j.dedupe_key));
+  const candidates: typeof unknown = [];
+  for (const j of unknown) {
+    const m = elsewhere.get(j.dedupe_key);
+    if (m && !isAggregator && aggregatorIds.has(m.source_id)) {
+      // Adopt: move the aggregator's posting to this direct source, with full data.
       await must(
         db
           .from("jobs")
@@ -209,34 +317,36 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
             description: j.description,
             compensation: j.compensation,
             thin: false,
-            ...(rescore ? { status: "new", score: null } : {}),
           })
           .eq("id", m.id),
       );
+      // Scored on title and location only: score again now that there's a description.
+      if (m.thin) {
+        await must(
+          db.from("matches").update({ status: "new", score: null, score_summary: null, score_pros: null, score_cons: null, scored_at: null })
+            .eq("job_id", m.id).eq("status", "scored"),
+        );
+      }
+      listed.add(m.id);
       stats.adopted++;
-    } else {
+    } else if (m) {
+      listed.add(m.id);
       stats.duplicates++;
+    } else if (isAggregator && coveredByDirect(j.url)) {
+      stats.duplicates++;
+    } else {
+      candidates.push(j);
     }
   }
 
-  // Filter on title/location first, fetch descriptions only for survivors, then filter fully.
-  // Every row sets the same columns: a bulk upsert sends missing ones as null, which `thin` rejects.
-  const rows: Record<string, unknown>[] = [];
-  const needDescription: (typeof candidates)[number][] = [];
+  // Descriptions are fetched once per posting, and only when it passes someone's title
+  // and location filters; each follower's full filter runs when their match is made.
+  const passesSomeone = (j: FetchedJob) =>
+    subscribers.some((p) => !verdict({ ...j, thin: false }, p.criteria));
+  const needDescription = candidates.filter((j) => !j.description && passesSomeone(j));
+  const rows = new Map<string, Record<string, unknown>>();
   for (const j of candidates) {
-    // Workday lists lack countries ("Best", "3 Locations"): judge the location after the detail fetch.
-    const reason = hardFilter(j, criteria, {
-      skipKeywordCheck: !j.description,
-      locationPending: !j.description && workdayFromUrl(j.url) !== null,
-    });
-    if (reason) {
-      stats.filtered++;
-      rows.push({ ...j, source_id: source.id, thin: false, status: "filtered", filter_reason: reason });
-    } else if (!j.description) {
-      needDescription.push(j);
-    } else {
-      rows.push({ ...j, source_id: source.id, thin: false, status: "new", filter_reason: null });
-    }
+    if (!needDescription.includes(j)) rows.set(j.external_id, { ...j, source_id: source.id, thin: false });
   }
   await pool(needDescription, DESCRIBE_CONCURRENCY, async (j) => {
     try {
@@ -251,49 +361,55 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
       }
       console.warn(`  no description for ${j.title} @ ${j.company}: ${e instanceof Error ? e.message : e}`);
     }
-    const thin = j.description.length < THIN_THRESHOLD;
-    const reason = thin ? null : hardFilter(j, criteria);
-    if (reason) stats.filtered++;
-    rows.push({ ...j, source_id: source.id, thin, status: reason ? "filtered" : "new", filter_reason: reason });
+    rows.set(j.external_id, { ...j, source_id: source.id, thin: j.description.length < THIN_THRESHOLD });
   });
 
-  for (let i = 0; i < rows.length; i += 500) {
-    await must(
-      db.from("jobs").upsert(rows.slice(i, i + 500), { onConflict: "source_id,external_id", ignoreDuplicates: true }),
-    );
+  const toInsert = [...rows.values()];
+  for (const part of chunks(toInsert, 500)) {
+    await must(db.from("jobs").upsert(part, { onConflict: "source_id,external_id", ignoreDuplicates: true }));
   }
-  stats.inserted = rows.length;
+  stats.inserted = toInsert.length;
+  if (toInsert.length) {
+    const ids = await selectAll<{ id: string; external_id: string }>((a, b) =>
+      db.from("jobs").select("id, external_id").eq("source_id", source.id).range(a, b),
+    );
+    for (const r of ids) if (rows.has(r.external_id)) listed.add(r.id);
+  }
 
-  // Postings that vanished before you acted on them get closed. Not for partial feeds
-  // (JobTech shows the last week only): there, dropping out of the window isn't closing.
-  const gone = ATS_INFO[source.ats]?.partial
-    ? []
-    : existing.filter((j) => !live.has(j.external_id) && OPEN_STATUSES.includes(j.status));
-  for (let i = 0; i < gone.length; i += 200) {
-    await must(db.from("jobs").update({ status: "closed" }).in("id", gone.slice(i, i + 200).map((j) => j.id)));
+  // Postings that vanished get closed, and so do matches nobody acted on. Not for
+  // partial feeds (they only show recent ads): there, dropping out isn't closing.
+  const gone = ATS_INFO[source.ats]?.partial ? [] : existing.filter((j) => !live.has(j.external_id) && !j.closed_at);
+  const now = new Date().toISOString();
+  for (const part of chunks(gone.map((j) => j.id))) {
+    await must(db.from("jobs").update({ closed_at: now }).in("id", part));
+    await must(db.from("matches").update({ status: "closed" }).in("job_id", part).in("status", OPEN_STATUSES));
   }
   stats.closed = gone.length;
 
-  if (ATS_INFO[source.ats]?.suggests) await discoverSources(fetched);
+  await fanOut([...listed], subscribers, acc);
+
+  if (ATS_INFO[source.ats]?.suggests) await discoverSources(fetched, subscribers);
 
   await db
     .from("sources")
-    .update({ last_error: null, last_checked_at: new Date().toISOString(), last_job_count: fetched.length })
+    .update({ last_error: null, last_checked_at: now, last_job_count: fetched.length })
     .eq("id", source.id);
   console.log(
-    `[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.filtered} filtered, ` +
-      `${stats.described} described), ${stats.duplicates} duplicates, ${stats.adopted} adopted, ` +
-      `${stats.stale} stale skipped, ${stats.closed} closed`,
+    `[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.described} described), ` +
+      `${stats.duplicates} duplicates, ${stats.adopted} adopted, ${stats.stale} stale skipped, ${stats.closed} closed, ` +
+      `${subscribers.length} following`,
   );
   return { ...stats, errors: 0 };
 }
 
-/** From aggregator listings, suggest companies that could be added as direct sources. */
-async function discoverSources(jobs: FetchedJob[]) {
-  const sources = await must<{ ats: string; slug: string }[]>(db.from("sources").select("ats, slug"));
-  const have = new Set(sources.map((s) => `${s.ats}:${s.slug.toLowerCase()}`));
+/** From an aggregator's listings, suggest companies its followers could add as direct sources. */
+async function discoverSources(jobs: FetchedJob[], subscribers: Person[]) {
+  if (!subscribers.length) return;
+  const sources = await must<{ id: string; ats: string; slug: string }[]>(db.from("sources").select("id, ats, slug"));
+  const slugOf = new Map(sources.map((s) => [s.id, `${s.ats}:${s.slug.toLowerCase()}`]));
+  // Probe results are shared: a host is checked once, whoever it was suggested to.
   const known = await must<{ ats: string; slug: string }[]>(db.from("source_suggestions").select("ats, slug"));
-  const suggested = new Map(known.map((s) => [s.slug.toLowerCase(), s.ats]));
+  const probed = new Map(known.map((s) => [s.slug.toLowerCase(), s.ats]));
 
   const groups = new Map<string, { ats: string; slug: string; company_name: string; job_count: number }>();
   for (const j of jobs) {
@@ -303,122 +419,147 @@ async function discoverSources(jobs: FetchedJob[]) {
     g.job_count++;
     groups.set(key, g);
   }
-
-  const rows = [];
   for (const g of groups.values()) {
     if (g.ats === "probe?") {
-      // A custom career domain: Teamtailor, Recruitee, or neither. Checked once per host;
-      // afterwards the stored suggestion remembers the answer.
-      const prev = suggested.get(g.slug.toLowerCase());
-      g.ats = prev ?? (await probeHost(g.slug)) ?? "custom";
+      // A custom career domain: Teamtailor, Recruitee, or neither.
+      g.ats = probed.get(g.slug.toLowerCase()) ?? (await probeHost(g.slug)) ?? "custom";
+      probed.set(g.slug.toLowerCase(), g.ats);
     }
-    if (have.has(`${g.ats}:${g.slug.toLowerCase()}`)) continue;
-    rows.push({ ...g, last_seen_at: new Date().toISOString() });
   }
-  // Two "probe?" groups can resolve to the same row; the upsert needs unique keys.
-  const unique = [...new Map(rows.map((r) => [`${r.ats}:${r.slug.toLowerCase()}`, r])).values()];
-  if (unique.length) await must(db.from("source_suggestions").upsert(unique, { onConflict: "ats,slug" }));
+  // Two "probe?" groups can resolve to the same key; the upsert needs unique keys.
+  const unique = [...new Map([...groups.values()].map((g) => [`${g.ats}:${g.slug.toLowerCase()}`, g])).values()];
+  for (const p of subscribers) {
+    const followed = new Set(p.subs.map((s) => slugOf.get(s.source_id)));
+    const rows = unique
+      .filter((g) => !followed.has(`${g.ats}:${g.slug.toLowerCase()}`))
+      .map((g) => ({ ...g, user_id: p.id, last_seen_at: new Date().toISOString() }));
+    for (const part of chunks(rows, 500)) {
+      await must(db.from("source_suggestions").upsert(part, { onConflict: "user_id,ats,slug" }));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Scoring
+// Describe + score
 // ---------------------------------------------------------------------------
 
+type MatchWithJob = { id: string; user_id: string; job_id: string; jobs: Job };
+
 /**
- * Fetches descriptions for waiting jobs that never got one: jobs a re-evaluation
- * moved back from "filtered", which were filtered before their description was
- * fetched. Then applies the full filter again (keywords, real Workday location).
+ * Fetches descriptions for postings someone is waiting on that never got one: postings
+ * filtered for everyone when they arrived (so not described), which a re-evaluation or
+ * a new follower then let through. Applies each waiting person's full filter after.
  */
-async function describePending(sources: Source[], criteria: Criteria) {
-  const byId = new Map(sources.map((s) => [s.id, s]));
-  const pending = await must<Job[]>(
-    db
-      .from("jobs")
-      .select("*")
-      .eq("status", "new")
-      .eq("description", "")
-      .eq("thin", false)
-      .in("source_id", [...byId.keys()])
-      .limit(MAX_SCORE_PER_RUN * 2),
+async function describePending(people: Person[], sourceIds: string[] | null, acc: PerPerson): Promise<Record<string, number>> {
+  let q = db
+    .from("matches")
+    .select("id, user_id, job_id, jobs!inner(*)")
+    .eq("status", "new")
+    .eq("jobs.description", "")
+    .eq("jobs.thin", false);
+  if (sourceIds) q = q.in("jobs.source_id", sourceIds);
+  const waiting = await must<MatchWithJob[]>(q.limit(MAX_SCORE_PER_RUN * 4));
+  if (!waiting.length) return {};
+  const byJob = new Map<string, MatchWithJob[]>();
+  for (const m of waiting) byJob.set(m.job_id, [...(byJob.get(m.job_id) ?? []), m]);
+  const jobs = [...byJob.values()].map((ms) => ms[0].jobs).slice(0, MAX_SCORE_PER_RUN * 2);
+  const sources = new Map(
+    (await must<Source[]>(db.from("sources").select("*").in("id", [...new Set(jobs.map((j) => j.source_id))]))).map((s) => [s.id, s]),
   );
+  const criteriaOf = new Map(people.map((p) => [p.id, p.criteria]));
+
   let described = 0;
-  let filtered = 0;
-  await pool(pending, DESCRIBE_CONCURRENCY, async (job) => {
-    const source = byId.get(job.source_id)!;
+  await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
     let found: { text: string; location?: string } = { text: "" };
     try {
-      found = await describe(source, job);
+      found = await describe(sources.get(job.source_id)!, job);
       described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
-        await must(db.from("jobs").update({ status: "closed" }).eq("id", job.id));
+        const now = new Date().toISOString();
+        await must(db.from("jobs").update({ closed_at: now }).eq("id", job.id));
+        await must(db.from("matches").update({ status: "closed" }).eq("job_id", job.id).in("status", OPEN_STATUSES));
         return;
       }
       console.warn(`  no description for ${job.title} @ ${job.company}: ${e instanceof Error ? e.message : e}`);
     }
     const updated = { ...job, description: found.text, location: found.location ?? job.location };
     const thin = updated.description.length < THIN_THRESHOLD;
-    const reason = thin ? null : hardFilter(updated, criteria);
-    if (reason) filtered++;
-    await must(
-      db
-        .from("jobs")
-        .update({
-          description: updated.description,
-          location: updated.location,
-          thin,
-          ...(reason ? { status: "filtered", filter_reason: reason } : {}),
-        })
-        .eq("id", job.id),
-    );
+    await must(db.from("jobs").update({ description: updated.description, location: updated.location, thin }).eq("id", job.id));
+    for (const m of byJob.get(job.id)!) {
+      const c = criteriaOf.get(m.user_id);
+      const reason = c ? verdict({ ...updated, thin }, c) : null;
+      if (reason) {
+        await must(db.from("matches").update({ status: "filtered", filter_reason: reason }).eq("id", m.id));
+        acc.add(m.user_id, "filtered_later");
+      }
+    }
   });
-  return pending.length ? { described_later: described, filtered_later: filtered } : {};
+  return { described_later: described };
 }
 
-/** AI spend over the last 24 hours, from the runs log. */
-async function spentLast24h(): Promise<number> {
+/** One person's AI spend over the last 24 hours, from their run shares. */
+async function spentLast24h(userId?: string): Promise<number> {
   const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
+  if (!userId) {
+    const rows = await must<{ stats: Record<string, number> | null }[]>(db.from("runs").select("stats").gte("started_at", since));
+    return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
+  }
   const rows = await must<{ stats: Record<string, number> | null }[]>(
-    db.from("runs").select("stats").gte("started_at", since),
+    db.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", userId).gte("runs.started_at", since),
   );
   return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
 }
 
 /**
- * What this run may spend on scoring: the per-run cap, or what's left of the 24-hour
- * cap if that's less. Listings over budget stay waiting for a later run.
+ * What a person may spend on scoring in this run: their per-run cap, or what's left of
+ * their 24-hour cap, or what's left of everyone's 24-hour cap, whichever is least.
+ * `runSpend` is what this run has spent so far (not in the runs log yet).
  */
-async function scoringBudget(c: Criteria): Promise<{ budget: number; spent24h: number }> {
-  const spent24h = await spentLast24h();
-  const budget = Math.max(0, Math.min(Number(c.max_run_cost_usd), Number(c.max_daily_cost_usd) - spent24h));
-  return { budget, spent24h };
+async function budgetFor(p: Person, settings: Settings, runSpend: { total: number }): Promise<number> {
+  const [mine, all] = await Promise.all([spentLast24h(p.id), spentLast24h()]);
+  return Math.max(
+    0,
+    Math.min(p.runCap, p.dayCap - mine, Number(settings.max_total_daily_cost_usd) - all - runSpend.total),
+  );
 }
 
-async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof loadContext>>) {
-  const pending = await must<Job[]>(
+async function loadContext(p: Person) {
+  const profile = await must<Profile>(db.from("profile").select("*").eq("user_id", p.id).single());
+  const rows = await must<
+    { decision: "approve" | "skip"; reasons: string[]; note: string | null; jobs: { title: string; company: string } | null }[]
+  >(
     db
-      .from("jobs")
-      .select("*")
-      .eq("status", "new")
-      .in("source_id", sourceIds)
-      .order("first_seen_at", { ascending: false })
-      .limit(MAX_SCORE_PER_RUN),
+      .from("feedback")
+      .select("decision, reasons, note, jobs(title, company)")
+      .eq("user_id", p.id)
+      .order("created_at", { ascending: false })
+      .limit(40),
   );
-  // Always report a cost, even $0, so the Report never shows a run as "unknown".
-  if (!pending.length) return { scored: 0, score_errors: 0, cost_usd: 0, tokens_in: 0, tokens_out: 0 };
+  const feedback: FeedbackExample[] = rows
+    .filter((r) => r.jobs)
+    .map((r) => ({ ...r.jobs!, decision: r.decision, reasons: r.reasons, note: r.note }));
+  return { profile, feedback };
+}
 
-  const { budget, spent24h } = await scoringBudget(ctx.criteria);
+/** Scores one person's waiting matches, within their budget. Over-budget ones stay waiting. */
+async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | null, runSpend: { total: number }): Promise<Record<string, number>> {
+  let q = db.from("matches").select("id, user_id, job_id, jobs!inner(*)").eq("user_id", p.id).eq("status", "new");
+  if (sourceIds) q = q.in("jobs.source_id", sourceIds);
+  const pending = await must<MatchWithJob[]>(q.order("created_at", { ascending: false }).limit(MAX_SCORE_PER_RUN));
+  if (!pending.length) return {};
+
+  const budget = await budgetFor(p, settings, runSpend);
   if (budget <= 0) {
-    console.log(
-      `Spend cap reached ($${spent24h.toFixed(4)} in the last 24h of $${ctx.criteria.max_daily_cost_usd}); ${pending.length} listings wait.`,
-    );
-    return { scored: 0, score_errors: 0, cost_usd: 0, tokens_in: 0, tokens_out: 0, over_budget: pending.length };
+    console.log(`[${p.email}] spend cap reached; ${pending.length} listings wait.`);
+    return { over_budget: pending.length };
   }
 
   const client = new Anthropic();
-  const system = buildSystemPrompt(ctx.profile, ctx.criteria, ctx.feedback);
-  const model = resolveModel(ctx.criteria.scoring_model);
-  console.log(`Scoring ${pending.length} listings with ${model}, budget $${budget.toFixed(4)}`);
+  const { profile, feedback } = await loadContext(p);
+  const system = buildSystemPrompt(profile, p.criteria, feedback);
+  const model = resolveModel(settings.scoring_model);
+  console.log(`[${p.email}] scoring ${pending.length} listings with ${model}, budget $${budget.toFixed(4)}`);
   let scored = 0;
   let errors = 0;
   const spend = { cost: 0, tokensIn: 0, tokensOut: 0 };
@@ -428,15 +569,18 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
     Array.from({ length: SCORE_CONCURRENCY }, async () => {
       // Stop taking new listings once the budget is spent. Calls already in flight
       // finish, so a run can go over by at most a few listings' cost.
-      for (let job = queue.shift(); job && spend.cost < budget; job = queue.shift()) {
+      for (let m = queue.shift(); m && spend.cost < budget; m = queue.shift()) {
+        const job = m.jobs;
         try {
           const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job);
-          spend.cost += costUsd(answeredBy, usage);
+          const cost = costUsd(answeredBy, usage);
+          spend.cost += cost;
+          runSpend.total += cost;
           spend.tokensIn += usage.input + usage.cacheWrite + usage.cacheRead;
           spend.tokensOut += usage.output;
           await must(
             db
-              .from("jobs")
+              .from("matches")
               .update({
                 status: "scored",
                 score: s.score,
@@ -445,7 +589,7 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
                 score_cons: s.cons.slice(0, 6),
                 scored_at: new Date().toISOString(),
               })
-              .eq("id", job.id),
+              .eq("id", m.id),
           );
           scored++;
           console.log(`  scored ${s.score}: ${job.title} @ ${job.company}`);
@@ -456,10 +600,9 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
       }
     }),
   );
-  // Listings never scored because the budget ran out; they stay waiting.
   const overBudget = pending.length - scored - errors;
-  console.log(`Scoring cost $${spend.cost.toFixed(4)} (${spend.tokensIn} tokens in, ${spend.tokensOut} out)`);
-  if (overBudget > 0) console.log(`Spend cap reached; ${overBudget} listings wait for the next run.`);
+  console.log(`[${p.email}] scoring cost $${spend.cost.toFixed(4)} (${spend.tokensIn} tokens in, ${spend.tokensOut} out)`);
+  if (overBudget > 0) console.log(`[${p.email}] spend cap reached; ${overBudget} listings wait for the next run.`);
   return {
     scored,
     score_errors: errors,
@@ -470,24 +613,63 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
   };
 }
 
+/** Scores everyone's waiting matches, person by person. */
+async function scoreAll(people: Person[], settings: Settings, sourceIds: string[] | null, acc: PerPerson) {
+  const runSpend = { total: 0 };
+  for (const p of people) acc.set(p.id, await scoreFor(p, settings, sourceIds, runSpend));
+  return runSpend.total;
+}
+
+// ---------------------------------------------------------------------------
+// Email
+// ---------------------------------------------------------------------------
+
+/** A match flattened into the Job shape the email templates take. */
+function asJob(m: MatchWithJob & Partial<Job>): Job {
+  return {
+    ...m.jobs,
+    status: m.status!,
+    status_changed_at: m.status_changed_at!,
+    filter_reason: m.filter_reason ?? null,
+    score: m.score ?? null,
+    score_summary: m.score_summary ?? null,
+    score_pros: m.score_pros ?? null,
+    score_cons: m.score_cons ?? null,
+    applied_at: m.applied_at ?? null,
+    followed_up_at: m.followed_up_at ?? null,
+    notified_at: m.notified_at ?? null,
+  };
+}
+
+/** Where a person's emails go. Only the admin falls back to DIGEST_TO; nobody else's mail can land there. */
+const recipient = (p: Person): string | undefined | null => p.criteria.digest_email.trim() || (p.isAdmin ? undefined : null);
+
+const MATCH_WITH_JOB = "id, user_id, job_id, status, status_changed_at, filter_reason, score, score_summary, score_pros, score_cons, notified_at, applied_at, followed_up_at, jobs!inner(*)";
+
 // ---------------------------------------------------------------------------
 // Modes
 // ---------------------------------------------------------------------------
 
-async function runFetch(mode: "watchlist" | "full") {
-  const ctx = await loadContext();
-  let q = db.from("sources").select("*").eq("enabled", true);
-  if (mode === "watchlist") q = q.eq("watchlist", true);
-  const sources = await must<Source[]>(q);
+type RunResult = { stats: Record<string, number>; perPerson: PerPerson };
+
+async function runFetch(mode: "watchlist" | "full"): Promise<RunResult> {
+  const acc = new PerPerson();
+  const [settings, people] = await Promise.all([loadSettings(), loadPeople()]);
+  // A board is fetched if anyone follows it (watched, for a watchlist run).
+  const wanted = new Set(people.flatMap((p) => p.subs.filter((s) => mode === "full" || s.watchlist).map((s) => s.source_id)));
+  const all = await must<Source[]>(db.from("sources").select("*"));
+  const sources = all.filter((s) => wanted.has(s.id));
   if (!sources.length) {
-    console.log(`No ${mode === "watchlist" ? "watchlist " : ""}sources configured.`);
-    return { sources: 0, cost_usd: 0 };
+    console.log(`No ${mode === "watchlist" ? "watched " : ""}sources followed.`);
+    return { stats: { sources: 0, cost_usd: 0 }, perPerson: acc };
   }
 
-  // Direct sources first, aggregators last (see syncSource). Aggregators are looked up across
-  // all sources, so a watchlist run can still adopt rows an aggregator found.
-  const all = await must<{ id: string; ats: Source["ats"] }[]>(db.from("sources").select("id, ats"));
+  // Direct sources first, aggregators last (see syncSource).
   const aggregatorIds = new Set(all.filter((s) => ATS_INFO[s.ats]?.aggregator).map((s) => s.id));
+  const followedAnywhere = new Set(people.flatMap((p) => p.subs.map((s) => s.source_id)));
+  const direct = new Set(
+    all.filter((s) => followedAnywhere.has(s.id) && !aggregatorIds.has(s.id)).map((s) => `${s.ats}:${s.slug.toLowerCase()}`),
+  );
   sources.sort((a, b) => Number(aggregatorIds.has(a.id)) - Number(aggregatorIds.has(b.id)));
 
   const totals: Record<string, number> = { sources: sources.length };
@@ -495,7 +677,7 @@ async function runFetch(mode: "watchlist" | "full") {
     // One broken source must not stop the others (or the scoring after them).
     let st: Record<string, number>;
     try {
-      st = await syncSource(s, ctx.criteria, aggregatorIds);
+      st = await syncSource(s, people, aggregatorIds, direct, acc);
     } catch (e) {
       const msg = e instanceof Error ? e.message : typeof e === "object" && e && "message" in e ? String(e.message) : String(e);
       await db.from("sources").update({ last_error: msg, last_checked_at: new Date().toISOString() }).eq("id", s.id);
@@ -504,88 +686,107 @@ async function runFetch(mode: "watchlist" | "full") {
     }
     for (const [k, v] of Object.entries(st)) totals[k] = (totals[k] ?? 0) + v;
   }
-  Object.assign(totals, await describePending(sources, ctx.criteria));
-  Object.assign(totals, await scorePending(sources.map((s) => s.id), ctx));
+  const ids = sources.map((s) => s.id);
+  Object.assign(totals, await describePending(people, ids, acc));
+  // A watchlist run scores only what the watched sources brought in.
+  const cost = await scoreAll(people, settings, mode === "watchlist" ? ids : null, acc);
+  totals.cost_usd = Math.round(cost * 1e6) / 1e6;
 
   if (mode === "watchlist") {
-    const strong = await must<Job[]>(
-      db
-        .from("jobs")
-        .select("*")
-        .eq("status", "scored")
-        .gte("score", ctx.criteria.score_threshold)
-        .is("notified_at", null)
-        .in("source_id", sources.map((s) => s.id))
-        .order("score", { ascending: false }),
-    );
-    if (strong.length) {
-      const { subject, html } = renderWatchlistAlert(strong);
-      await sendEmail(subject, html, ctx.criteria.digest_email);
-      await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", strong.map((j) => j.id)));
+    for (const p of people) {
+      const watched = p.subs.filter((s) => s.watchlist).map((s) => s.source_id);
+      const to = recipient(p);
+      if (!watched.length || to === null) continue;
+      const strong = await must<(MatchWithJob & Partial<Job>)[]>(
+        db
+          .from("matches")
+          .select(MATCH_WITH_JOB)
+          .eq("user_id", p.id)
+          .eq("status", "scored")
+          .gte("score", p.criteria.score_threshold)
+          .is("notified_at", null)
+          .in("jobs.source_id", watched)
+          .order("score", { ascending: false }),
+      );
+      if (!strong.length) continue;
+      const { subject, html } = renderWatchlistAlert(strong.map(asJob));
+      await sendEmail(subject, html, to);
+      await must(db.from("matches").update({ notified_at: new Date().toISOString() }).in("id", strong.map((m) => m.id)));
+      acc.add(p.id, "alerted", strong.length);
+      totals.alerted = (totals.alerted ?? 0) + strong.length;
     }
-    totals.alerted = strong.length;
   }
-  return totals;
+  return { stats: totals, perPerson: acc };
 }
 
-/** Describes and scores jobs already waiting, across all sources, without fetching anything. */
-async function runScore() {
-  const ctx = await loadContext();
-  const sources = await must<Source[]>(db.from("sources").select("*"));
-  return {
-    ...(await describePending(sources, ctx.criteria)),
-    ...(await scorePending(sources.map((s) => s.id), ctx)),
-  };
+/** Describes and scores listings already waiting, for everyone, without fetching anything. */
+async function runScore(): Promise<RunResult> {
+  const acc = new PerPerson();
+  const [settings, people] = await Promise.all([loadSettings(), loadPeople()]);
+  const stats: Record<string, number> = { ...(await describePending(people, null, acc)) };
+  stats.cost_usd = Math.round((await scoreAll(people, settings, null, acc)) * 1e6) / 1e6;
+  for (const [, s] of acc.entries()) {
+    for (const k of ["scored", "score_errors", "over_budget"]) if (s[k]) stats[k] = (stats[k] ?? 0) + s[k];
+  }
+  return { stats, perPerson: acc };
 }
 
-async function runDigest() {
-  const { criteria } = await loadContext();
+async function runDigest(): Promise<RunResult> {
+  const acc = new PerPerson();
+  const people = await loadPeople();
   const now = Date.now();
-  const followCutoff = new Date(now - criteria.followup_days * 86_400_000).toISOString();
   const dayAgo = new Date(now - 86_400_000).toISOString();
-
-  const newMatches = await must<Job[]>(
-    db
-      .from("jobs")
-      .select("*")
-      .eq("status", "scored")
-      .gte("score", criteria.score_threshold)
-      .is("notified_at", null)
-      .order("score", { ascending: false })
-      .limit(25),
-  );
-  const applied = await must<Job[]>(db.from("jobs").select("*").eq("status", "applied"));
-  const followUps = applied.filter((j) => (j.followed_up_at ?? j.applied_at ?? j.status_changed_at) < followCutoff);
-  const statusChanges = await must<Job[]>(
-    db
-      .from("jobs")
-      .select("*")
-      .in("status", ["applied", "interview", "offer", "rejected"])
-      .gte("status_changed_at", dayAgo)
-      .order("status_changed_at", { ascending: false }),
-  );
-
   // cost_usd: the digest makes no Claude calls.
-  const stats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0, cost_usd: 0 };
-  if (newMatches.length || followUps.length || statusChanges.length) {
-    const { subject, html } = renderDigest({ newMatches, followUps, statusChanges });
-    await sendEmail(subject, html, criteria.digest_email);
-    stats.emailed = 1;
-    if (newMatches.length) {
-      await must(db.from("jobs").update({ notified_at: new Date().toISOString() }).in("id", newMatches.map((j) => j.id)));
+  const stats: Record<string, number> = { emailed: 0, cost_usd: 0 };
+
+  for (const p of people) {
+    const to = recipient(p);
+    if (to === null) continue;
+    const mine = () => db.from("matches").select(MATCH_WITH_JOB).eq("user_id", p.id);
+    const followCutoff = new Date(now - p.criteria.followup_days * 86_400_000).toISOString();
+    const [newMatches, applied, statusChanges] = await Promise.all([
+      must<(MatchWithJob & Partial<Job>)[]>(
+        mine().eq("status", "scored").gte("score", p.criteria.score_threshold).is("notified_at", null).order("score", { ascending: false }).limit(25),
+      ),
+      must<(MatchWithJob & Partial<Job>)[]>(mine().eq("status", "applied")),
+      must<(MatchWithJob & Partial<Job>)[]>(
+        mine().in("status", ["applied", "interview", "offer", "rejected"]).gte("status_changed_at", dayAgo).order("status_changed_at", { ascending: false }),
+      ),
+    ]);
+    const followUps = applied.filter((m) => (m.followed_up_at ?? m.applied_at ?? m.status_changed_at!) < followCutoff);
+    const mineStats = { new_matches: newMatches.length, follow_ups: followUps.length, status_changes: statusChanges.length, emailed: 0 };
+    if (newMatches.length || followUps.length || statusChanges.length) {
+      const { subject, html } = renderDigest({
+        newMatches: newMatches.map(asJob),
+        followUps: followUps.map(asJob),
+        statusChanges: statusChanges.map(asJob),
+      });
+      await sendEmail(subject, html, to);
+      mineStats.emailed = 1;
+      stats.emailed++;
+      if (newMatches.length) {
+        await must(db.from("matches").update({ notified_at: new Date().toISOString() }).in("id", newMatches.map((m) => m.id)));
+      }
+    } else {
+      console.log(`[${p.email}] nothing to report; no email sent.`);
     }
-  } else {
-    console.log("Nothing to report; no email sent.");
+    acc.set(p.id, mineStats);
   }
-  return stats;
+  return { stats, perPerson: acc };
 }
 
-/** Runs one mode and logs it in the runs table (the Report's run log). */
+/** Runs one mode and logs it: the runs table (whole run) and run_users (each person's share). */
 async function record(mode: Mode) {
   const run = await must<{ id: string }>(db.from("runs").insert({ kind: mode }).select("id").single());
   try {
-    const stats = mode === "digest" ? await runDigest() : mode === "score" ? await runScore() : await runFetch(mode);
+    const { stats, perPerson } =
+      mode === "digest" ? await runDigest() : mode === "score" ? await runScore() : await runFetch(mode);
     await db.from("runs").update({ finished_at: new Date().toISOString(), stats }).eq("id", run.id);
+    const shares = perPerson
+      .entries()
+      .filter(([, s]) => Object.values(s).some((v) => v))
+      .map(([user_id, s]) => ({ run_id: run.id, user_id, stats: { cost_usd: 0, ...s } }));
+    if (shares.length) await must(db.from("run_users").upsert(shares, { onConflict: "run_id,user_id" }));
     console.log(`${mode} done:`, stats);
   } catch (e) {
     const msg = e instanceof Error ? e.message : JSON.stringify(e);
@@ -603,43 +804,81 @@ async function lastStarted(kind: Mode): Promise<number | null> {
 }
 
 /**
- * Jobs waiting to be scored (after a re-evaluation, or more than one run's cap) are
- * scored at the next quiet tick, 60 at a time. If the last scoring run scored nothing
- * (e.g. the API key stopped working), it waits 6 hours instead of retrying every tick.
+ * Listings waiting to be scored (after a re-evaluation, a new follower, or more than one
+ * run's cap) are scored at the next quiet tick, if someone waiting has budget left. If
+ * the last scoring run scored nothing (e.g. the API key stopped working), it waits 6
+ * hours instead of retrying every tick.
  */
-async function scoringDue(criteria: Criteria): Promise<boolean> {
-  const { count } = await db.from("jobs").select("id", { count: "exact", head: true }).eq("status", "new");
-  if (!count) return false;
-  // Nothing to do until the 24-hour spend cap has room again.
-  if ((await scoringBudget(criteria)).budget <= 0) {
-    console.log(`${count} listings waiting, but the 24-hour spend cap is reached.`);
-    return false;
+async function scoringDue(settings: Settings): Promise<boolean> {
+  const people = await loadPeople();
+  const runSpend = { total: 0 };
+  let due = false;
+  for (const p of people) {
+    const { count } = await db.from("matches").select("id", { count: "exact", head: true }).eq("user_id", p.id).eq("status", "new");
+    if (!count) continue;
+    if ((await budgetFor(p, settings, runSpend)) > 0) due = true;
+    else console.log(`[${p.email}] ${count} listings waiting, but a spend cap is reached.`);
   }
+  if (!due) return false;
   const [last] = await must<{ started_at: string; stats: Record<string, number>; error: string | null }[]>(
     db.from("runs").select("started_at, stats, error").eq("kind", "score").order("started_at", { ascending: false }).limit(1),
   );
   if (!last) return true;
-  const stuck = Boolean(last.error) || !(last.stats?.scored > 0);
+  const stuck = Boolean(last.error) || !(last.stats?.scored > 0 || last.stats?.over_budget > 0);
   return !stuck || Date.now() - Date.parse(last.started_at) > 6 * 3_600_000;
 }
 
-/** Called every 15 minutes by GitHub Actions: runs whatever the schedule on the Criteria page says is due. */
+/**
+ * Invites the admin added on the Members page: creates the account, makes it a member,
+ * and emails a link to set a password. Someone who already has an account gets a
+ * password-reset link instead. Done here because the worker has the service-role and
+ * email keys; the web app doesn't.
+ */
+async function processInvites() {
+  const pending = await must<{ email: string }[]>(db.from("invites").select("email").is("sent_at", null).is("error", null));
+  const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+  for (const { email } of pending) {
+    try {
+      if (!appUrl || !process.env.RESEND_API_KEY) throw new Error("APP_URL and RESEND_API_KEY are needed to send invites.");
+      let reset = false;
+      let link = await db.auth.admin.generateLink({ type: "invite", email });
+      if (link.error && /already been registered|already exists/i.test(link.error.message)) {
+        reset = true;
+        link = await db.auth.admin.generateLink({ type: "recovery", email });
+      }
+      if (link.error || !link.data.user) throw new Error(link.error?.message ?? "no user returned");
+      await must(db.from("members").upsert({ user_id: link.data.user.id, email }, { onConflict: "user_id", ignoreDuplicates: true }));
+      const url = `${appUrl}/auth/confirm?${new URLSearchParams({ token_hash: link.data.properties.hashed_token, type: reset ? "recovery" : "invite" })}`;
+      const { subject, html } = renderInvite(url, reset);
+      await sendEmail(subject, html, email);
+      await must(db.from("invites").update({ sent_at: new Date().toISOString() }).eq("email", email));
+      console.log(`Invite sent to ${email}${reset ? " (existing account: password reset)" : ""}.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await db.from("invites").update({ error: msg }).eq("email", email);
+      console.error(`Invite to ${email} failed: ${msg}`);
+    }
+  }
+}
+
+/** Called every 15 minutes: sends pending invites, then runs whatever the shared schedule says is due. */
 async function tick() {
-  const criteria = await must<Criteria>(db.from("criteria").select("*").eq("id", 1).single());
+  await processInvites().catch((e) => console.error("Invites failed:", e)); // never blocks the schedule
+  const settings = await loadSettings();
   const last = { watchlist: await lastStarted("watchlist"), full: await lastStarted("full") };
-  const due = dueNow(criteria, last, Date.now());
-  console.log(`Tick (${criteria.timezone}): daily ${due.daily ? "due" : "not due"}, watchlist ${due.watchlist ? "due" : "not due"}`);
+  const due = dueNow(settings, last, Date.now());
+  console.log(`Tick (${settings.timezone}): daily ${due.daily ? "due" : "not due"}, watchlist ${due.watchlist ? "due" : "not due"}`);
   if (due.daily) {
     try {
       await record("full");
     } finally {
-      await record("digest"); // the digest goes out even if some sources failed
+      await record("digest"); // the digests go out even if some sources failed
     }
   } else if (due.watchlist) {
-    const { count } = await db.from("sources").select("id", { count: "exact", head: true }).eq("watchlist", true).eq("enabled", true);
+    const { count } = await db.from("subscriptions").select("source_id", { count: "exact", head: true }).eq("watchlist", true).eq("enabled", true);
     if (count) await record("watchlist");
-    else console.log("No watched sources; nothing to check.");
-  } else if (await scoringDue(criteria)) {
+    else console.log("Nobody watches a source; nothing to check.");
+  } else if (await scoringDue(settings)) {
     await record("score");
   }
 }

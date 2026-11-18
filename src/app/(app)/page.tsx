@@ -20,19 +20,19 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const limit = Math.min(500, Math.max(PAGE, Number(n) || PAGE));
   const supabase = await createClient();
 
-  const { data: criteria } = await supabase.from("criteria").select("score_threshold").eq("id", 1).single();
+  const { data: criteria } = await supabase.from("criteria").select("score_threshold").single();
   const threshold = criteria?.score_threshold ?? 60;
 
   const rowsQuery =
     view === "skipped"
-      ? supabase.from("jobs").select(JOB_LIST_COLUMNS).eq("status", "skipped").order("status_changed_at", { ascending: false })
+      ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "skipped").order("status_changed_at", { ascending: false })
       : view === "all"
-        ? supabase.from("jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").order("score", { ascending: false })
-        : supabase.from("jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
+        ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").order("score", { ascending: false })
+        : supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
   const [{ data, error }, { count: scoredCount }, { count: aboveCount }] = await Promise.all([
     rowsQuery.limit(limit + 1), // one extra row tells us whether there's more
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
+    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
+    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
   ]);
   if (error) throw new Error(error.message);
   const hasMore = (data?.length ?? 0) > limit;

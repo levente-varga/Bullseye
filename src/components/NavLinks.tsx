@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { PendingBar } from "./PendingBar";
-import { IconChart, IconInbox, IconPipeline, IconSliders, IconSources, IconUser } from "./icons";
+import { IconChart, IconInbox, IconPipeline, IconSliders, IconSources, IconUser, IconUsers } from "./icons";
 
 export const NAV = [
   { href: "/", label: "Inbox", Icon: IconInbox, key: "inbox" },
@@ -14,6 +14,9 @@ export const NAV = [
   { href: "/profile", label: "Profile", Icon: IconUser, key: "profile" },
   { href: "/report", label: "Report", Icon: IconChart, key: "report" },
 ] as const;
+
+/** Admin only: the Members page. */
+const ADMIN_NAV = { href: "/admin", label: "Members", Icon: IconUsers, key: "admin" } as const;
 
 export type NavCounts = Partial<Record<(typeof NAV)[number]["key"], string | number>>;
 
@@ -25,7 +28,7 @@ const isActive = (path: string, href: string) => (href === "/" ? path === "/" : 
  * whenever the server sends new ones (after a save). Otherwise they'd go stale
  * when the worker changes the database.
  */
-export function SidebarNav({ counts: initial }: { counts?: NavCounts }) {
+export function SidebarNav({ counts: initial, admin = false }: { counts?: NavCounts; admin?: boolean }) {
   const path = usePathname();
   const [live, setLive] = useState<NavCounts | null>(null);
   const initialKey = JSON.stringify(initial ?? null);
@@ -44,7 +47,7 @@ export function SidebarNav({ counts: initial }: { counts?: NavCounts }) {
   const counts = live ?? initial ?? {};
   return (
     <nav className="space-y-px">
-      {NAV.map(({ href, label, Icon, key }) => {
+      {[...NAV, ...(admin ? [ADMIN_NAV] : [])].map(({ href, label, Icon, key }) => {
         const active = isActive(path, href);
         return (
           <Link
@@ -56,7 +59,7 @@ export function SidebarNav({ counts: initial }: { counts?: NavCounts }) {
           >
             <Icon className={active ? "text-[var(--accent-strong)]" : "text-[var(--faint)]"} />
             <span className="flex-1">{label}</span>
-            {counts[key] !== undefined && <span className="mono faint text-[11px]">{counts[key]}</span>}
+            {key !== "admin" && counts[key] !== undefined && <span className="mono faint text-[11px]">{counts[key]}</span>}
             <PendingBar />
           </Link>
         );

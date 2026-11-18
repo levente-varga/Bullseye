@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 async function signIn(form: FormData) {
   "use server";
   const supabase = await createClient();
+  // Start clean: a non-member's old session would otherwise linger on this page.
+  await supabase.auth.signOut();
   const { error } = await supabase.auth.signInWithPassword({
     email: String(form.get("email") ?? ""),
     password: String(form.get("password") ?? ""),
@@ -35,7 +37,15 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             <span className="label">Password</span>
             <input name="password" type="password" required autoComplete="current-password" className="input" />
           </label>
-          {error && <p className="text-[12px] text-[var(--bad)]">Wrong email or password.</p>}
+          {error && (
+            <p className="text-[12px] text-[var(--bad)]">
+              {error === "not_member"
+                ? "This account doesn't have access to Bullseye. Ask the admin for an invite."
+                : error === "link"
+                  ? "That link has expired or was already used. Ask the admin to send a new invite."
+                  : "Wrong email or password."}
+            </p>
+          )}
           <SubmitButton className="btn-primary w-full py-1.5">Sign in</SubmitButton>
         </div>
       </form>
