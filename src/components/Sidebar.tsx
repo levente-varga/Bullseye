@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getNavCounts } from "@/lib/nav-counts";
 import { agoText } from "@/lib/time";
-import { SidebarNav } from "./NavLinks";
+import { SidebarNav, TopNav } from "./NavLinks";
 import { Dot } from "./ui";
 
 /** Sidebar contents that need data: nav counts, watchlist, last-run status. */
@@ -61,6 +61,13 @@ export async function SidebarData() {
       </div>
     </>
   );
+}
+
+/** The mobile nav, with the Members page for the admin (the check needs the session). */
+export async function TopNavData() {
+  const supabase = await createClient();
+  const { data: admin } = await supabase.rpc("is_admin");
+  return <TopNav admin={admin === true} />;
 }
 
 export function SidebarFallback() {
