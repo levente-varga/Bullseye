@@ -101,7 +101,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                   type="file"
                   accept="application/pdf,.pdf"
                   required
-                  className="text-[13px] file:mr-3 file:cursor-pointer file:border file:border-[var(--border-strong)] file:bg-[var(--surface)] file:px-2.5 file:py-1 file:text-[13px] file:text-[var(--fg)]"
+                  className="max-w-full min-w-0 text-[13px] file:mr-3 file:cursor-pointer file:border file:border-[var(--border-strong)] file:bg-[var(--surface)] file:px-2.5 file:py-1 file:text-[13px] file:text-[var(--fg)]"
                 />
                 <SubmitButton className="btn-primary ml-auto">{profile.cv_file_path ? "Replace PDF" : "Upload PDF"}</SubmitButton>
                 <p className="hint w-full">Uploading extracts the text into the box below, replacing what&apos;s there.</p>

@@ -126,7 +126,7 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
           <ScoreMeter score={job.score} width="w-[72px]" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="font-medium">{job.title}</span>
+              <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
               {job.remote && <Pill tone="accent">Remote</Pill>}
               {job.thin && <Pill tone="warn">Limited info</Pill>}
             </div>

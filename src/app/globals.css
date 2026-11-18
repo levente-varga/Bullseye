@@ -183,7 +183,7 @@ input[type="radio"]:checked:hover {
 
   /* The app's one two-column layout: a main column plus a fixed 320px side column.
      Use it for every side-by-side pair, so the gap falls in the same place on every page. */
-  .split { @apply grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]; }
+  .split { @apply grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]; }
 
   /* --- tables ------------------------------------------------------------- */
   .table { @apply w-full border-collapse text-left; }
@@ -196,6 +196,29 @@ input[type="radio"]:checked:hover {
   .table td { @apply px-3 py-2.5 align-middle; border-bottom: 1px solid var(--border); }
   .table tr:last-child td { border-bottom: 0; }
   .table tbody tr:hover td { background: var(--surface-2); }
+
+  /* Below md, a .table-stack lays each row out as a wrapping card instead of columns,
+     so nothing scrolls sideways. Cells opt in with max-md:* utilities (full width,
+     hidden) and data-label, which prints a small caption before the value. The table
+     itself also needs max-md:block: Tailwind's own `table` utility (display: table)
+     outranks this layer. A plain max-width query, because the range form
+     (width < 48rem) is silently dropped by the Turbopack build. */
+  @media (max-width: 47.99rem) {
+    .table-stack thead { display: none; }
+    .table-stack, .table-stack tbody { display: block; }
+    .table-stack tr {
+      display: flex; flex-wrap: wrap; align-items: center; column-gap: 1rem; row-gap: 0.5rem;
+      padding: 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    .table-stack tr:last-child { border-bottom: 0; }
+    .table-stack td { display: block; padding: 0; border: 0; }
+    .table-stack tbody tr:hover td { background: transparent; }
+    .table-stack td[data-label]::before {
+      content: attr(data-label); margin-right: 0.375rem;
+      font-family: var(--font-sans); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--faint);
+    }
+  }
 
   /* --- controls ------------------------------------------------------------ */
   .input {
