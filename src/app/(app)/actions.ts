@@ -10,6 +10,7 @@ import { hardFilter } from "@/lib/filters";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import {
   ATS_INFO,
+  DEFAULT_CAPS,
   DEFAULT_SCORING_MODEL,
   SCORING_MODELS,
   WATCH_INTERVALS,
@@ -146,8 +147,8 @@ export async function saveSettings(form: FormData) {
       await supabase
         .from("members")
         .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd"), DEFAULT_CAPS.run),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), DEFAULT_CAPS.daily),
         })
         .eq("user_id", me.id)
     ).error,
@@ -548,8 +549,8 @@ export async function updateMemberCaps(form: FormData) {
       await supabase
         .from("members")
         .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), 0.25),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), 1),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd"), DEFAULT_CAPS.run),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), DEFAULT_CAPS.daily),
         })
         .eq("user_id", str(form, "user_id"))
     ).error,
