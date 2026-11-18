@@ -234,7 +234,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
           />
           <Panel>
             {runs.length === 0 ? (
-              <Empty>{runFilter === "all" ? "No runs yet. The worker logs here every time it runs." : "No runs match this filter."}</Empty>
+              <Empty>{runFilter === "all" ? "No runs yet." : "No runs match this filter."}</Empty>
             ) : (
               <div className="md:overflow-x-auto">
                 <table className="table table-stack max-md:block md:min-w-[640px]">

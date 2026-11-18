@@ -83,7 +83,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     <>
       <PageHeader
         title="Criteria"
-        meta="Hard filters run first and cost nothing; only listings that pass are scored. Separate list entries with commas or new lines. Changes apply to listings fetched from now on."
+        meta="Filters are free; only listings that pass get scored. Separate entries with commas or new lines."
       />
 
       <div className="split">
@@ -101,7 +101,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                   <span className="muted">Remote listings pass the location filter</span>
                 </label>
               </Row>
-              <Row label="Must-have keywords" hint="The description must contain one. Empty means any.">
+              <Row label="Must-have keywords" hint="In the description. Empty means any.">
                 <List name="include_keywords" value={criteria.include_keywords} placeholder="TypeScript, React" />
               </Row>
               <Row label="Exclude" hint="Whole words in the title.">
@@ -112,7 +112,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
 
           <Panel title="Scoring">
             <div className="divide">
-              <Row label="Preferences" hint="Free text the scorer reads.">
+              <Row label="Preferences" hint="For the scorer.">
                 <textarea
                   name="preferences"
                   defaultValue={criteria.preferences}
@@ -121,7 +121,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                   placeholder="E.g. I prefer product companies over agencies, small-to-mid teams, and want to grow towards full-stack."
                 />
               </Row>
-              <Row label="Inbox threshold" hint="Scores below this stay out of the Inbox and the digest.">
+              <Row label="Inbox threshold" hint="Lower scores stay out of the Inbox.">
                 <input name="score_threshold" type="number" min={0} max={100} defaultValue={criteria.score_threshold} className="input mono w-24" />
               </Row>
             </div>
@@ -129,12 +129,12 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
 
           <Panel title="Notifications">
             <div className="divide">
-              <Row label="Send emails to" hint="The daily digest and watchlist alerts.">
+              <Row label="Send emails to" hint="Digest and watchlist alerts.">
                 <input name="digest_email" type="email" defaultValue={criteria.digest_email} className="input" placeholder="you@example.com" />
               </Row>
               <Row
                 label="Remind me to follow up"
-                hint="When an application gets no reply for this long, it's flagged in the Pipeline and listed in your digest, so you can write to the company."
+                hint="Flags applications with no reply."
               >
                 <div className="flex items-center gap-2">
                   <span className="muted text-[12px]">after</span>
@@ -181,23 +181,19 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
               <SubmitButton className="btn" done="Added">Add</SubmitButton>
             </form>
           </Panel>
-          <p className="faint text-[12px] leading-relaxed">
-            The scorer already reads your recent decisions. Turn frequent skip reasons into filters to save scoring cost.
-          </p>
+          <p className="faint text-[12px]">Frequent reasons make good filters.</p>
 
           <div id="reevaluate" className="scroll-mt-6">
             <Panel title="Re-evaluate">
               <form action={reevaluate} className="space-y-3 p-3 text-[13px]">
                 <p className="muted leading-relaxed">
-                  Changes here only apply to new listings. Re-evaluate applies the <b>saved</b> criteria to the{" "}
-                  <span className="mono text-[var(--fg)]">{openCount ?? 0}</span> listings you haven&apos;t acted on: listings
-                  that now fail move to Filtered, filtered ones that now pass get scored. Free.
+                  Apply the saved criteria to the <span className="mono text-[var(--fg)]">{openCount ?? 0}</span> listings
+                  you haven&apos;t acted on. Free.
                 </p>
                 <label className="flex items-start gap-2">
                   <input type="checkbox" name="rescore" className="mt-0.5" />
                   <span className="muted">
-                    Also re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones against the new
-                    criteria, about <span className="mono text-[var(--fg)]">{formatUsd(rescoreCost)}</span>
+                    Re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones too (~<span className="mono text-[var(--fg)]">{formatUsd(rescoreCost)}</span>)
                   </span>
                 </label>
                 <SubmitButton className="btn" done="Done">
@@ -209,11 +205,10 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                     <span className="mono">{done.waiting}</span> waiting to be scored ·{" "}
                     <span className="mono">{done.kept}</span> unchanged.
                     {Number(done.waiting) > 0 && (
-                      <span className="faint"> Scoring runs in the background, 60 every 15 minutes.</span>
+                      <span className="faint"> Scored in the background.</span>
                     )}
                   </p>
                 )}
-                <p className="faint text-[12px] leading-relaxed">Approved, skipped and applied listings are never touched.</p>
               </form>
             </Panel>
           </div>
@@ -242,7 +237,7 @@ function SettingsForm(props: {
       <fieldset disabled={!isAdmin} className="space-y-6">
         <Panel title="Schedule" aside={`times in ${settings.timezone.replace(/_/g, " ")}${isAdmin ? "" : " · set by the admin"}`}>
           <div className="divide">
-            <Row label="Daily search" hint="Checks every source, scores what's new, then sends the digests.">
+            <Row label="Daily search" hint="Fetch, score, then send digests.">
               <div className="flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-2 text-[13px]">
                   <input type="checkbox" name="daily_enabled" defaultChecked={settings.daily_enabled} />
@@ -252,7 +247,7 @@ function SettingsForm(props: {
               </div>
               <p className="hint mt-1.5">Next: {fmtRun(next.daily, settings.timezone)}</p>
             </Row>
-            <Row label="Watchlist check" hint="Only watched sources; strong new matches are emailed right away.">
+            <Row label="Watchlist check" hint="Watched sources; strong matches are emailed.">
               <select name="watch_interval_minutes" defaultValue={settings.watch_interval_minutes} className="input w-auto">
                 {WATCH_INTERVALS.map((w) => (
                   <option key={w.minutes} value={w.minutes}>
@@ -263,20 +258,19 @@ function SettingsForm(props: {
               {isAdmin && <p className="hint mt-1.5">Next: {fmtRun(next.watchlist, settings.timezone)}</p>}
             </Row>
             {isAdmin && (
-              <Row label="Timezone" hint="The daily time above is in this timezone.">
+              <Row label="Timezone">
                 <TimezoneSelect name="timezone" value={settings.timezone} options={timezones()} />
               </Row>
             )}
           </div>
           <p className="faint border-t border-[var(--border)] px-3 py-2 text-[12px]">
-            Bullseye checks the schedule every 15 minutes, and GitHub sometimes starts that a few minutes late, so runs
-            happen up to ~20 minutes after the set time.
+            Runs can start up to ~20 minutes late.
           </p>
         </Panel>
 
         <Panel title="AI scoring" aside={isAdmin ? undefined : "set by the admin"}>
           <div className="divide">
-            <Row label="Model" hint="Used from the next run, for everyone. Scored listings keep their score.">
+            <Row label="Model" hint="For everyone, from the next run.">
               <div className="grid gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3">
                 {SCORING_MODELS.map((m) => (
                   <label
@@ -294,26 +288,24 @@ function SettingsForm(props: {
             </Row>
             <Row
               label={isAdmin ? "Your spend caps" : "Spend caps"}
-              hint="A safety net for AI scoring. Listings over a cap stay waiting and are scored once there's budget again. 0 pauses scoring."
+              hint="Over-cap listings wait for budget. 0 pauses scoring."
             >
               <div className="flex flex-wrap items-end gap-4">
                 <Money name="max_run_cost_usd" label="Per run" value={member.max_run_cost_usd} />
                 <Money name="max_daily_cost_usd" label="Per 24 hours" value={member.max_daily_cost_usd} />
               </div>
               <p className="faint mt-2 text-[12px]">
-                Spent in the last 24 hours: <span className="mono text-[var(--fg)]">{formatUsd(props.spent24h)}</span>. At the
-                recent <span className="mono">{formatUsd(props.perJob)}</span> per listing, the per-run cap covers about{" "}
-                <span className="mono">
+                <span className="mono text-[var(--fg)]">{formatUsd(props.spent24h)}</span> spent in 24h · a run covers ~<span className="mono">
                   {props.perJob > 0 ? Math.floor(Number(member.max_run_cost_usd) / props.perJob).toLocaleString("en-US") : "–"}
                 </span>{" "}
-                listings.
+                listings
               </p>
             </Row>
             {isAdmin && (
-              <Row label="Everyone, per 24 hours" hint="A backstop over all members' caps: no scoring for anyone once reached.">
+              <Row label="Everyone, per 24 hours" hint="Stops all scoring once reached.">
                 <Money name="max_total_daily_cost_usd" label="All members" value={settings.max_total_daily_cost_usd} />
                 <p className="faint mt-2 text-[12px]">
-                  Everyone spent <span className="mono text-[var(--fg)]">{formatUsd(props.spentAll24h)}</span> in the last 24 hours.
+                  <span className="mono text-[var(--fg)]">{formatUsd(props.spentAll24h)}</span> spent in 24h
                 </p>
               </Row>
             )}

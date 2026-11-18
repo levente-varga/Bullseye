@@ -33,7 +33,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
     <>
       <PageHeader
         title="Profile"
-        meta="Stored only in your database and private storage, never in the repo. The scorer judges listings against your headline, location and CV."
+        meta="Private. The scorer reads your headline, location and CV."
       />
 
       <div className="space-y-10">
@@ -60,7 +60,6 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
               <label className="field">
                 <span className="label">Other links</span>
                 <textarea name="links" defaultValue={profile.links.join("\n")} rows={2} className="input mono" placeholder="One per line" />
-                <span className="hint">Kept separate so application forms can be pre-filled field by field later.</span>
               </label>
             </div>
           </Panel>
@@ -103,7 +102,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
                   className="max-w-full min-w-0 text-[13px] file:mr-3 file:cursor-pointer file:border file:border-[var(--border-strong)] file:bg-[var(--surface)] file:px-2.5 file:py-1 file:text-[13px] file:text-[var(--fg)]"
                 />
                 <SubmitButton className="btn-primary ml-auto">{profile.cv_file_path ? "Replace PDF" : "Upload PDF"}</SubmitButton>
-                <p className="hint w-full">Uploading extracts the text into the box below, replacing what&apos;s there.</p>
+                <p className="hint w-full">Replaces the text below.</p>
               </form>
             </Panel>
 
@@ -134,7 +133,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
           />
           <Panel>
             {(answers ?? []).length === 0 ? (
-              <Empty>No answers yet. Start with notice period, salary expectation and work permit.</Empty>
+              <Empty>No answers yet. Try notice period, salary and work permit.</Empty>
             ) : (
               <ol className="divide">
                 {(answers ?? []).map((a, i) => (
