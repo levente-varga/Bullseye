@@ -115,6 +115,13 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   let fetched: (FetchedJob & { dedupe_key: string })[];
   try {
     fetched = (await fetchBoard(source)).map((j) => ({ ...j, dedupe_key: dedupeKey(j.url) }));
+    // A company board can really have no openings, but an aggregator going from some
+    // listings to none almost always means its site changed and the adapter reads nothing.
+    if (isAggregator && fetched.length === 0 && (source.last_job_count ?? 0) > 0) {
+      throw new Error(
+        `Returned no listings (${source.last_job_count} last time). The site has probably changed and Bullseye can't read it anymore.`,
+      );
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.from("sources").update({ last_error: msg, last_checked_at: new Date().toISOString() }).eq("id", source.id);
@@ -246,7 +253,10 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
 
   if (ATS_INFO[source.ats]?.suggests) await discoverSources(fetched);
 
-  await db.from("sources").update({ last_error: null, last_checked_at: new Date().toISOString() }).eq("id", source.id);
+  await db
+    .from("sources")
+    .update({ last_error: null, last_checked_at: new Date().toISOString(), last_job_count: fetched.length })
+    .eq("id", source.id);
   console.log(
     `[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.filtered} filtered, ` +
       `${stats.described} described), ${stats.duplicates} duplicates, ${stats.adopted} adopted, ` +
