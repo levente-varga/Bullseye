@@ -68,12 +68,12 @@ export function SidebarNav({ counts: initial, admin = false }: { counts?: NavCou
   );
 }
 
-/** Horizontal nav for narrow screens. */
-export function TopNav() {
+/** Horizontal nav for narrow screens. `admin` adds the Members page. */
+export function TopNav({ admin = false }: { admin?: boolean }) {
   const path = usePathname();
   return (
     <nav className="flex flex-wrap gap-x-0.5 gap-y-1">
-      {NAV.map(({ href, label }) => (
+      {[...NAV, ...(admin ? [ADMIN_NAV] : [])].map(({ href, label }) => (
         <Link
           key={href}
           href={href}

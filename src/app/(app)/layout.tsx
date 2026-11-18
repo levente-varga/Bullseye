@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { IconBullseye } from "@/components/icons";
 import { TopNav } from "@/components/NavLinks";
-import { SidebarData, SidebarFallback } from "@/components/Sidebar";
+import { SidebarData, SidebarFallback, TopNavData } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { signOut } from "./actions";
 
@@ -40,11 +40,18 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       <div className="min-w-0 flex-1 md:pl-[232px]">
         {/* Top bar (mobile) */}
         <header className="border-b border-[var(--border)] px-4 pt-3 pb-2 md:hidden">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between gap-3">
             <Wordmark />
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <form action={signOut}>
+                <button className="btn-ghost text-[12px]">Sign out</button>
+              </form>
+            </div>
           </div>
-          <TopNav />
+          <Suspense fallback={<TopNav />}>
+            <TopNavData />
+          </Suspense>
         </header>
         <main className="mx-auto w-full max-w-[1120px] px-4 py-6 md:px-10 md:py-10">{children}</main>
       </div>
