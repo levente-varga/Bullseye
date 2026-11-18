@@ -471,6 +471,78 @@ export async function workdayTotal(slug: string): Promise<number> {
   return ((await res.json()) as { total?: number }).total ?? 0;
 }
 
+// --- JobTech / Platsbanken (aggregator) -------------------------------------------
+// Sweden's public employment service publishes every job ad in Platsbanken through an
+// open API (jobtechdev.se), most of them in Swedish. Slug: search parameters, e.g.
+// "occupation-field=apaJ_2ja_LuF" (Data/IT); empty means Data/IT + Culture/media/design.
+// The API stops at 2,000 results per search, so each run reads the last week's ads
+// (≈900 for the default) and the source is "partial": older ads aren't closed for
+// dropping out of the window.
+
+export const JOBTECH_DEFAULT_QUERY = "occupation-field=apaJ_2ja_LuF&occupation-field=9puE_nYg_crq";
+const JOBTECH_WINDOW_MINUTES = 7 * 24 * 60;
+const JOBTECH_PAGE = 100;
+const JOBTECH_MAX = 2000;
+
+interface JobTechAd {
+  id: string;
+  headline: string;
+  webpage_url: string;
+  publication_date?: string;
+  description?: { text?: string | null };
+  employer?: { name?: string | null };
+  application_details?: { url?: string | null };
+  workplace_address?: { city?: string | null; municipality?: string | null; country?: string | null };
+  workplace_model?: { label?: string | null } | null;
+  salary_description?: string | null;
+}
+
+/** The employer's own posting when the ad links to one (so duplicates of direct sources match), else Platsbanken. */
+function jobTechUrl(ad: JobTechAd): string {
+  const apply = ad.application_details?.url;
+  if (!apply || !/^https?:\/\//i.test(apply)) return ad.webpage_url;
+  try {
+    const u = new URL(apply);
+    u.pathname = u.pathname.replace(/\/applications\/new\/?$/, ""); // Teamtailor apply form → the posting
+    u.searchParams.delete("promotion");
+    return u.toString();
+  } catch {
+    return ad.webpage_url;
+  }
+}
+
+async function fetchJobTech(query: string): Promise<FetchedJob[]> {
+  const base = new URLSearchParams(query || JOBTECH_DEFAULT_QUERY);
+  base.set("published-after", String(JOBTECH_WINDOW_MINUTES));
+  base.set("limit", String(JOBTECH_PAGE));
+  const out: FetchedJob[] = [];
+  for (let offset = 0; offset + JOBTECH_PAGE <= JOBTECH_MAX; offset += JOBTECH_PAGE) {
+    base.set("offset", String(offset));
+    const page = await getJson<{ total?: { value?: number }; hits: JobTechAd[] }>(
+      `https://jobsearch.api.jobtechdev.se/search?${base}`,
+    );
+    for (const ad of page.hits) {
+      const a = ad.workplace_address ?? {};
+      const place = a.city || a.municipality;
+      const country = a.country === "Sverige" ? "Sweden" : a.country;
+      const model = ad.workplace_model?.label ?? "";
+      out.push({
+        external_id: ad.id,
+        title: ad.headline.trim(),
+        company: ad.employer?.name?.trim() || "Unknown employer",
+        location: [place, country].filter(Boolean).join(", ") || "Sweden",
+        remote: /distans|hybrid/i.test(model),
+        url: jobTechUrl(ad),
+        description: clip(ad.description?.text ?? ""),
+        compensation: ad.salary_description || null,
+        posted_at: ad.publication_date ? new Date(ad.publication_date).toISOString() : null,
+      });
+    }
+    if (page.hits.length < JOBTECH_PAGE || offset + JOBTECH_PAGE >= (page.total?.value ?? 0)) break;
+  }
+  return out;
+}
+
 // --- Sweden Game Jobs (aggregator) ---------------------------------------------
 
 interface SgjJob {
@@ -532,6 +604,8 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchWorkable(slug, company);
     case "workday":
       return fetchWorkday(slug, company);
+    case "jobtech":
+      return fetchJobTech(slug);
     case "swedengamejobs":
       return fetchSwedenGameJobs();
   }
@@ -547,6 +621,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   recruitee: (s) => `https://${s}`,
   workable: (s) => `https://apply.workable.com/${s}`,
   workday: (s) => `https://${s}`,
+  jobtech: () => "https://arbetsformedlingen.se/platsbanken/",
   swedengamejobs: () => "https://www.swedengamejobs.com/",
 };
 

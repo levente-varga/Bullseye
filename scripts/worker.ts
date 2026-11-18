@@ -234,14 +234,17 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   }
   stats.inserted = rows.length;
 
-  // Postings that vanished before you acted on them get closed.
-  const gone = existing.filter((j) => !live.has(j.external_id) && OPEN_STATUSES.includes(j.status));
+  // Postings that vanished before you acted on them get closed. Not for partial feeds
+  // (JobTech shows the last week only): there, dropping out of the window isn't closing.
+  const gone = ATS_INFO[source.ats]?.partial
+    ? []
+    : existing.filter((j) => !live.has(j.external_id) && OPEN_STATUSES.includes(j.status));
   for (let i = 0; i < gone.length; i += 200) {
     await must(db.from("jobs").update({ status: "closed" }).in("id", gone.slice(i, i + 200).map((j) => j.id)));
   }
   stats.closed = gone.length;
 
-  if (isAggregator) await discoverSources(fetched);
+  if (ATS_INFO[source.ats]?.suggests) await discoverSources(fetched);
 
   await db.from("sources").update({ last_error: null, last_checked_at: new Date().toISOString() }).eq("id", source.id);
   console.log(

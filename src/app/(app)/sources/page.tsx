@@ -221,7 +221,14 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
                   <li key={a}>
                     {ATS_INFO[a].label}:{" "}
-                    {ATS_INFO[a].aggregator ? <span className="faint">leave empty</span> : <code className="mono faint">{ATS_INFO[a].slugExample}</code>}
+                    {a === "swedengamejobs" ? (
+                      <span className="faint">leave empty</span>
+                    ) : (
+                      <>
+                        <code className="mono faint">{ATS_INFO[a].slugExample}</code>
+                        {a === "jobtech" && <span className="faint"> (or leave empty for IT + design jobs)</span>}
+                      </>
+                    )}
                   </li>
                 ))}
                 <li>The country filter (two letters) only applies to SmartRecruiters.</li>
