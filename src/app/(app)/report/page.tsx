@@ -7,7 +7,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { CreditChart } from "@/components/CreditChart";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
 import { buildSeries, dayStart, type TopUp } from "@/lib/credits";
-import { formatUsd } from "@/lib/pricing";
+import { formatRunCost, formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
 import { addCreditEntry, deleteCreditEntry } from "../actions";
 import type { JobStatus, Run } from "@/lib/types";
@@ -271,7 +271,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                             }
                           >
                             {/* Only runs that used AI show a cost; the rest (digests, nothing to score) a dash. */}
-                            {r.stats.cost_usd > 0 ? formatUsd(r.stats.cost_usd) : <span className="faint">–</span>}
+                            {r.stats.cost_usd > 0 ? formatRunCost(r.stats.cost_usd) : <span className="faint">–</span>}
                           </td>
                           <td className="max-w-0 text-[12px]">
                             {r.error ? (

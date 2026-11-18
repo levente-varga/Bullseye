@@ -1,6 +1,6 @@
 import { USER_AGENT, fetchBoard, probeHost, workdayTotal } from "./ats";
 import { detectAts } from "./dedupe";
-import type { Ats } from "./types";
+import { ATS_INFO, type Ats } from "./types";
 
 /**
  * Turns any careers page or job posting URL into a source: which ATS the
@@ -24,6 +24,7 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
   { ats: "smartrecruiters", re: /(?:jobs|careers)\.smartrecruiters\.com\/([A-Za-z0-9_-]+)/, slug: (m) => m[1] },
   { ats: "personio", re: /([a-z0-9-]+\.jobs\.personio\.(?:de|com))/i, slug: (m) => m[1].toLowerCase() },
   { ats: "recruitee", re: /([a-z0-9-]+\.recruitee\.com)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "pinpoint", re: /([a-z0-9-]+\.pinpointhq\.com)/i, slug: (m) => m[1].toLowerCase() },
   { ats: "workable", re: /apply\.workable\.com\/(?!j\/|api\/)([a-z0-9-]+)/i, slug: (m) => m[1].toLowerCase() },
   {
     ats: "workday",
@@ -31,6 +32,12 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
     slug: (m) => `${m[1].toLowerCase()}/${m[2]}`,
   },
 ];
+
+/** "Greenhouse, Lever, …": every company job system (aggregators excluded). */
+const SUPPORTED = (Object.keys(ATS_INFO) as Ats[])
+  .filter((a) => !ATS_INFO[a].aggregator)
+  .map((a) => ATS_INFO[a].label)
+  .join(", ");
 
 const IGNORED_SLUGS = /^(embed|v\d|api|www|app|static|assets)$/i;
 
@@ -74,9 +81,8 @@ export async function detectSource(input: string): Promise<Detected | { error: s
   if (!candidates.length) {
     return {
       error:
-        "Couldn't recognize the job system behind that page. Supported: Greenhouse, Lever, Ashby, Teamtailor, " +
-        "SmartRecruiters, Personio, Recruitee, Workable, Workday. Try a link to one of the company's job postings " +
-        "instead of the careers homepage.",
+        `Couldn't recognize the job system behind that page. Supported: ${SUPPORTED}. ` +
+        "Try a link to one of the company's job postings instead of the careers homepage.",
     };
   }
 
@@ -108,7 +114,7 @@ async function fetchText(url: string): Promise<string | null> {
 /** "career.paradoxplaza.com" → "Paradoxplaza", "bunq.recruitee.com" → "Bunq". Editable later. */
 function guessName(ats: Ats, slug: string): string {
   const host = slug.split("/")[0];
-  const base = ["teamtailor", "personio", "recruitee", "workday"].includes(ats)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)
     : slug;
   const clean = base.replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();

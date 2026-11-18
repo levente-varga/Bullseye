@@ -18,6 +18,7 @@ on:
           - daily
           - watchlist
           - full
+          - score
           - digest
 
 concurrency:

@@ -3,11 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
-import { JOBTECH_DEFAULT_QUERY } from "@/lib/ats";
+import { JOBTECH_DEFAULT_QUERY, workdayFromUrl } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
+import { hardFilter } from "@/lib/filters";
 import { createClient } from "@/lib/supabase/server";
-import { ATS_INFO, DEFAULT_SCORING_MODEL, SCORING_MODELS, WATCH_INTERVALS, type Ats, type JobDetails, type JobStatus } from "@/lib/types";
+import {
+  ATS_INFO,
+  DEFAULT_SCORING_MODEL,
+  SCORING_MODELS,
+  WATCH_INTERVALS,
+  type Ats,
+  type Criteria,
+  type FetchedJob,
+  type JobDetails,
+  type JobStatus,
+} from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 /** Splits a textarea on newlines or commas into a clean list. */
@@ -130,6 +141,75 @@ function scheduleFields(form: FormData) {
   };
 }
 
+/** Columns the hard filters read, plus what deciding the outcome needs. */
+type EvalRow = { id: string; url: string; title: string; location: string; remote: boolean; description: string; thin: boolean; status: JobStatus; filter_reason: string | null };
+
+const RESET_SCORE = { score: null, score_summary: null, score_pros: null, score_cons: null, scored_at: null };
+
+/**
+ * Applies the saved criteria to jobs you haven't acted on (waiting, scored, filtered):
+ * - fails the filters now → Filtered (with the new reason)
+ * - was filtered, passes now → waiting to be scored (described first if it never was)
+ * - with `rescore`: scored jobs that still pass → waiting to be scored again
+ * Free by itself; scoring happens at the next runs. Decisions and the Pipeline are untouched.
+ */
+export async function reevaluate(form: FormData) {
+  const supabase = await db();
+  const rescore = form.get("rescore") === "on";
+  const { data: c, error } = await supabase.from("criteria").select("*").eq("id", 1).single();
+  check(error);
+  const criteria = c as Criteria;
+
+  const toFiltered = new Map<string, string[]>(); // reason → ids
+  const toWaiting: string[] = [];
+  let kept = 0;
+  let moved = 0; // newly filtered
+  const PAGE = 500;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error: e } = await supabase
+      .from("jobs")
+      .select("id, url, title, location, remote, description, thin, status, filter_reason")
+      .in("status", ["new", "scored", "filtered"])
+      .order("id")
+      .range(from, from + PAGE - 1);
+    check(e);
+    const rows = (data ?? []) as EvalRow[];
+    for (const j of rows) {
+      const noText = !j.description || j.thin;
+      const reason = hardFilter(j as unknown as FetchedJob, criteria, {
+        skipKeywordCheck: noText,
+        locationPending: !j.description && workdayFromUrl(j.url) !== null,
+      });
+      if (reason) {
+        // Still filtered with a different reason: the reason is updated, but it isn't a move.
+        if (j.status !== "filtered" || j.filter_reason !== reason) toFiltered.set(reason, [...(toFiltered.get(reason) ?? []), j.id]);
+        if (j.status === "filtered") kept++;
+        else moved++;
+      } else if (j.status === "filtered" || (rescore && j.status === "scored")) {
+        toWaiting.push(j.id);
+      } else {
+        kept++;
+      }
+    }
+    if (rows.length < PAGE) break;
+  }
+
+  // Updates in chunks: ids travel in the request URL.
+  const chunks = (ids: string[]) => Array.from({ length: Math.ceil(ids.length / 150) }, (_, i) => ids.slice(i * 150, i * 150 + 150));
+  for (const [reason, ids] of toFiltered) {
+    for (const part of chunks(ids)) {
+      check((await supabase.from("jobs").update({ status: "filtered", filter_reason: reason, ...RESET_SCORE }).in("id", part)).error);
+    }
+  }
+  for (const part of chunks(toWaiting)) {
+    check((await supabase.from("jobs").update({ status: "new", filter_reason: null, ...RESET_SCORE }).in("id", part)).error);
+  }
+
+  revalidatePath("/", "layout");
+  const summary = new URLSearchParams({ filtered: String(moved), waiting: String(toWaiting.length), kept: String(kept) });
+  redirect(`/criteria?${summary}#reevaluate`);
+}
+
 export async function addExcludeKeyword(form: FormData) {
   const supabase = await db();
   const kw = str(form, "keyword");
@@ -154,6 +234,7 @@ function normalizeSlug(ats: Ats, input: string): string {
   // Career site hosts; a bare company name gets the default domain.
   if (ats === "personio") return host.includes(".") ? host : `${host}.jobs.personio.de`;
   if (ats === "recruitee") return host.includes(".") ? host : `${host}.recruitee.com`;
+  if (ats === "pinpoint") return host.includes(".") ? host : `${host}.pinpointhq.com`;
   if (ats === "workday") {
     // "<tenant>.wd<N>.myworkdayjobs.com/<site>", from a careers site or posting URL.
     const d = detectAts(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);

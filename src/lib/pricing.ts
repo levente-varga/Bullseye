@@ -23,7 +23,14 @@ export function costUsd(model: string, u: TokenUsage): number {
 }
 
 /** "$0.0123" below a cent, "$1.23" otherwise. */
+/** A single amount (balance, burn rate, total): cents, or up to 4 decimals below a cent ("$0.004"). */
 export function formatUsd(v: number): string {
   if (v === 0) return "$0";
-  return v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+  if (Math.abs(v) >= 0.01) return `$${v.toFixed(2)}`;
+  return `$${v.toFixed(4).replace(/0+$/, "")}`;
+}
+
+/** One run's cost in a column: always 4 decimals, so rows line up and compare at a glance. */
+export function formatRunCost(v: number): string {
+  return `$${v.toFixed(4)}`;
 }
