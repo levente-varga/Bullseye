@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/SubmitButton";
 import { CreditChart } from "@/components/CreditChart";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
 import { buildSeries, dayStart, type TopUp } from "@/lib/credits";
@@ -148,7 +149,7 @@ export default async function ReportPage() {
               <form action={addCreditEntry} className="flex gap-1.5 border-b border-[var(--border)] p-3">
                 <input name="date" type="date" defaultValue={todayIso} max={todayIso} className="input mono min-w-0 flex-1" />
                 <input name="amount" inputMode="decimal" required placeholder="$5.00" className="input mono w-20" />
-                <button className="btn-primary">Add</button>
+                <SubmitButton className="btn-primary" done="Added">Add</SubmitButton>
               </form>
               {topUps.length === 0 ? (
                 <Empty>No top-ups yet.</Empty>
@@ -162,9 +163,9 @@ export default async function ReportPage() {
                       <span className="mono text-right text-[13px]">+${e.amount_usd.toFixed(2)}</span>
                       <form action={deleteCreditEntry}>
                         <input type="hidden" name="id" value={e.id} />
-                        <button className="btn-ghost btn-danger text-[12px]" aria-label="Delete top-up">
+                        <SubmitButton className="btn-ghost btn-danger text-[12px]" aria-label="Delete top-up">
                           ✕
-                        </button>
+                        </SubmitButton>
                       </form>
                     </li>
                   ))}

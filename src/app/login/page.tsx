@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { SubmitButton } from "@/components/SubmitButton";
 import { IconBullseye } from "@/components/icons";
 import { createClient } from "@/lib/supabase/server";
 
@@ -35,7 +36,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             <input name="password" type="password" required autoComplete="current-password" className="input" />
           </label>
           {error && <p className="text-[12px] text-[var(--bad)]">Wrong email or password.</p>}
-          <button className="btn-primary w-full py-1.5">Sign in</button>
+          <SubmitButton className="btn-primary w-full py-1.5">Sign in</SubmitButton>
         </div>
       </form>
     </main>
