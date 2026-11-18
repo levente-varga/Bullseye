@@ -1,23 +1,17 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getNavCounts } from "@/lib/nav-counts";
 import { agoText } from "@/lib/time";
-import { PIPELINE_STATUSES } from "@/lib/types";
 import { SidebarNav } from "./NavLinks";
 import { Dot } from "./ui";
 
 /** Sidebar contents that need data: nav counts, watchlist, last-run status. */
 export async function SidebarData() {
   const supabase = await createClient();
-  const [{ data: criteria }, sources, run] = await Promise.all([
-    supabase.from("criteria").select("score_threshold").eq("id", 1).single(),
+  const [counts, sources, run] = await Promise.all([
+    getNavCounts(supabase),
     supabase.from("sources").select("id, company_name, watchlist, enabled, last_error").order("company_name"),
     supabase.from("runs").select("kind, started_at, finished_at, error").order("started_at", { ascending: false }).limit(1),
-  ]);
-  const threshold = criteria?.score_threshold ?? 60;
-  const [inbox, pipeline, suggestions] = await Promise.all([
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
-    supabase.from("jobs").select("id", { count: "exact", head: true }).in("status", PIPELINE_STATUSES.filter((s) => s !== "rejected")),
-    supabase.from("source_suggestions").select("id", { count: "exact", head: true }).eq("status", "new").neq("ats", "custom"),
   ]);
 
   const list = sources.data ?? [];
@@ -28,13 +22,7 @@ export async function SidebarData() {
 
   return (
     <>
-      <SidebarNav
-        counts={{
-          inbox: inbox.count ?? 0,
-          pipeline: pipeline.count ?? 0,
-          sources: suggestions.count ? `${enabled} +${suggestions.count}` : enabled,
-        }}
-      />
+      <SidebarNav counts={counts} />
 
       <div className="rule mt-5 pt-4">
         <div className="eyebrow mb-2 flex items-center justify-between px-2">

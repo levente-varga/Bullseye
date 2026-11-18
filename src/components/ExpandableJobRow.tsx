@@ -1,17 +1,25 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { getJobDetails, skipJob } from "@/app/(app)/actions";
-import { SKIP_REASONS, type JobDetails } from "@/lib/types";
+import { getJobDetails } from "@/app/(app)/actions";
+import type { JobDetails } from "@/lib/types";
 import { IconExternal } from "./icons";
-import { SubmitButton } from "./SubmitButton";
 
 /**
- * An Inbox row. Only the summary line ships with the page; the scorer's
- * reasoning and the skip form are fetched and rendered the first time the row
- * is opened. Keeps "All scored" light no matter how many rows it has.
+ * A job row that opens to show the scorer's reasoning. Only the summary line
+ * ships with the page; the reasoning is fetched the first time the row is
+ * opened, which keeps long lists light. `side` fills the right column of the
+ * opened row (e.g. the Inbox's skip form).
  */
-export function ExpandableJobRow(props: { id: string; url: string; summaryClassName: string; summary: ReactNode }) {
+export function ExpandableJobRow(props: {
+  id: string;
+  url: string;
+  summaryClassName: string;
+  summary: ReactNode;
+  side?: ReactNode;
+  /** Left padding of the opened panel on wide screens, to line up with the title column. */
+  indent?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<JobDetails | null | undefined>(undefined);
 
@@ -30,7 +38,9 @@ export function ExpandableJobRow(props: { id: string; url: string; summaryClassN
     <details className="group" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className={props.summaryClassName}>{props.summary}</summary>
       {open && (
-        <div className="grid gap-5 border-t border-[var(--border)] bg-[var(--bg)] px-3 py-4 lg:grid-cols-[1fr_320px] lg:pl-[132px]">
+        <div
+          className={`grid gap-5 border-t border-[var(--border)] bg-[var(--bg)] px-3 py-4 ${props.side ? "lg:grid-cols-[1fr_320px]" : ""} ${props.indent ?? "lg:pl-[132px]"}`}
+        >
           <div className="space-y-3">
             {details === undefined ? (
               <div aria-busy="true" className="space-y-2">
@@ -65,21 +75,7 @@ export function ExpandableJobRow(props: { id: string; url: string; summaryClassN
               Open posting <IconExternal />
             </a>
           </div>
-
-          <form action={skipJob} className="space-y-2.5">
-            <input type="hidden" name="id" value={props.id} />
-            <div className="eyebrow">Skip because</div>
-            <div className="flex flex-wrap gap-1.5">
-              {SKIP_REASONS.map((r) => (
-                <label key={r} className="chip">
-                  <input type="checkbox" name="reasons" value={r} className="sr-only" />
-                  {r}
-                </label>
-              ))}
-            </div>
-            <input name="other" placeholder="Other reason (optional)" className="input" />
-            <SubmitButton className="btn">Skip</SubmitButton>
-          </form>
+          {props.side}
         </div>
       )}
     </details>

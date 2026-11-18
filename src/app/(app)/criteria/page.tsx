@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SubmitButton } from "@/components/SubmitButton";
 import { createClient } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
@@ -151,7 +152,7 @@ export default async function CriteriaPage() {
             </div>
           </Panel>
 
-          <button className="btn-primary">Save criteria</button>
+          <SubmitButton className="btn-primary" done="Saved">Save criteria</SubmitButton>
         </form>
 
         <aside className="space-y-3">
@@ -173,7 +174,7 @@ export default async function CriteriaPage() {
             )}
             <form action={addExcludeKeyword} className="flex gap-1.5 border-t border-[var(--border)] p-3">
               <input name="keyword" placeholder="Exclude a title word" className="input" />
-              <button className="btn">Add</button>
+              <SubmitButton className="btn" done="Added">Add</SubmitButton>
             </form>
           </Panel>
           <p className="faint text-[12px] leading-relaxed">

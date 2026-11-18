@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { PendingBar } from "./PendingBar";
 import { IconChart, IconInbox, IconPipeline, IconSliders, IconSources, IconUser } from "./icons";
 
@@ -18,9 +19,29 @@ export type NavCounts = Partial<Record<(typeof NAV)[number]["key"], string | num
 
 const isActive = (path: string, href: string) => (href === "/" ? path === "/" : path.startsWith(href));
 
-/** Vertical nav for the sidebar. */
-export function SidebarNav({ counts = {} }: { counts?: NavCounts }) {
+/**
+ * Vertical nav for the sidebar. `counts` come from the layout, which Next.js
+ * doesn't re-render on navigation, so they're re-read on every page change and
+ * whenever the server sends new ones (after a save). Otherwise they'd go stale
+ * when the worker changes the database.
+ */
+export function SidebarNav({ counts: initial }: { counts?: NavCounts }) {
   const path = usePathname();
+  const [live, setLive] = useState<NavCounts | null>(null);
+  const initialKey = JSON.stringify(initial ?? null);
+
+  useEffect(() => {
+    if (!initial) return; // fallback while the sidebar loads
+    const ctrl = new AbortController();
+    fetch("/api/nav-counts", { signal: ctrl.signal, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: NavCounts | null) => c && setLive(c))
+      .catch(() => {}); // keep the last known counts
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialKey stands in for `initial`
+  }, [path, initialKey]);
+
+  const counts = live ?? initial ?? {};
   return (
     <nav className="space-y-px">
       {NAV.map(({ href, label, Icon, key }) => {

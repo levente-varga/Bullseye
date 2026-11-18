@@ -1,9 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
-import { IconExternal } from "@/components/icons";
+import { SubmitButton } from "@/components/SubmitButton";
+import { ExpandableJobRow } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
 import { agoText, nowMs } from "@/lib/time";
 import { JOB_LIST_COLUMNS, PIPELINE_STATUSES, type Job, type JobStatus } from "@/lib/types";
-import { markFollowedUp, setStatus } from "../actions";
+import { markFollowedUp, restoreToInbox, setStatus } from "../actions";
 
 const LABEL: Record<string, string> = {
   approved: "To apply",
@@ -11,6 +12,15 @@ const LABEL: Record<string, string> = {
   interview: "Interview",
   offer: "Offer",
   rejected: "Rejected",
+};
+
+/** Button text for moving a job to a status. */
+const ACTION: Partial<Record<JobStatus, string>> = {
+  applied: "Applied",
+  interview: "Interview",
+  offer: "Offer",
+  rejected: "Rejected",
+  skipped: "Drop",
 };
 
 const NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
@@ -71,46 +81,61 @@ export default async function PipelinePage() {
               ) : (
                 <ul className="divide">
                   {rows.map((job) => (
-                    <li key={job.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5 hover:bg-[var(--surface-2)]">
-                      <ScoreMeter score={job.score} width="w-14" />
-                      <div className="min-w-0 flex-1">
-                        <a
-                          href={job.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 font-medium hover:underline"
-                        >
-                          {job.title} <IconExternal className="text-[var(--faint)]" />
-                        </a>
-                        <div className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px]">
-                          <span>{job.company}</span>
-                          {job.applied_at && <span className="mono faint">applied {agoText(job.applied_at)}</span>}
-                          {job.followed_up_at && <span className="mono faint">followed up {agoText(job.followed_up_at)}</span>}
-                          {due(job) && (
-                            <span className="inline-flex items-center gap-1.5">
-                              <Dot tone="warn" />
-                              <Pill tone="warn">Follow-up due</Pill>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {status === "applied" && (
-                          <form action={markFollowedUp}>
-                            <input type="hidden" name="id" value={job.id} />
-                            <button className="btn">Followed up</button>
-                          </form>
-                        )}
-                        {(NEXT[status] ?? []).map((to) => (
-                          <form key={to} action={setStatus}>
-                            <input type="hidden" name="id" value={job.id} />
-                            <input type="hidden" name="status" value={to} />
-                            <button className={to === "rejected" || to === "skipped" ? "btn" : "btn-primary"}>
-                              {to === "skipped" ? "Drop" : `→ ${LABEL[to]}`}
-                            </button>
-                          </form>
-                        ))}
-                      </div>
+                    <li key={job.id}>
+                      <ExpandableJobRow
+                        id={job.id}
+                        url={job.url}
+                        indent="lg:pl-[88px]"
+                        summaryClassName="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] [&::-webkit-details-marker]:hidden"
+                        summary={
+                          <>
+                            <ScoreMeter score={job.score} width="w-14" />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium">{job.title}</div>
+                              <div className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px]">
+                                <span>{job.company}</span>
+                                {job.applied_at && <span className="mono faint">applied {agoText(job.applied_at)}</span>}
+                                {job.followed_up_at && <span className="mono faint">followed up {agoText(job.followed_up_at)}</span>}
+                                {due(job) && (
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Dot tone="warn" />
+                                    <Pill tone="warn">Follow-up due</Pill>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {status === "applied" && (
+                                <form action={markFollowedUp}>
+                                  <input type="hidden" name="id" value={job.id} />
+                                  <SubmitButton className="btn">Followed up</SubmitButton>
+                                </form>
+                              )}
+                              {(NEXT[status] ?? []).map((to) => (
+                                <form key={to} action={setStatus}>
+                                  <input type="hidden" name="id" value={job.id} />
+                                  <input type="hidden" name="status" value={to} />
+                                  <SubmitButton className={to === "rejected" || to === "skipped" ? "btn" : "btn-primary"}>
+                                    {ACTION[to]}
+                                  </SubmitButton>
+                                </form>
+                              ))}
+                              {status === "approved" && (
+                                <form action={restoreToInbox}>
+                                  <input type="hidden" name="id" value={job.id} />
+                                  <SubmitButton className="btn" title="Undo the approval: back to the Inbox, as if untouched">
+                                    Back to Inbox
+                                  </SubmitButton>
+                                </form>
+                              )}
+                              <span className="btn">
+                                <span className="group-open:hidden">Details</span>
+                                <span className="hidden group-open:inline">Close</span>
+                              </span>
+                            </div>
+                          </>
+                        }
+                      />
                     </li>
                   ))}
                 </ul>
@@ -122,7 +147,7 @@ export default async function PipelinePage() {
       <p className="faint mt-4 text-[12px]">
         &quot;Follow-up due&quot; means an application has had no reply for <span className="mono">{followupDays}</span>{" "}
         days: a reminder to write to the company. Click Followed up afterwards to restart the timer (set on the
-        Criteria page).
+        Criteria page). Dropped jobs move to Inbox → Skipped, where you can restore them.
       </p>
     </>
   );
