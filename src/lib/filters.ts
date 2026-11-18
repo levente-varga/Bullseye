@@ -15,7 +15,11 @@ const hasWord = (haystack: string, word: string) =>
 export function hardFilter(
   job: FetchedJob,
   c: Criteria,
-  opts: { skipKeywordCheck?: boolean } = {},
+  /**
+   * skipKeywordCheck: no description yet, so must-have keywords can't be judged.
+   * locationPending: the real location comes with the description (Workday), so don't judge it yet.
+   */
+  opts: { skipKeywordCheck?: boolean; locationPending?: boolean } = {},
 ): string | null {
   // Title only: descriptions mention almost everything in passing.
   const excluded = c.exclude_keywords.find((k) => k.trim() && hasWord(job.title, k));
@@ -25,7 +29,9 @@ export function hardFilter(
     return "Title matches none of the target roles";
   }
 
-  if (c.locations.length) {
+  if (opts.locationPending) {
+    // checked again once the description (and real location) is in
+  } else if (c.locations.length) {
     const locationOk = c.locations.some((l) => l.trim() && has(job.location, l));
     if (!locationOk && !(c.remote_ok && job.remote)) {
       return `Location "${job.location || "unknown"}" not in target locations`;

@@ -9,7 +9,7 @@
 import "./env";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchBoard } from "../src/lib/ats";
+import { fetchBoard, probeHost, workdayFromUrl } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
@@ -138,8 +138,10 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   }
   const coveredByDirect = (url: string) => {
     const d = detectAts(url);
-    const ats = d.ats === "teamtailor?" ? "teamtailor" : d.ats;
-    return direct.has(`${ats}:${d.slug.toLowerCase()}`);
+    const slug = d.slug.toLowerCase();
+    // A custom career domain could be either; a source on that host covers it.
+    if (d.ats === "probe?") return direct.has(`teamtailor:${slug}`) || direct.has(`recruitee:${slug}`);
+    return direct.has(`${d.ats}:${slug}`);
   };
 
   // New to this source, and unique within this fetch.
@@ -192,7 +194,11 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   const rows: Record<string, unknown>[] = [];
   const needDescription: (typeof candidates)[number][] = [];
   for (const j of candidates) {
-    const reason = hardFilter(j, criteria, { skipKeywordCheck: !j.description });
+    // Workday lists lack countries ("Best", "3 Locations"): judge the location after the detail fetch.
+    const reason = hardFilter(j, criteria, {
+      skipKeywordCheck: !j.description,
+      locationPending: !j.description && workdayFromUrl(j.url) !== null,
+    });
     if (reason) {
       stats.filtered++;
       rows.push({ ...j, source_id: source.id, thin: false, status: "filtered", filter_reason: reason });
@@ -204,7 +210,9 @@ async function syncSource(source: Source, criteria: Criteria, aggregatorIds: Set
   }
   await pool(needDescription, DESCRIBE_CONCURRENCY, async (j) => {
     try {
-      j.description = await describe(source, j);
+      const found = await describe(source, j);
+      j.description = found.text;
+      if (found.location) j.location = found.location;
       stats.described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
@@ -262,24 +270,18 @@ async function discoverSources(jobs: FetchedJob[]) {
 
   const rows = [];
   for (const g of groups.values()) {
-    if (g.ats === "teamtailor?") {
-      // Confirm once per host; afterwards the stored suggestion remembers the answer.
+    if (g.ats === "probe?") {
+      // A custom career domain: Teamtailor, Recruitee, or neither. Checked once per host;
+      // afterwards the stored suggestion remembers the answer.
       const prev = suggested.get(g.slug.toLowerCase());
-      g.ats = prev ?? ((await isTeamtailor(g.slug)) ? "teamtailor" : "custom");
+      g.ats = prev ?? (await probeHost(g.slug)) ?? "custom";
     }
     if (have.has(`${g.ats}:${g.slug.toLowerCase()}`)) continue;
     rows.push({ ...g, last_seen_at: new Date().toISOString() });
   }
-  if (rows.length) await must(db.from("source_suggestions").upsert(rows, { onConflict: "ats,slug" }));
-}
-
-async function isTeamtailor(host: string): Promise<boolean> {
-  try {
-    const res = await fetch(`https://${host}/jobs.rss`, { signal: AbortSignal.timeout(10_000) });
-    return res.ok && (res.headers.get("content-type") ?? "").includes("xml");
-  } catch {
-    return false;
-  }
+  // Two "probe?" groups can resolve to the same row; the upsert needs unique keys.
+  const unique = [...new Map(rows.map((r) => [`${r.ats}:${r.slug.toLowerCase()}`, r])).values()];
+  if (unique.length) await must(db.from("source_suggestions").upsert(unique, { onConflict: "ats,slug" }));
 }
 
 // ---------------------------------------------------------------------------
