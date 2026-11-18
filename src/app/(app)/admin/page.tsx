@@ -5,7 +5,7 @@ import { Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
-import type { Member } from "@/lib/types";
+import { DEFAULT_CAPS, type Member } from "@/lib/types";
 import { cancelInvite, inviteMember, removeMember, updateMemberCaps } from "../actions";
 
 /** Admin only: invite friends, set their AI spend caps, remove them. */
@@ -64,8 +64,9 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             </SubmitButton>
           </form>
           <p className="faint mt-2 text-[12px] leading-relaxed">
-            They get an email with a link to set a password. New members start with default spend caps ($0.25 per run, $1 per
-            24 hours), no sources and an empty profile.
+            They get an email with a link to set a password. New members start with spend caps of{" "}
+            {formatUsd(DEFAULT_CAPS.run)} per run and {formatUsd(DEFAULT_CAPS.daily)} per 24 hours (raise them below), no
+            sources and an empty profile.
           </p>
           {invites.length > 0 && (
             <Panel title="Pending invites" aside={String(invites.length)}>

@@ -216,6 +216,9 @@ export interface Settings {
   max_total_daily_cost_usd: number;
 }
 
+/** AI spend caps (USD) a new member starts with, and what an emptied cap field falls back to. */
+export const DEFAULT_CAPS = { run: 0.01, daily: 0.05 };
+
 /** Someone who may use the app. Their AI spend caps (USD; 0 = no scoring) are set by the admin. */
 export interface Member {
   user_id: string;
