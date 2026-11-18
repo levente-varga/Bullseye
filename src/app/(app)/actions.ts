@@ -10,7 +10,6 @@ import { hardFilter } from "@/lib/filters";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import {
   ATS_INFO,
-  DEFAULT_CAPS,
   DEFAULT_SCORING_MODEL,
   SCORING_MODELS,
   WATCH_INTERVALS,
@@ -134,7 +133,7 @@ export async function saveSettings(form: FormData) {
           scoring_model: SCORING_MODELS.some((m) => m.id === str(form, "scoring_model"))
             ? str(form, "scoring_model")
             : DEFAULT_SCORING_MODEL,
-          max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd"), 3),
+          max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd")),
           ...scheduleFields(form),
           updated_at: new Date().toISOString(),
         })
@@ -147,8 +146,8 @@ export async function saveSettings(form: FormData) {
       await supabase
         .from("members")
         .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), DEFAULT_CAPS.run),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), DEFAULT_CAPS.daily),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
         })
         .eq("user_id", me.id)
     ).error,
@@ -255,10 +254,10 @@ export async function addExcludeKeyword(form: FormData) {
   revalidatePath("/criteria");
 }
 
-/** A dollar amount from a form field: non-negative, two decimals; the fallback when empty or invalid. */
-function money(raw: string, fallback: number): number {
+/** A dollar amount from a form field: non-negative, in cents; undefined when empty or invalid (the value stays as it was). */
+function money(raw: string): number | undefined {
   const n = Number(raw);
-  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : fallback;
+  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : undefined;
 }
 
 // --- Sources ----------------------------------------------------------------
@@ -549,8 +548,8 @@ export async function updateMemberCaps(form: FormData) {
       await supabase
         .from("members")
         .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd"), DEFAULT_CAPS.run),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd"), DEFAULT_CAPS.daily),
+          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
+          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
         })
         .eq("user_id", str(form, "user_id"))
     ).error,
@@ -563,5 +562,25 @@ export async function removeMember(form: FormData) {
   const supabase = await db();
   if (form.get("confirm") !== "on") redirect("/admin?error=Tick the box to confirm removing a member.");
   check((await supabase.rpc("remove_member", { p_user: str(form, "user_id") })).error);
+  revalidatePath("/admin");
+}
+
+/** The caps new members start with (admin only; RLS enforces it too). */
+export async function saveMemberDefaults(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return;
+  check(
+    (
+      await supabase
+        .from("settings")
+        .update({
+          default_run_cost_usd: money(str(form, "default_run_cost_usd")),
+          default_daily_cost_usd: money(str(form, "default_daily_cost_usd")),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", 1)
+    ).error,
+  );
   revalidatePath("/admin");
 }

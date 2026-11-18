@@ -214,10 +214,10 @@ export interface Settings {
   scoring_model: ScoringModel;
   /** AI spend across everyone per rolling 24 hours (USD): a backstop over the per-person caps. */
   max_total_daily_cost_usd: number;
+  /** The caps (USD) a new member starts with. */
+  default_run_cost_usd: number;
+  default_daily_cost_usd: number;
 }
-
-/** AI spend caps (USD) a new member starts with, and what an emptied cap field falls back to. */
-export const DEFAULT_CAPS = { run: 0.01, daily: 0.05 };
 
 /** Someone who may use the app. Their AI spend caps (USD; 0 = no scoring) are set by the admin. */
 export interface Member {
