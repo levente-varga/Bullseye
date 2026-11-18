@@ -889,6 +889,76 @@ async function fetchWorkWithIndies(): Promise<FetchedJob[]> {
   }).filter((j) => j.title);
 }
 
+// --- Jobylon ------------------------------------------------------------------
+// A Nordic ATS. No public API: each company's embeddable widget page lists every open
+// job in a JavaScript array (JBL.embed_v2['jobs'] = [{ id: '…', url: '…', … }]).
+// Slug: the company's Jobylon id. The list has the city only ("Helsinki"), so the
+// location filter waits for the posting, whose structured data has the country.
+
+interface JobylonEntry {
+  id: string;
+  url: string;
+  title: string;
+  company: string;
+  locations_text: string;
+  workspace: string;
+  published_date: string;
+}
+
+/** One string field from a JS object literal chunk ("key: 'value'"), with \uXXXX escapes decoded. */
+function jsField(chunk: string, key: string): string {
+  const m = chunk.match(new RegExp(`\\b${key}: '((?:[^'\\\\]|\\\\.)*)'`));
+  if (!m) return "";
+  return m[1]
+    .replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\(.)/g, "$1");
+}
+
+async function fetchJobylon(companyId: string, company: string): Promise<FetchedJob[]> {
+  const html = await (await get(`https://cdn.jobylon.com/jobs/companies/${encodeURIComponent(companyId)}/embed/v2/`, "text/html")).text();
+  const start = html.indexOf("JBL.embed_v2['jobs']");
+  if (start < 0) throw new Error("Jobylon: job list not found (no such company, or the widget changed)");
+  const list = html.slice(start, html.indexOf("];", start));
+  // Each job starts with "{ id: '<digits>'"; nested objects come after it, so splitting there is safe.
+  const chunks = list.split(/\{\s*id: '/).slice(1).map((c) => `id: '${c}`);
+  return chunks
+    .map((c): JobylonEntry => ({
+      id: jsField(c, "id"),
+      url: jsField(c, "url"),
+      title: jsField(c, "title"),
+      company: jsField(c, "company"),
+      locations_text: jsField(c, "locations_text"),
+      workspace: jsField(c, "workspace"),
+      published_date: jsField(c, "published_date"),
+    }))
+    .filter((j) => j.id && j.title && j.url)
+    .map((j) => {
+      const remote = /remote/i.test(j.workspace);
+      const posted = Date.parse(j.published_date.replace(/\./g, ""));
+      return {
+        external_id: j.id,
+        title: j.title.trim(),
+        // Jobylon's own name: the source's may just be the numeric id.
+        company: j.company || company || "Unknown company",
+        location: [j.locations_text, remote ? "Remote" : ""].filter(Boolean).join(" / "),
+        remote,
+        url: new URL(j.url, "https://emp.jobylon.com").toString(),
+        description: "", // from the posting page later (with its country)
+        compensation: null,
+        posted_at: Number.isFinite(posted) ? new Date(posted).toISOString() : null,
+      };
+    });
+}
+
+/** A Jobylon posting URL (emp.jobylon.com/jobs/<id>-…). */
+export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\/jobs\/\d+/i.test(url);
+
+/**
+ * Whether a listing's real location comes with its details, so the location filter has
+ * to wait: Workday lists say "Best" or "3 Locations", Jobylon lists name the city only.
+ */
+export const locationNeedsDetail = (url: string) => workdayFromUrl(url) !== null || isJobylonPosting(url);
+
 export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" | "country">): Promise<FetchedJob[]> {
   const { ats, slug, company_name: company } = source;
   switch (ats) {
@@ -912,6 +982,8 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchWorkday(slug, company);
     case "pinpoint":
       return fetchPinpoint(slug, company);
+    case "jobylon":
+      return fetchJobylon(slug, company);
     case "jobtech":
       return fetchJobTech(slug);
     case "swedengamejobs":
@@ -942,6 +1014,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   workable: (s) => `https://apply.workable.com/${s}`,
   workday: (s) => `https://${s}`,
   pinpoint: (s) => `https://${s}`,
+  jobylon: (s) => `https://emp.jobylon.com/companies/${s}/`,
   jobtech: () => "https://arbetsformedlingen.se/platsbanken/",
   swedengamejobs: () => "https://www.swedengamejobs.com/",
   himalayas: (q) => `https://himalayas.app/jobs?${new URLSearchParams(q)}`,

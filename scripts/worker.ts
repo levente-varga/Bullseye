@@ -15,7 +15,7 @@
 import "./env";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchBoard, probeHost, workdayFromUrl } from "../src/lib/ats";
+import { fetchBoard, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
@@ -197,8 +197,8 @@ function verdict(job: Pick<JobRow, "url" | "title" | "location" | "remote" | "de
   const noText = !job.description || job.thin;
   return hardFilter(job as unknown as FetchedJob, c, {
     skipKeywordCheck: noText,
-    // Workday lists lack countries ("Best", "3 Locations"): judge the location once the detail is in.
-    locationPending: !job.description && !job.thin && workdayFromUrl(job.url) !== null,
+    // Workday and Jobylon lists lack countries: judge the location once the detail is in.
+    locationPending: !job.description && !job.thin && locationNeedsDetail(job.url),
   });
 }
 

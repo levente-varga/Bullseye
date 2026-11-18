@@ -150,7 +150,7 @@ function Money(props: { name: string; label: string; value: number }) {
       <span className="hint">{props.label}</span>
       <span className="flex items-center gap-1.5">
         <span className="faint mono">$</span>
-        <input name={props.name} type="number" min={0} step={0.05} defaultValue={props.value} className="input mono w-24" />
+        <input name={props.name} type="number" min={0} step={0.01} defaultValue={props.value} className="input mono w-24" />
       </span>
     </label>
   );

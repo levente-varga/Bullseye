@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
-import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, workdayFromUrl } from "@/lib/ats";
+import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
@@ -210,7 +210,7 @@ export async function reevaluate(form: FormData) {
       const noText = !j.description || j.thin;
       const reason = hardFilter(j as unknown as FetchedJob, criteria, {
         skipKeywordCheck: noText,
-        locationPending: !j.description && workdayFromUrl(j.url) !== null,
+        locationPending: !j.description && locationNeedsDetail(j.url),
       });
       if (reason) {
         // Still filtered with a different reason: the reason is updated, but it isn't a move.
@@ -275,6 +275,8 @@ function normalizeSlug(ats: Ats, input: string): string {
     const m = raw.match(/categories\/([a-z0-9-]+)/i);
     return (m ? m[1] : raw.replace(/\.rss$/, "")).toLowerCase() || WWR_DEFAULT_CATEGORY;
   }
+  // Jobylon: the company id, bare or from a company/embed URL (a posting URL needs Auto-detect).
+  if (ats === "jobylon") return raw.match(/companies\/(\d+)/)?.[1] ?? (/^\d+$/.test(raw) ? raw : "");
   const host = raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
   if (ats === "teamtailor") return host; // e.g. career.paradoxplaza.com
   // Career site hosts; a bare company name gets the default domain.
@@ -316,6 +318,10 @@ export async function addSource(form: FormData) {
     ats = chosen as Ats;
     slug = normalizeSlug(ats, str(form, "slug"));
     if (!slug) back({ error: "Enter the board, domain or URL." });
+    // A Jobylon id says nothing about the company: take the name from its listings.
+    if (!name && ats === "jobylon") {
+      name = (await fetchBoard({ ats, slug: slug!, company_name: "", country: null }).catch(() => []))[0]?.company ?? "";
+    }
     name ||= ATS_INFO[ats].defaultName ?? slug;
   }
 
