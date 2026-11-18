@@ -74,7 +74,7 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
               className="mb-3 flex items-start gap-2 border border-[var(--border)] px-3 py-2 text-[13px]"
               style={{ background: `var(--${cvNotice.tone}-tint)` }}
             >
-              <span className="pt-1.5"><Dot tone={cvNotice.tone} /></span> {cvNotice.text}
+              <span className="flex h-[1lh] items-center"><Dot tone={cvNotice.tone} /></span> {cvNotice.text}
             </div>
           )}
           <div className="space-y-6">

@@ -182,7 +182,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           )}
           {addError && (
             <div className="mb-3 flex items-start gap-2 border border-[var(--border)] bg-[var(--bad-tint)] px-3 py-2 text-[13px]">
-              <span className="pt-1.5"><Dot tone="bad" /></span> {addError}
+              <span className="flex h-[1lh] items-center"><Dot tone="bad" /></span> {addError}
             </div>
           )}
           <form action={addSource} className="panel">

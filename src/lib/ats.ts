@@ -36,17 +36,17 @@ function decodeEntities(s: string): string {
 const clip = (s: string) => s.slice(0, MAX_DESCRIPTION);
 const looksRemote = (s: string) => /\bremote\b/i.test(s);
 
-async function get(url: string, accept: string): Promise<Response> {
+async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
   const res = await fetch(url, {
     headers: { Accept: accept, "User-Agent": USER_AGENT },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   return res;
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  return (await (await get(url, "application/json")).json()) as T;
+async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
+  return (await (await get(url, "application/json", timeoutMs)).json()) as T;
 }
 
 // --- Greenhouse -------------------------------------------------------------
@@ -99,8 +99,11 @@ interface LeverJob {
 }
 
 async function fetchLever(slug: string, company: string): Promise<FetchedJob[]> {
+  // Lever returns every posting with its full description in one response (800KB for
+  // ~70 jobs), and it has taken anywhere from 2s to 15s+; 20s cut off real boards.
   const data = await getJson<LeverJob[]>(
     `https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`,
+    60_000,
   );
   return data.map((j) => {
     const location = j.categories?.location ?? "";
