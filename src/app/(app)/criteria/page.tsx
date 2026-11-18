@@ -25,7 +25,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
   const supabase = await createClient();
   const lastRun = (kind: string) =>
     supabase.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1);
-  const [{ data: c, error }, { data: skips }, { data: lastWatch }, { data: lastFull }, { count: openCount }, { count: scoredCount }, { data: scoredRuns }] =
+  const [{ data: c, error }, { data: skips }, { data: lastWatch }, { data: lastFull }, { count: openCount }, { count: scoredCount }, { data: scoredRuns }, { data: dayRuns }] =
     await Promise.all([
       supabase.from("criteria").select("*").eq("id", 1).single(),
       supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
@@ -35,7 +35,10 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
       supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
       // Recent runs that scored something: their cost per job prices a re-score.
       supabase.from("runs").select("stats").gt("stats->scored", 0).order("started_at", { ascending: false }).limit(20),
+      // Spend in the last 24 hours, against the daily cap.
+      supabase.from("runs").select("stats").gte("started_at", new Date(nowMs() - 86_400_000).toISOString()),
     ]);
+  const spent24h = (dayRuns ?? []).reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
   const spent = (scoredRuns ?? []).reduce(
     (a, r) => ({ cost: a.cost + (Number(r.stats.cost_usd) || 0), jobs: a.jobs + (Number(r.stats.scored) || 0) }),
     { cost: 0, jobs: 0 },
@@ -111,6 +114,32 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
               </Row>
               <Row label="Inbox threshold" hint="Scores below this stay out of the Inbox and the digest.">
                 <input name="score_threshold" type="number" min={0} max={100} defaultValue={criteria.score_threshold} className="input mono w-24" />
+              </Row>
+              <Row
+                label="Spend caps"
+                hint="A safety net for AI scoring. Listings over a cap stay waiting and are scored once there's budget again. 0 pauses scoring."
+              >
+                <div className="flex flex-wrap items-end gap-4">
+                  <label className="field">
+                    <span className="hint">Per run</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="faint mono">$</span>
+                      <input name="max_run_cost_usd" type="number" min={0} step={0.05} defaultValue={criteria.max_run_cost_usd} className="input mono w-24" />
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span className="hint">Per 24 hours</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="faint mono">$</span>
+                      <input name="max_daily_cost_usd" type="number" min={0} step={0.05} defaultValue={criteria.max_daily_cost_usd} className="input mono w-24" />
+                    </span>
+                  </label>
+                </div>
+                <p className="faint mt-2 text-[12px]">
+                  Spent in the last 24 hours: <span className="mono text-[var(--fg)]">{formatUsd(spent24h)}</span>. At your recent{" "}
+                  <span className="mono">{formatUsd(perJob)}</span> per listing, the per-run cap covers about{" "}
+                  <span className="mono">{perJob > 0 ? Math.floor(Number(criteria.max_run_cost_usd) / perJob).toLocaleString("en-US") : "–"}</span> listings.
+                </p>
               </Row>
             </div>
           </Panel>

@@ -10,17 +10,36 @@ export type Ats =
   | "workday"
   | "pinpoint"
   | "jobtech"
-  | "swedengamejobs";
+  | "swedengamejobs"
+  | "himalayas"
+  | "workingnomads"
+  | "remoteok"
+  | "weworkremotely"
+  | "arbeitnow"
+  | "workwithindies";
 
 /** How each source type is configured on the Sources page. */
 /**
  * aggregator: lists other companies' jobs (runs after direct sources, never overrides them).
  * suggests: its links are mined for direct sources to suggest.
  * partial: only shows recent ads, so ads missing from it aren't closed.
+ * fixedSlug: the source has nothing to configure; this is stored as its slug.
+ * defaultName: the name used when the form leaves it empty.
+ * blurb: one line on what it covers, for the Sources page.
  */
 export const ATS_INFO: Record<
   Ats,
-  { label: string; slugLabel: string; slugExample: string; aggregator?: boolean; suggests?: boolean; partial?: boolean }
+  {
+    label: string;
+    slugLabel: string;
+    slugExample: string;
+    aggregator?: boolean;
+    suggests?: boolean;
+    partial?: boolean;
+    fixedSlug?: string;
+    defaultName?: string;
+    blurb?: string;
+  }
 > = {
   greenhouse: { label: "Greenhouse", slugLabel: "Board slug or URL", slugExample: "job-boards.greenhouse.io/mojangab" },
   lever: { label: "Lever", slugLabel: "Board slug or URL", slugExample: "jobs.lever.co/avalanchestudios" },
@@ -38,6 +57,8 @@ export const ATS_INFO: Record<
     slugExample: "occupation-field=apaJ_2ja_LuF",
     aggregator: true,
     partial: true,
+    defaultName: "Platsbanken (JobTech)",
+    blurb: "Sweden's public job board, every employer",
   },
   swedengamejobs: {
     label: "Sweden Game Jobs (aggregator)",
@@ -45,6 +66,66 @@ export const ATS_INFO: Record<
     slugExample: "swedengamejobs.com",
     aggregator: true,
     suggests: true,
+    fixedSlug: "swedengamejobs.com",
+    defaultName: "Sweden Game Jobs",
+    blurb: "Swedish game studios",
+  },
+  himalayas: {
+    label: "Himalayas (aggregator)",
+    slugLabel: "Search parameters (optional)",
+    slugExample: "q=developer&country=SE",
+    aggregator: true,
+    partial: true,
+    defaultName: "Himalayas",
+    blurb: "Remote jobs worldwide; filtered by a search",
+  },
+  workingnomads: {
+    label: "Working Nomads (aggregator)",
+    slugLabel: "—",
+    slugExample: "workingnomads.com",
+    aggregator: true,
+    partial: true,
+    fixedSlug: "workingnomads.com",
+    defaultName: "Working Nomads",
+    blurb: "Remote jobs, many open to Europe",
+  },
+  remoteok: {
+    label: "Remote OK (aggregator)",
+    slugLabel: "—",
+    slugExample: "remoteok.com",
+    aggregator: true,
+    partial: true,
+    fixedSlug: "remoteok.com",
+    defaultName: "Remote OK",
+    blurb: "Remote jobs, mostly US",
+  },
+  weworkremotely: {
+    label: "We Work Remotely (aggregator)",
+    slugLabel: "Category (optional)",
+    slugExample: "remote-full-stack-programming-jobs",
+    aggregator: true,
+    partial: true,
+    defaultName: "We Work Remotely",
+    blurb: "Remote jobs, mostly US",
+  },
+  arbeitnow: {
+    label: "Arbeitnow (aggregator)",
+    slugLabel: "—",
+    slugExample: "arbeitnow.com",
+    aggregator: true,
+    partial: true,
+    fixedSlug: "arbeitnow.com",
+    defaultName: "Arbeitnow",
+    blurb: "Europe, mostly Germany",
+  },
+  workwithindies: {
+    label: "Work With Indies (aggregator)",
+    slugLabel: "—",
+    slugExample: "workwithindies.com",
+    aggregator: true,
+    fixedSlug: "workwithindies.com",
+    defaultName: "Work With Indies",
+    blurb: "Indie game studios worldwide",
   },
 };
 
@@ -123,6 +204,9 @@ export interface Criteria {
   daily_enabled: boolean;
   /** IANA timezone, e.g. "Europe/Budapest". */
   timezone: string;
+  /** AI scoring spend caps in USD: per run, and per rolling 24 hours. 0 = no scoring. */
+  max_run_cost_usd: number;
+  max_daily_cost_usd: number;
 }
 
 export const WATCH_INTERVALS: { minutes: number; label: string }[] = [

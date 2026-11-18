@@ -375,6 +375,25 @@ async function describePending(sources: Source[], criteria: Criteria) {
   return pending.length ? { described_later: described, filtered_later: filtered } : {};
 }
 
+/** AI spend over the last 24 hours, from the runs log. */
+async function spentLast24h(): Promise<number> {
+  const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
+  const rows = await must<{ stats: Record<string, number> | null }[]>(
+    db.from("runs").select("stats").gte("started_at", since),
+  );
+  return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
+}
+
+/**
+ * What this run may spend on scoring: the per-run cap, or what's left of the 24-hour
+ * cap if that's less. Listings over budget stay waiting for a later run.
+ */
+async function scoringBudget(c: Criteria): Promise<{ budget: number; spent24h: number }> {
+  const spent24h = await spentLast24h();
+  const budget = Math.max(0, Math.min(Number(c.max_run_cost_usd), Number(c.max_daily_cost_usd) - spent24h));
+  return { budget, spent24h };
+}
+
 async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof loadContext>>) {
   const pending = await must<Job[]>(
     db
@@ -388,10 +407,18 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
   // Always report a cost, even $0, so the Report never shows a run as "unknown".
   if (!pending.length) return { scored: 0, score_errors: 0, cost_usd: 0, tokens_in: 0, tokens_out: 0 };
 
+  const { budget, spent24h } = await scoringBudget(ctx.criteria);
+  if (budget <= 0) {
+    console.log(
+      `Spend cap reached ($${spent24h.toFixed(4)} in the last 24h of $${ctx.criteria.max_daily_cost_usd}); ${pending.length} listings wait.`,
+    );
+    return { scored: 0, score_errors: 0, cost_usd: 0, tokens_in: 0, tokens_out: 0, over_budget: pending.length };
+  }
+
   const client = new Anthropic();
   const system = buildSystemPrompt(ctx.profile, ctx.criteria, ctx.feedback);
   const model = resolveModel(ctx.criteria.scoring_model);
-  console.log(`Scoring ${pending.length} listings with ${model}`);
+  console.log(`Scoring ${pending.length} listings with ${model}, budget $${budget.toFixed(4)}`);
   let scored = 0;
   let errors = 0;
   const spend = { cost: 0, tokensIn: 0, tokensOut: 0 };
@@ -399,7 +426,9 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
   const queue = [...pending];
   await Promise.all(
     Array.from({ length: SCORE_CONCURRENCY }, async () => {
-      for (let job = queue.shift(); job; job = queue.shift()) {
+      // Stop taking new listings once the budget is spent. Calls already in flight
+      // finish, so a run can go over by at most a few listings' cost.
+      for (let job = queue.shift(); job && spend.cost < budget; job = queue.shift()) {
         try {
           const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job);
           spend.cost += costUsd(answeredBy, usage);
@@ -427,10 +456,14 @@ async function scorePending(sourceIds: string[], ctx: Awaited<ReturnType<typeof 
       }
     }),
   );
+  // Listings never scored because the budget ran out; they stay waiting.
+  const overBudget = pending.length - scored - errors;
   console.log(`Scoring cost $${spend.cost.toFixed(4)} (${spend.tokensIn} tokens in, ${spend.tokensOut} out)`);
+  if (overBudget > 0) console.log(`Spend cap reached; ${overBudget} listings wait for the next run.`);
   return {
     scored,
     score_errors: errors,
+    ...(overBudget > 0 ? { over_budget: overBudget } : {}),
     cost_usd: Math.round(spend.cost * 1e6) / 1e6,
     tokens_in: spend.tokensIn,
     tokens_out: spend.tokensOut,
@@ -574,9 +607,14 @@ async function lastStarted(kind: Mode): Promise<number | null> {
  * scored at the next quiet tick, 60 at a time. If the last scoring run scored nothing
  * (e.g. the API key stopped working), it waits 6 hours instead of retrying every tick.
  */
-async function scoringDue(): Promise<boolean> {
+async function scoringDue(criteria: Criteria): Promise<boolean> {
   const { count } = await db.from("jobs").select("id", { count: "exact", head: true }).eq("status", "new");
   if (!count) return false;
+  // Nothing to do until the 24-hour spend cap has room again.
+  if ((await scoringBudget(criteria)).budget <= 0) {
+    console.log(`${count} listings waiting, but the 24-hour spend cap is reached.`);
+    return false;
+  }
   const [last] = await must<{ started_at: string; stats: Record<string, number>; error: string | null }[]>(
     db.from("runs").select("started_at, stats, error").eq("kind", "score").order("started_at", { ascending: false }).limit(1),
   );
@@ -601,7 +639,7 @@ async function tick() {
     const { count } = await db.from("sources").select("id", { count: "exact", head: true }).eq("watchlist", true).eq("enabled", true);
     if (count) await record("watchlist");
     else console.log("No watched sources; nothing to check.");
-  } else if (await scoringDue()) {
+  } else if (await scoringDue(criteria)) {
     await record("score");
   }
 }
