@@ -2,8 +2,8 @@ import type { Ats, FetchedJob, Source } from "./types";
 
 /**
  * Adapters for job sources. The ATS ones (Greenhouse, Lever, Ashby,
- * Teamtailor, SmartRecruiters) are public endpoints companies publish for
- * exactly this purpose. Sweden Game Jobs is an aggregator read from its page
+ * Teamtailor, SmartRecruiters, Personio, Recruitee, Workable, Workday) are
+ * public endpoints companies publish for exactly this purpose. Sweden Game Jobs is an aggregator read from its page
  * data; it only gives titles and links, so descriptions are fetched later.
  */
 
@@ -247,6 +247,302 @@ export async function fetchSmartRecruitersDescription(company: string, id: strin
   );
 }
 
+// --- Personio (XML feed) ------------------------------------------------------
+// Slug: the career site host, e.g. "personio.jobs.personio.de" (also .com).
+
+async function fetchPersonio(host: string, company: string): Promise<FetchedJob[]> {
+  const xml = await (await get(`https://${host}/xml?language=en`, "application/xml")).text();
+  const positions = xml.match(/<position>[\s\S]*?<\/position>/g) ?? [];
+  return positions.map((p) => {
+    const id = xmlTag(p, "id");
+    // <office> appears once at the top, and again inside <additionalOffices>.
+    const offices = [...new Set([...p.matchAll(/<office>([\s\S]*?)<\/office>/g)].map((m) => decodeEntities(m[1].trim())))];
+    const sections = [...p.matchAll(/<jobDescription>([\s\S]*?)<\/jobDescription>/g)].map((m) => {
+      const name = decodeEntities(xmlTag(m[1], "name"));
+      return `${name}\n${htmlToText(xmlTag(m[1], "value"))}`;
+    });
+    const created = xmlTag(p, "createdAt");
+    const location = offices.join(" | ");
+    return {
+      external_id: id,
+      title: decodeEntities(xmlTag(p, "name")),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: `https://${host}/job/${id}?language=en`,
+      description: clip(sections.join("\n\n")),
+      compensation: null,
+      posted_at: created ? new Date(created).toISOString() : null,
+    };
+  });
+}
+
+// --- Recruitee (JSON API) -----------------------------------------------------
+// Slug: the career site host, "<company>.recruitee.com" or a custom domain.
+
+interface RecruiteeOffer {
+  id: number;
+  title: string;
+  status?: string;
+  careers_url: string;
+  location?: string;
+  locations?: { city?: string; name?: string; country?: string }[];
+  remote?: boolean;
+  hybrid?: boolean;
+  description?: string;
+  requirements?: string;
+  published_at?: string;
+  salary?: { min?: string | null; max?: string | null; period?: string; currency?: string } | null;
+}
+
+async function fetchRecruitee(host: string, company: string): Promise<FetchedJob[]> {
+  const data = await getJson<{ offers: RecruiteeOffer[] }>(`https://${host}/api/offers/`);
+  return data.offers
+    .filter((o) => !o.status || o.status === "published")
+    .map((o) => {
+      const places = (o.locations ?? []).map((l) => [l.city || l.name, l.country].filter(Boolean).join(", ")).filter(Boolean);
+      const location = places.length ? [...new Set(places)].join(" | ") : (o.location ?? "");
+      const s = o.salary;
+      return {
+        external_id: String(o.id),
+        title: o.title.trim(),
+        company,
+        location,
+        remote: Boolean(o.remote) || looksRemote(location),
+        url: o.careers_url,
+        description: clip([o.description, o.requirements].filter(Boolean).map((h) => htmlToText(h!)).join("\n\n")),
+        compensation: s && (s.min || s.max) ? `${s.min ?? "?"}–${s.max ?? "?"} ${s.currency ?? ""} per ${s.period ?? "year"}`.trim() : null,
+        posted_at: o.published_at ? new Date(o.published_at.replace(" UTC", "Z").replace(" ", "T")).toISOString() : null,
+      };
+    });
+}
+
+// --- Workable (widget API) ------------------------------------------------------
+// Slug: the account, as in apply.workable.com/<account>.
+
+interface WorkableJob {
+  title: string;
+  shortcode: string;
+  url: string;
+  telecommuting?: boolean;
+  city?: string;
+  country?: string;
+  locations?: { city?: string; country?: string }[];
+  description?: string;
+  published_on?: string;
+}
+
+async function fetchWorkable(account: string, company: string): Promise<FetchedJob[]> {
+  const data = await getJson<{ jobs: WorkableJob[] }>(
+    `https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(account)}?details=true`,
+  );
+  return data.jobs.map((j) => {
+    const places = (j.locations?.length ? j.locations : [{ city: j.city, country: j.country }])
+      .map((l) => [l.city, l.country].filter(Boolean).join(", "))
+      .filter(Boolean);
+    const location = [...new Set(places)].join(" | ");
+    return {
+      external_id: j.shortcode,
+      title: j.title.trim(),
+      company,
+      location,
+      remote: Boolean(j.telecommuting) || looksRemote(location),
+      url: j.url,
+      description: clip(htmlToText(j.description ?? "")),
+      compensation: null,
+      posted_at: j.published_on ? new Date(j.published_on).toISOString() : null,
+    };
+  });
+}
+
+// --- Workday (careers site API) ---------------------------------------------------
+// Slug: "<tenant>.wd<N>.myworkdayjobs.com/<site>", e.g. "philips.wd3.myworkdayjobs.com/jobs-and-careers".
+// The list has no descriptions and often no country, and multi-location jobs only say
+// "3 Locations". The detail API fills all three in, only for new postings that pass the title filter.
+
+const WORKDAY_PAGE = 20; // the API's maximum
+const WORKDAY_MAX = 2000;
+
+/** Splits a Workday slug into its API base and the public site base. */
+export function workdayBase(slug: string): { api: string; site: string } {
+  const [host, site] = slug.split("/");
+  const tenant = host.split(".")[0];
+  return { api: `https://${host}/wday/cxs/${tenant}/${site}`, site: `https://${host}/${site}` };
+}
+
+interface WorkdayPosting {
+  title: string;
+  externalPath: string;
+  locationsText?: string;
+  postedOn?: string;
+}
+interface WorkdayDetail {
+  jobPostingInfo?: {
+    jobDescription?: string;
+    location?: string;
+    additionalLocations?: string[];
+    country?: { descriptor?: string };
+    remoteType?: string;
+  };
+}
+
+/** "Posted Today" / "Posted Yesterday" / "Posted 5 Days Ago" / "Posted 30+ Days Ago" → an ISO date. */
+function workdayPostedOn(text: string | undefined, now = Date.now()): string | null {
+  if (!text) return null;
+  if (/today/i.test(text)) return new Date(now).toISOString();
+  if (/yesterday/i.test(text)) return new Date(now - 86_400_000).toISOString();
+  const days = text.match(/(\d+)\+?\s+days?/i);
+  return days ? new Date(now - Number(days[1]) * 86_400_000).toISOString() : null;
+}
+
+async function fetchWorkday(slug: string, company: string): Promise<FetchedJob[]> {
+  const { api, site } = workdayBase(slug);
+  const page = async (offset: number) => {
+    const res = await fetch(`${api}/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": USER_AGENT },
+      body: JSON.stringify({ limit: WORKDAY_PAGE, offset, searchText: "", appliedFacets: {} }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${api}/jobs`);
+    return (await res.json()) as { total?: number; jobPostings?: WorkdayPosting[] };
+  };
+  // Only the first page reports the total; the rest are fetched a few at a time.
+  const first = await page(0);
+  const postings: WorkdayPosting[] = [...(first.jobPostings ?? [])];
+  const offsets: number[] = [];
+  for (let o = WORKDAY_PAGE; o < Math.min(first.total ?? 0, WORKDAY_MAX); o += WORKDAY_PAGE) offsets.push(o);
+  for (let i = 0; i < offsets.length; i += 5) {
+    const pages = await Promise.all(offsets.slice(i, i + 5).map(page));
+    for (const p of pages) postings.push(...(p.jobPostings ?? []));
+  }
+
+  return postings.map((p) => {
+    // "3 Locations" stays as is here; the detail fetch for new postings fills in the places.
+    const location = p.locationsText ?? "";
+    return {
+      external_id: p.externalPath,
+      title: p.title.trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: `${site}${p.externalPath}`,
+      description: "", // fetched for new postings only
+      compensation: null,
+      posted_at: workdayPostedOn(p.postedOn),
+    };
+  });
+}
+
+/** Description and real places for one Workday posting (detail API). */
+export async function fetchWorkdayPosting(slug: string, externalPath: string): Promise<{ text: string; location: string }> {
+  const info = (await getJson<WorkdayDetail>(`${workdayBase(slug).api}${externalPath}`)).jobPostingInfo;
+  const places = [info?.location, ...(info?.additionalLocations ?? [])].filter(Boolean) as string[];
+  const country = info?.country?.descriptor;
+  // The list often says just "Best" or "3 Locations": add the country so location filters can match.
+  const location = places.map((p) => (country && !p.includes(country) ? `${p}, ${country}` : p)).join(" | ");
+  return { text: clip(htmlToText(info?.jobDescription ?? "")), location };
+}
+
+/** A Workday posting URL as source slug + posting path, e.g. for aggregator links. */
+export function workdayFromUrl(url: string): { slug: string; path: string } | null {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.endsWith(".myworkdayjobs.com")) return null;
+    const segments = u.pathname.split("/").filter(Boolean);
+    const at = segments.findIndex((s) => !/^[a-z]{2}-[A-Z]{2}$/.test(s)); // skip a locale like en-US
+    if (at < 0 || segments[at + 1] !== "job") return null;
+    return { slug: `${u.hostname.toLowerCase()}/${segments[at]}`, path: `/${segments.slice(at + 1).join("/")}` };
+  } catch {
+    return null;
+  }
+}
+
+/** Number of open postings on a Workday site, from one request (Add source shows it). */
+export async function workdayTotal(slug: string): Promise<number> {
+  const { api } = workdayBase(slug);
+  const res = await fetch(`${api}/jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": USER_AGENT },
+    body: JSON.stringify({ limit: 1, offset: 0, searchText: "", appliedFacets: {} }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${api}/jobs`);
+  return ((await res.json()) as { total?: number }).total ?? 0;
+}
+
+// --- JobTech / Platsbanken (aggregator) -------------------------------------------
+// Sweden's public employment service publishes every job ad in Platsbanken through an
+// open API (jobtechdev.se), most of them in Swedish. Slug: search parameters, e.g.
+// "occupation-field=apaJ_2ja_LuF" (Data/IT); empty means Data/IT + Culture/media/design.
+// The API stops at 2,000 results per search, so each run reads the last week's ads
+// (≈900 for the default) and the source is "partial": older ads aren't closed for
+// dropping out of the window.
+
+export const JOBTECH_DEFAULT_QUERY = "occupation-field=apaJ_2ja_LuF&occupation-field=9puE_nYg_crq";
+const JOBTECH_WINDOW_MINUTES = 7 * 24 * 60;
+const JOBTECH_PAGE = 100;
+const JOBTECH_MAX = 2000;
+
+interface JobTechAd {
+  id: string;
+  headline: string;
+  webpage_url: string;
+  publication_date?: string;
+  description?: { text?: string | null };
+  employer?: { name?: string | null };
+  application_details?: { url?: string | null };
+  workplace_address?: { city?: string | null; municipality?: string | null; country?: string | null };
+  workplace_model?: { label?: string | null } | null;
+  salary_description?: string | null;
+}
+
+/** The employer's own posting when the ad links to one (so duplicates of direct sources match), else Platsbanken. */
+function jobTechUrl(ad: JobTechAd): string {
+  const apply = ad.application_details?.url;
+  if (!apply || !/^https?:\/\//i.test(apply)) return ad.webpage_url;
+  try {
+    const u = new URL(apply);
+    u.pathname = u.pathname.replace(/\/applications\/new\/?$/, ""); // Teamtailor apply form → the posting
+    u.searchParams.delete("promotion");
+    return u.toString();
+  } catch {
+    return ad.webpage_url;
+  }
+}
+
+async function fetchJobTech(query: string): Promise<FetchedJob[]> {
+  const base = new URLSearchParams(query || JOBTECH_DEFAULT_QUERY);
+  base.set("published-after", String(JOBTECH_WINDOW_MINUTES));
+  base.set("limit", String(JOBTECH_PAGE));
+  const out: FetchedJob[] = [];
+  for (let offset = 0; offset + JOBTECH_PAGE <= JOBTECH_MAX; offset += JOBTECH_PAGE) {
+    base.set("offset", String(offset));
+    const page = await getJson<{ total?: { value?: number }; hits: JobTechAd[] }>(
+      `https://jobsearch.api.jobtechdev.se/search?${base}`,
+    );
+    for (const ad of page.hits) {
+      const a = ad.workplace_address ?? {};
+      const place = a.city || a.municipality;
+      const country = a.country === "Sverige" ? "Sweden" : a.country;
+      const model = ad.workplace_model?.label ?? "";
+      out.push({
+        external_id: ad.id,
+        title: ad.headline.trim(),
+        company: ad.employer?.name?.trim() || "Unknown employer",
+        location: [place, country].filter(Boolean).join(", ") || "Sweden",
+        remote: /distans|hybrid/i.test(model),
+        url: jobTechUrl(ad),
+        description: clip(ad.description?.text ?? ""),
+        compensation: ad.salary_description || null,
+        posted_at: ad.publication_date ? new Date(ad.publication_date).toISOString() : null,
+      });
+    }
+    if (page.hits.length < JOBTECH_PAGE || offset + JOBTECH_PAGE >= (page.total?.value ?? 0)) break;
+  }
+  return out;
+}
+
 // --- Sweden Game Jobs (aggregator) ---------------------------------------------
 
 interface SgjJob {
@@ -300,6 +596,16 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchTeamtailor(slug, company);
     case "smartrecruiters":
       return fetchSmartRecruiters(slug, company, source.country);
+    case "personio":
+      return fetchPersonio(slug, company);
+    case "recruitee":
+      return fetchRecruitee(slug, company);
+    case "workable":
+      return fetchWorkable(slug, company);
+    case "workday":
+      return fetchWorkday(slug, company);
+    case "jobtech":
+      return fetchJobTech(slug);
     case "swedengamejobs":
       return fetchSwedenGameJobs();
   }
@@ -311,5 +617,28 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   ashby: (s) => `https://jobs.ashbyhq.com/${s}`,
   teamtailor: (s) => `https://${s}/jobs`,
   smartrecruiters: (s) => `https://jobs.smartrecruiters.com/${s}`,
+  personio: (s) => `https://${s}`,
+  recruitee: (s) => `https://${s}`,
+  workable: (s) => `https://apply.workable.com/${s}`,
+  workday: (s) => `https://${s}`,
+  jobtech: () => "https://arbetsformedlingen.se/platsbanken/",
   swedengamejobs: () => "https://www.swedengamejobs.com/",
 };
+
+/** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */
+export async function probeHost(host: string): Promise<"teamtailor" | "recruitee" | null> {
+  const ok = async (path: string, type: RegExp) => {
+    try {
+      const res = await fetch(`https://${host}${path}`, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(8_000),
+      });
+      return res.ok && type.test(res.headers.get("content-type") ?? "");
+    } catch {
+      return false;
+    }
+  };
+  if (await ok("/jobs.rss", /xml/)) return "teamtailor";
+  if (await ok("/api/offers/", /json/)) return "recruitee";
+  return null;
+}

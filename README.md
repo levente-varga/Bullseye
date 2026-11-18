@@ -17,7 +17,7 @@ Every 15 min (Supabase cron → GitHub Actions): worker tick → runs what the s
                                        Inbox · Pipeline · Criteria · Sources · Profile · Report
 ```
 
-1. **Fetch.** Listings come from companies' own job boards through public endpoints: Greenhouse, Lever and Ashby APIs, Teamtailor RSS feeds, and the SmartRecruiters API. An aggregator ([Sweden Game Jobs](https://www.swedengamejobs.com)) catches companies with custom career sites; for those, the description is fetched from the original posting.
+1. **Fetch.** Listings come from companies' own job boards through public endpoints: Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable and Workday APIs, and Teamtailor and Personio feeds. Two aggregators catch everything else: [Sweden Game Jobs](https://www.swedengamejobs.com) for games (descriptions are fetched from the original posting), and [JobTech](https://jobtechdev.se), the open API behind Sweden's public job board Platsbanken (by default the last 7 days of IT and design ads).
    - **Deduplication:** the same posting from two sources is stored once, keyed on the ATS job ID (or a cleaned-up URL). The company's own board wins. If it's added later, it adopts the aggregator's copy along with your decisions on it.
    - **Discovery:** companies seen on the aggregator are suggested as direct sources on the Sources page.
 2. **Filter.** Cheap hard filters (role in the title, location or remote, excluded title words, must-have keywords) run first, at no cost.
@@ -87,4 +87,4 @@ Hosting, database, cron and email all fit in free tiers. GitHub Actions minutes 
 ## Roadmap
 - [ ] Tailored CV and cover-letter drafts for approved jobs
 - [ ] Assisted apply: prefill forms from the profile and answer bank
-- [ ] More sources: Workable, Jobylon, Workday, more aggregators
+- [ ] More sources: Homerun, Softgarden, JOIN, BambooHR (where a public feed exists)

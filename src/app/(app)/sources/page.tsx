@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { ErrorDetails } from "@/components/ErrorDetails";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
@@ -81,6 +82,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                               {s.company_name}
                             </a>
                             {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
+                            {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
                           </div>
                           {!ATS_INFO[s.ats]?.aggregator && (
                             <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
@@ -88,7 +90,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                               {s.country && ` · ${s.country.toUpperCase()} only`}
                             </div>
                           )}
-                          {s.last_error && <div className="mt-1 pl-3.5 text-[12px] text-[var(--bad)]">{s.last_error}</div>}
+                          {s.last_error && (
+                            <div className="mt-1 max-w-[520px] pl-3.5 text-[12px]">
+                              <ErrorDetails error={s.last_error} />
+                            </div>
+                          )}
                         </td>
                         <td>
                           <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
@@ -213,7 +219,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
               <summary className="faint cursor-pointer">How does this work?</summary>
               <p className="muted mt-2 leading-relaxed">
-                Companies publish their jobs through a job system (an ATS). Bullseye reads five of them. With{" "}
+                Companies publish their jobs through a job system (an ATS). Bullseye reads nine of them. With{" "}
                 <b>Auto-detect</b>, paste the company&apos;s careers page or any of its job postings; Bullseye finds the
                 system and the board itself. If it can&apos;t, pick the type by hand and enter the board:
               </p>
@@ -221,7 +227,14 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
                   <li key={a}>
                     {ATS_INFO[a].label}:{" "}
-                    {ATS_INFO[a].aggregator ? <span className="faint">leave empty</span> : <code className="mono faint">{ATS_INFO[a].slugExample}</code>}
+                    {a === "swedengamejobs" ? (
+                      <span className="faint">leave empty</span>
+                    ) : (
+                      <>
+                        <code className="mono faint">{ATS_INFO[a].slugExample}</code>
+                        {a === "jobtech" && <span className="faint"> (or leave empty for IT + design jobs)</span>}
+                      </>
+                    )}
                   </li>
                 ))}
                 <li>The country filter (two letters) only applies to SmartRecruiters.</li>
