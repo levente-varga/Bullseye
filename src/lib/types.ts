@@ -8,6 +8,7 @@ export type Ats =
   | "recruitee"
   | "workable"
   | "workday"
+  | "pinpoint"
   | "jobtech"
   | "swedengamejobs";
 
@@ -30,6 +31,7 @@ export const ATS_INFO: Record<
   recruitee: { label: "Recruitee", slugLabel: "Career site URL", slugExample: "bunq.recruitee.com" },
   workable: { label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
   workday: { label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
+  pinpoint: { label: "Pinpoint", slugLabel: "Career site URL", slugExample: "workwithus.pinpointhq.com" },
   jobtech: {
     label: "JobTech / Platsbanken (aggregator)",
     slugLabel: "Search parameters (optional)",
