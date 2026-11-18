@@ -59,8 +59,8 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {sources.length === 0 ? (
               <Empty>No sources yet. Add one below, or pick from the suggestions.</Empty>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="table min-w-[720px]">
+              <div className="md:overflow-x-auto">
+                <table className="table table-stack max-md:block md:min-w-[720px]">
                   <thead>
                     <tr>
                       <th className="w-10">#</th>
@@ -74,9 +74,9 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                   <tbody>
                     {sources.map((s, i) => (
                       <tr key={s.id} className={s.enabled ? "" : "opacity-55"}>
-                        <td className="mono faint text-[12px]">{pad2(i + 1)}</td>
-                        <td>
-                          <div className="flex items-center gap-2">
+                        <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
+                        <td className="max-md:w-full">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Dot tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"} />
                             <a href={ATS_BOARD_URL[s.ats](s.slug)} target="_blank" rel="noreferrer" className="font-medium hover:underline">
                               {s.company_name}
@@ -91,7 +91,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                             </div>
                           )}
                           {s.last_error && (
-                            <div className="mt-1 max-w-[520px] pl-3.5 text-[12px]">
+                            <div className="mt-1 max-w-[520px] min-w-0 pl-3.5 text-[12px]">
                               <ErrorDetails error={s.last_error} />
                             </div>
                           )}
@@ -99,10 +99,10 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                         <td>
                           <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
                         </td>
-                        <td className="mono text-right">{open[s.id]}</td>
-                        <td className="mono muted text-[12px]">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
-                        <td>
-                          <div className="flex justify-end gap-1.5">
+                        <td className="mono text-right" data-label="Open">{open[s.id]}</td>
+                        <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
+                        <td className="max-md:w-full">
+                          <div className="flex flex-wrap gap-1.5 md:justify-end">
                             <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />
                             <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
                             <form action={deleteSource}>
@@ -124,8 +124,8 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           <section>
             <SectionHeader title="Suggested" count={addable.length} actions={<span className="faint">seen on an aggregator · adding gets full descriptions and hourly-ready updates</span>} />
             <Panel>
-              <div className="overflow-x-auto">
-                <table className="table min-w-[620px]">
+              <div className="md:overflow-x-auto">
+                <table className="table table-stack max-md:block md:min-w-[620px]">
                   <thead>
                     <tr>
                       <th className="w-10">#</th>
@@ -138,14 +138,14 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                   <tbody>
                     {addable.map((s, i) => (
                       <tr key={s.id}>
-                        <td className="mono faint text-[12px]">{pad2(i + 1)}</td>
-                        <td>
+                        <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
+                        <td className="max-md:w-full">
                           <div className="font-medium">{s.company_name}</div>
                           <div className="mono faint mt-0.5 text-[11px]">{s.slug}</div>
                         </td>
                         <td><Pill>{ATS_INFO[s.ats as Ats]?.label ?? s.ats}</Pill></td>
-                        <td className="mono text-right">{s.job_count}</td>
-                        <td>
+                        <td className="mono text-right" data-label="Jobs">{s.job_count}</td>
+                        <td className="max-md:ml-auto">
                           <div className="flex justify-end gap-1.5">
                             <form action={acceptSuggestion}>
                               <input type="hidden" name="id" value={s.id} />

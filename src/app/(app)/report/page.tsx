@@ -228,8 +228,8 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
             {runs.length === 0 ? (
               <Empty>{runFilter === "all" ? "No runs yet. The worker logs here every time it runs." : "No runs match this filter."}</Empty>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="table min-w-[640px]">
+              <div className="md:overflow-x-auto">
+                <table className="table table-stack max-md:block md:min-w-[640px]">
                   <thead>
                     <tr>
                       <th className="w-24">When</th>
@@ -244,18 +244,18 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                       const took = r.finished_at ? Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000) : null;
                       return (
                         <tr key={r.id}>
-                          <td className="mono muted text-[12px]" title={new Date(r.started_at).toLocaleString()}>
+                          <td className="mono muted text-[12px] max-md:order-2" title={new Date(r.started_at).toLocaleString()}>
                             {agoText(r.started_at)}
                           </td>
-                          <td>
+                          <td className="max-md:order-1">
                             <span className="inline-flex items-center gap-2">
                               <Dot tone={r.error ? "bad" : r.finished_at ? "ok" : "warn"} />
                               {r.kind}
                             </span>
                           </td>
-                          <td className="mono muted text-[12px]">{took == null ? "…" : took < 60 ? `${took}s` : `${Math.round(took / 60)}m`}</td>
+                          <td className="mono muted text-[12px] max-md:order-3" data-label="Took">{took == null ? "…" : took < 60 ? `${took}s` : `${Math.round(took / 60)}m`}</td>
                           <td
-                            className="mono text-right text-[12px]"
+                            className="mono text-right text-[12px] max-md:order-4 max-md:ml-auto"
                             title={
                               r.stats.cost_estimated
                                 ? "Estimated: this run predates cost tracking"
@@ -273,7 +273,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                             {/* Only runs that used AI show a cost; the rest (digests, nothing to score) a dash. */}
                             {r.stats.cost_usd > 0 ? formatRunCost(r.stats.cost_usd) : <span className="faint">–</span>}
                           </td>
-                          <td className="max-w-0 text-[12px]">
+                          <td className="text-[12px] max-md:order-5 max-md:w-full md:max-w-0">
                             {r.error ? (
                               <ErrorDetails error={r.error} />
                             ) : !r.finished_at ? (

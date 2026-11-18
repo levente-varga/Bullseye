@@ -69,12 +69,12 @@ export function SidebarNav({ counts: initial }: { counts?: NavCounts }) {
 export function TopNav() {
   const path = usePathname();
   return (
-    <nav className="-mx-4 flex gap-1 overflow-x-auto px-4">
+    <nav className="flex flex-wrap gap-x-0.5 gap-y-1">
       {NAV.map(({ href, label }) => (
         <Link
           key={href}
           href={href}
-          className={`shrink-0 px-2 py-1 text-[13px] ${
+          className={`px-1.5 py-1 text-[13px] ${
             isActive(path, href) ? "bg-[var(--surface-2)] text-[var(--fg)]" : "text-[var(--muted)]"
           }`}
         >
