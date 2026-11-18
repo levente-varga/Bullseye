@@ -58,6 +58,20 @@ export async function setStatus(form: FormData) {
   revalidatePath("/pipeline");
 }
 
+/**
+ * Undo: puts a job back in the Inbox, untouched. Works from the Pipeline ("Back to Inbox")
+ * and the Inbox's Skipped view ("Restore"). Its approve/skip decision is deleted too,
+ * so a misclick doesn't teach the scorer anything.
+ */
+export async function restoreToInbox(form: FormData) {
+  const supabase = await db();
+  const id = str(form, "id");
+  check((await supabase.from("feedback").delete().eq("job_id", id)).error);
+  check((await supabase.from("jobs").update({ status: "scored" }).eq("id", id)).error);
+  revalidatePath("/");
+  revalidatePath("/pipeline");
+}
+
 export async function markFollowedUp(form: FormData) {
   const supabase = await db();
   check(
