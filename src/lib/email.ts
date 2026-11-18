@@ -23,7 +23,7 @@ function section(title: string, jobs: Job[], empty: string): string {
 
 function wrap(body: string): string {
   const link = appUrl()
-    ? `<p style="margin-top:24px"><a href="${esc(appUrl())}" style="color:#d4481f">Open Bullseye →</a></p>`
+    ? `<p style="margin-top:24px"><a href="${esc(appUrl())}" style="color:#914708">Open Bullseye →</a></p>`
     : "";
   return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;color:#111">${body}${link}</div>`;
 }
