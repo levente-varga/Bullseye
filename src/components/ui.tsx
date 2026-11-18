@@ -48,9 +48,9 @@ export function Pill({ tone = "muted", children }: { tone?: Tone; children: Reac
   return <span className={`pill pill-${tone}`}>{children}</span>;
 }
 
-export function Dot({ tone = "muted" }: { tone?: Tone }) {
+export function Dot({ tone = "muted", title }: { tone?: Tone; title?: string }) {
   const color = { ok: "var(--ok)", warn: "var(--warn)", bad: "var(--bad)", accent: "var(--accent)", muted: "var(--faint)" }[tone];
-  return <span className="dot" style={{ background: color }} />;
+  return <span className="dot" style={{ background: color }} title={title} aria-label={title} role={title ? "img" : undefined} />;
 }
 
 /** Thin bar on a hatched track. `value` is 0–100. */
