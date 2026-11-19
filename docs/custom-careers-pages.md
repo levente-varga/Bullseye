@@ -32,7 +32,14 @@ Checked on 2026-11-20.
 | GameXcite | gamexcite.de/jobs | Wix site: links on the jobs page (7 at the time); apply by email | From each job page |
 | Hello Games | hellogames.org (e.g. `/jobs/build-engineer`) | One page per job; `/jobs` itself is a 404, so the list lives elsewhere; apply by email | From each job page |
 | Mighty Koi | mighty-koi.com/careers | Its own site and application form; the careers page shows no job links (likely added by JavaScript) | From each job page |
+| Donkey Crew | donkey.team/jobs | Links on the jobs page (5 at the time); apply by email | From each job page |
+| Games Farm | games-farm.com/jobs.html | **One page, one section per job** (`#programmer`…), an email link each | The section's text |
+| Gamepires | gamepires.com (WordPress, `?page_id=3846`) | **One page, one section per job** (`#3d-gameplay-animator`…) | The section's text |
+| AlterEyes | altereyes.com/jobs/ | **One page, one section per job** (`#headline-…`) | The section's text |
 | Bohemia Interactive | careers.bohemia.net/en/open-positions | Links on the careers page or `sitemap.xml` (7 at the time) | Titles only: the job pages render in the browser, and `robots.txt` disallows `/api/` |
+
+One-page sites (every job a section of one page) need the type to split the page by
+its headings; the rest are a list of links to job pages.
 
 ## Not covered by it
 
@@ -43,6 +50,14 @@ Checked on 2026-11-20.
   needs the anonymous token the careers page issues; skipped for now.
 - **Super Spline Studios** (`supersplinestudios.com/jobs/`): answers Bullseye with 403
   Forbidden, like gamejobs.co.
+- **Second Star Games** (CharlieHR Recruit, `jobs.recruit.charliehr.com/<company>/<job>/view-job`):
+  each job page is readable (Next.js data and JSON-LD), but no public list of a company's
+  jobs was found (`/<company>` and `/<company>/jobs` are 404).
+- **Overwolf** (Comeet): job pages render with JSON-LD, but the list of positions is loaded
+  by Comeet's script, whose API needs a company id and token not found on the site.
+- **Game Dev Estonia** (`gamedevestonia.ee/jobs`, an industry job board): readable (RSS
+  and a WordPress `jobpost` API), but only 7 jobs, the newest seen from 2024, and every
+  job names "Gamedev Estonia" rather than the studio, so not worth an aggregator.
 - **Playtouch** (`playtouch.net/career`): the jobs are added by JavaScript (the linked
   `#qa-release-ops-…` job isn't in the page's HTML); no job system behind it.
 - **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL
