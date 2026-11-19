@@ -36,6 +36,7 @@ Checked on 2026-11-20.
 | Games Farm | games-farm.com/jobs.html | **One page, one section per job** (`#programmer`…), an email link each | The section's text |
 | Gamepires | gamepires.com (WordPress, `?page_id=3846`) | **One page, one section per job** (`#3d-gameplay-animator`…) | The section's text |
 | AlterEyes | altereyes.com/jobs/ | **One page, one section per job** (`#headline-…`) | The section's text |
+| Isoocool Entertainment | iscoolentertainment.com/careers/ | Links on the careers page (7 at the time) | Job pages are tiny (7KB, no apply link): likely rendered in the browser, so possibly titles only |
 | Bohemia Interactive | careers.bohemia.net/en/open-positions | Links on the careers page or `sitemap.xml` (7 at the time) | Titles only: the job pages render in the browser, and `robots.txt` disallows `/api/` |
 
 One-page sites (every job a section of one page) need the type to split the page by
