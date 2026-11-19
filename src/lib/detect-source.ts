@@ -1,4 +1,16 @@
-import { USER_AGENT, appleTotal, fetchBoard, probeHost, workdayTotal } from "./ats";
+import {
+  USER_AGENT,
+  appleTotal,
+  eightfoldTotal,
+  fetchBoard,
+  isEightfoldSite,
+  isSuccessFactorsPage,
+  phenomBase,
+  phenomTotal,
+  probeHost,
+  successFactorsTotal,
+  workdayTotal,
+} from "./ats";
 import { detectAts } from "./dedupe";
 import { ATS_INFO, type Ats } from "./types";
 
@@ -34,6 +46,7 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
   },
   { ats: "hibob", re: /([a-z0-9-]+)\.careers\.hibob\.com/i, slug: (m) => m[1].toLowerCase() },
   { ats: "breezy", re: /([a-z0-9-]+)\.breezy\.hr/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "rippling", re: /ats\.rippling\.com\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?([a-z0-9-]+)\/jobs/i, slug: (m) => m[1].toLowerCase() },
   { ats: "bamboohr", re: /([a-z0-9-]+)\.bamboohr\.com\/(?:careers|jobs)/i, slug: (m) => m[1].toLowerCase() },
   // Jobylon: the widget on a careers page (jbl_company_id = 2986), a posting page
   // (company_id = 2986;), or a company/embed link.
@@ -75,16 +88,27 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (board) candidates.push({ ats: "greenhouse", slug: board });
   }
 
+  // 1c. An Eightfold careers site (explore.jobs.netflix.net/careers/job/<id>, *.eightfold.ai):
+  // confirmed by its jobs API answering.
+  if (!candidates.length && (/^\/careers(\/job\/\d+)?\/?$/.test(url.pathname) || url.hostname.endsWith(".eightfold.ai"))) {
+    if (await isEightfoldSite(url.hostname)) candidates.push({ ats: "eightfold", slug: url.hostname.toLowerCase() });
+  }
+
   // 2. A Teamtailor or Recruitee career site on this host.
   if (!candidates.length) {
     const found = await probeHost(url.hostname.toLowerCase());
     if (found) candidates.push({ ats: found, slug: url.hostname.toLowerCase() });
   }
 
-  // 3. ATS links inside the page.
+  // 3. A Phenom careers site (its pages carry Phenom's page data), or ATS links inside the page.
   if (!candidates.length) {
     const html = await fetchText(url.toString());
-    if (html) {
+    const phenom = html ? phenomBase(url, html) : null;
+    if (phenom) candidates.push({ ats: "phenom", slug: phenom });
+    // A SAP SuccessFactors career site (Career Site Builder): searched on its own host.
+    const sf = !phenom && html && isSuccessFactorsPage(html);
+    if (sf) candidates.push({ ats: "successfactors", slug: url.hostname.toLowerCase() });
+    if (html && !phenom && !sf) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
         if (m && !IGNORED_SLUGS.test(slug(m).split("/").pop() ?? "")) candidates.push({ ats, slug: slug(m) });
@@ -108,6 +132,11 @@ export async function detectSource(input: string): Promise<Detected | { error: s
       if (c.ats === "workday") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await workdayTotal(c.slug) };
       // Apple's site is read newest first; its total comes from one search page.
       if (c.ats === "apple") return { ...c, companyGuess: "Apple", jobCount: await appleTotal() };
+      // Phenom is searched by role; its total comes from one search page.
+      if (c.ats === "phenom") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await phenomTotal(c.slug) };
+      if (c.ats === "successfactors") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await successFactorsTotal(c.slug) };
+      // Eightfold lists 10 a page: its count comes with the first.
+      if (c.ats === "eightfold") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await eightfoldTotal(c.slug) };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -159,10 +188,12 @@ async function fetchText(url: string): Promise<string | null> {
 function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature"].includes(ats)
-    ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)
+  if (ats === "inrecruiting") slug = slug.split("/")[1] ?? slug; // the company segment
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors", "eightfold"].includes(ats)
+    ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
-  const clean = base.replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
+  // "disneycareers" → "disney"; a Rippling board "kinetic-games-careers" → "kinetic-games"
+  const clean = base.replace(/-(careers?|jobs)$/i, "").replace(/(?<=.)(careers?|jobs)$/i, "").replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
   // Short names are usually initials: "ea" → "EA".
   return clean.length <= 3 ? clean.toUpperCase() : clean.charAt(0).toUpperCase() + clean.slice(1);
 }

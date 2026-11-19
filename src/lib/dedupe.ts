@@ -71,6 +71,26 @@ export function dedupeKey(url: string): string {
     const m = path.match(/\/jobs\/([0-9a-f-]{36})/i);
     if (m) return `hibob:${m[1].toLowerCase()}`;
   }
+  // Phenom: <host>/<region>/<lang>/job/<id>[/<title>]; region, language and title vary.
+  {
+    const m = path.match(/^\/[a-z-]+\/[a-z]{2}(?:-[a-z]{2})?\/job\/([a-z0-9]+)(?:\/|$)/i);
+    if (m) return `phenom:${host}:${m[1].toLowerCase()}`;
+  }
+  // SuccessFactors career sites: <host>/job/<title>/<id>/ (ids are per site)
+  {
+    const m = path.match(/^\/job\/[^/]+\/(\d{6,})\/?$/);
+    if (m) return `sf:${host}:${m[1]}`;
+  }
+  // InRecruiting: <host>.intervieweb.it/<company>/jobs/<title>-<id>/<lang>/
+  if (host.endsWith(".intervieweb.it")) {
+    const m = path.match(/\/jobs\/[a-z0-9-]*?-(\d+)(?:\/|$)/i);
+    if (m) return `inrecruiting:${host}:${m[1]}`;
+  }
+  // Rippling: ats.rippling.com/[<locale>/]<board>/jobs/<uuid>
+  if (host === "ats.rippling.com") {
+    const m = path.match(/\/jobs\/([0-9a-f-]{36})/i);
+    if (m) return `rippling:${m[1].toLowerCase()}`;
+  }
   // BambooHR: <company>.bamboohr.com/careers/<id> (ids are per company)
   if (host.endsWith(".bamboohr.com")) {
     const m = path.match(/\/careers\/(\d+)/);
@@ -123,6 +143,8 @@ export type DetectedAts =
   | "hibob"
   | "breezy"
   | "bamboohr"
+  | "rippling"
+  | "inrecruiting"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -162,6 +184,15 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
   if (host === "jobs.apple.com") return { ats: "apple", slug: "apple" };
   if (host.endsWith(".careers.hibob.com")) return { ats: "hibob", slug: host.split(".")[0] };
   if (host.endsWith(".breezy.hr") && host !== "app.breezy.hr") return { ats: "breezy", slug: host.split(".")[0] };
+  if (host.endsWith(".intervieweb.it") && first && !/^(app|www)$/.test(host.split(".")[0])) {
+    // /<company>/jobs/<title>-<id>/<lang>/ or /<company>/<lang>/career
+    const lang = segments.slice(1).find((s) => /^[a-z]{2}$/i.test(s)) ?? "en";
+    return { ats: "inrecruiting", slug: `${host}/${first.toLowerCase()}/${lang.toLowerCase()}` };
+  }
+  if (host === "ats.rippling.com") {
+    const board = segments.find((s, i) => !(i === 0 && /^[a-z]{2}(-[A-Z]{2})?$/i.test(s)));
+    if (board) return { ats: "rippling", slug: board.toLowerCase() };
+  }
   if (host.endsWith(".bamboohr.com") && !/^(www|api|app)\./.test(host)) return { ats: "bamboohr", slug: host.split(".")[0] };
   {
     const base = avatureBase(url);

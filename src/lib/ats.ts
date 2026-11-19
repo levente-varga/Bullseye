@@ -58,8 +58,8 @@ async function perTerm(terms: string[] | undefined, search: (term: string | null
 const looksRemote = (s: string) => /\bremote\b/i.test(s);
 
 /**
- * GET with one retry after a few seconds when the server hiccups (5xx, timeout, dropped
- * connection): Lever's API returns the odd 502 for big boards. 4xx answers aren't retried.
+ * GET with one retry when the server hiccups (5xx, timeout, dropped connection: Lever's
+ * API returns the odd 502 for big boards) or rate-limits (429). Other 4xx aren't retried.
  */
 async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
@@ -78,9 +78,11 @@ async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Res
       throw e;
     }
     if (res.ok) return res;
-    if (res.status >= 500 && attempt < 2) {
+    // A rate limit (429) waits as long as the site asks (Retry-After, capped), then retries.
+    if ((res.status >= 500 || res.status === 429) && attempt < 2) {
+      const after = Number(res.headers.get("retry-after"));
       await res.body?.cancel();
-      await sleep(RETRY_DELAY_MS);
+      await sleep(res.status === 429 ? Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 10_000, 60_000) : RETRY_DELAY_MS);
       continue;
     }
     throw new Error(`${res.status} ${res.statusText} for ${url}`);
@@ -506,6 +508,354 @@ export async function fetchBambooDescription(url: string): Promise<{ text: strin
   const location = [j.location?.city, j.location?.addressCountry].filter(Boolean).join(", ");
   const pay = j.compensation?.trim() ? `\n\nCompensation: ${j.compensation.trim()}` : "";
   return { text: clip(htmlToText(j.description) + pay), location: location || undefined };
+}
+
+// --- Phenom (careers sites of Disney and other large employers) ----------------------------
+// Slug: the site's base, "<host>/<region>/<lang>", e.g. "join.disneycareers.com/global/en".
+// Its search results page embeds the results as data (10 a page). Searched for the
+// followers' target roles, a few pages each (its search does narrow by role); the job
+// pages' structured data has the description.
+
+const PHENOM_PAGE = 10;
+const PHENOM_MAX_PAGES = 5;
+const PHENOM_SPACING_MS = 1_000;
+
+interface PhenomJob {
+  jobId: string;
+  title: string;
+  location?: string;
+  multi_location?: string[];
+  postedDate?: string;
+  locationType?: string;
+}
+
+/** The JSON object after `"<key>":` in a page, scanned string-aware (descriptions hold braces). */
+function embeddedObject(html: string, key: string): unknown {
+  const at = html.indexOf(`"${key}"`);
+  if (at < 0) return null;
+  const start = html.indexOf("{", at);
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return JSON.parse(html.slice(start, i + 1));
+  }
+  return null;
+}
+
+async function fetchPhenom(base: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  let first = true;
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 0; page < PHENOM_MAX_PAGES; page++) {
+      if (!first) await sleep(PHENOM_SPACING_MS);
+      first = false;
+      const params = new URLSearchParams(term ? { keywords: term } : {});
+      if (page) params.set("from", String(page * PHENOM_PAGE));
+      const html = await (await get(`https://${base}/search-results?${params}`, "text/html")).text();
+      const search = embeddedObject(html, "eagerLoadRefineSearch") as { totalHits?: number; data?: { jobs?: PhenomJob[] } } | null;
+      if (!search) throw new Error("Phenom: search results not found on the page (site layout changed?)");
+      const jobs = search.data?.jobs ?? [];
+      for (const j of jobs) {
+        const places = [...new Set((j.multi_location?.length ? j.multi_location : [j.location ?? ""]).filter(Boolean))];
+        const remote = places.some(looksRemote) || /remote/i.test(j.locationType ?? "");
+        out.push({
+          external_id: String(j.jobId),
+          title: j.title.trim(),
+          company,
+          location: places.join(" | "),
+          remote,
+          url: `https://${base}/job/${j.jobId}`,
+          description: "", // from the job page's structured data
+          compensation: null,
+          posted_at: j.postedDate ?? null,
+        });
+      }
+      if (jobs.length < PHENOM_PAGE || (page + 1) * PHENOM_PAGE >= (search.totalHits ?? 0)) break;
+    }
+    return out;
+  });
+}
+
+/** Number of jobs on a Phenom careers site, from one search page (Add board shows it). */
+export async function phenomTotal(base: string): Promise<number> {
+  const html = await (await get(`https://${base}/search-results`, "text/html")).text();
+  return (embeddedObject(html, "eagerLoadRefineSearch") as { totalHits?: number } | null)?.totalHits ?? 0;
+}
+
+/** Whether a page is a Phenom careers site; its base ("<host>/<region>/<lang>") if so. */
+export function phenomBase(url: URL, html: string): string | null {
+  if (!/phApp\.ddo|eagerLoadRefineSearch|phenompeople/i.test(html)) return null;
+  const m = url.pathname.match(/^\/([a-z-]+)\/([a-z]{2}(?:-[a-z]{2})?)\//i);
+  return m ? `${url.hostname.toLowerCase()}/${m[1]}/${m[2]}` : null;
+}
+
+// --- Rippling (public job board API) -----------------------------------------------------
+// Slug: the board name, "<board>" in ats.rippling.com/[<locale>/]<board>/jobs/<uuid>.
+// One request lists every job with its location; each job's detail has the description.
+
+const RIPPLING_API = "https://api.rippling.com/platform/api/ats/v1/board";
+
+interface RipplingJob {
+  uuid: string;
+  name: string;
+  url: string;
+  workLocation?: { label?: string };
+}
+
+async function fetchRippling(board: string, company: string): Promise<FetchedJob[]> {
+  const jobs = await getJson<RipplingJob[]>(`${RIPPLING_API}/${encodeURIComponent(board)}/jobs`);
+  return jobs.map((j) => {
+    const location = j.workLocation?.label?.trim() ?? "";
+    return {
+      external_id: j.uuid,
+      title: j.name.trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: j.url || `https://ats.rippling.com/${board}/jobs/${j.uuid}`,
+      description: "", // from the job's detail
+      compensation: null,
+      posted_at: null,
+    };
+  });
+}
+
+/** A Rippling job link, as [board, uuid]. */
+export function ripplingJob(url: string): [string, string] | null {
+  const m = url.match(/^https:\/\/ats\.rippling\.com\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?([a-z0-9-]+)\/jobs\/([0-9a-f-]{36})/i);
+  return m ? [m[1].toLowerCase(), m[2].toLowerCase()] : null;
+}
+
+/** A Rippling job's description (about the company, then the role) and locations. */
+export async function fetchRipplingDescription(board: string, uuid: string): Promise<{ text: string; location?: string }> {
+  const d = await getJson<{ description?: { company?: string; role?: string }; workLocations?: string[] }>(
+    `${RIPPLING_API}/${encodeURIComponent(board)}/jobs/${encodeURIComponent(uuid)}`,
+  );
+  const text = [d.description?.role, d.description?.company].filter(Boolean).map((h) => htmlToText(String(h))).join("\n\n");
+  if (!text) throw new Error("Rippling: no description for this job");
+  const location = [...new Set(d.workLocations ?? [])].join(" | ");
+  return { text: clip(text), location: location || undefined };
+}
+
+// --- InRecruiting (Zucchetti, *.intervieweb.it) -------------------------------------------
+// Slug: "<host>/<company>/<lang>", e.g. "inrecruitingfr.intervieweb.it/namcobandai/en".
+// The career page lists every job (title, link, location); the job pages' structured data
+// has the description.
+
+async function fetchInRecruiting(slug: string, company: string): Promise<FetchedJob[]> {
+  const [host, org, lang = "en"] = slug.split("/");
+  const html = await (await get(`https://${host}/${org}/${lang}/career`, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const card of html.split(/class="row vacancy__render"/).slice(1)) {
+    const link = card.match(/href="(https?:\/\/[^"]+\/jobs\/[a-z0-9-]+-(\d+)\/[a-z]{2}\/?)"/i);
+    const title = card.match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1];
+    if (!link || !title || out.has(link[2])) continue;
+    // <span title="Location"><i …></i><span class="sr-only">Location </span>Lyon France </span>
+    const loc = card.match(/___vm_location___[\s\S]*?<span class="sr-only">[^<]*<\/span>([^<]*)</)?.[1];
+    const location = decodeEntities((loc ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    out.set(link[2], {
+      external_id: link[2],
+      title: decodeEntities(title.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: link[1],
+      description: "", // from the job page's structured data
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  if (!out.size && !/vacancy__render|tab-annunci/.test(html)) throw new Error("InRecruiting: no job list on the career page (layout changed?)");
+  return [...out.values()];
+}
+
+// --- SAP SuccessFactors career sites (Volvo Group and other large employers) ---------------
+// Slug: the career site host, e.g. "jobs.volvogroup.com". Its search pages list 100 jobs
+// each (title, link, location); searched for the followers' target roles, a few pages per
+// role. (robots.txt keeps bots out of /services/, where its RSS lives.) The job pages'
+// structured data has the description.
+
+const SF_PAGE = 100;
+const SF_MAX_PAGES = 3;
+const SF_SPACING_MS = 1_000;
+
+/** "Ji'nan, CN, 250102" → "Ji'nan, China": country codes named, postal codes dropped. */
+function sfPlace(raw: string): string {
+  return raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p && !/^\d[\d\s-]*$/.test(p))
+    .map((p) => (/^[A-Z]{2}$/.test(p) ? countryName(p) : p))
+    .join(", ");
+}
+
+async function fetchSuccessFactors(host: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  let first = true;
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 0; page < SF_MAX_PAGES; page++) {
+      if (!first) await sleep(SF_SPACING_MS);
+      first = false;
+      const params = new URLSearchParams({ q: term ?? "", startrow: String(page * SF_PAGE) });
+      const html = await (await get(`https://${host}/search/?${params}`, "text/html")).text();
+      const rows = html.split(/<tr class="data-row"/).slice(1);
+      for (const row of rows) {
+        const a = row.match(/<a[^>]+href="(\/job\/[^"]+\/(\d+)\/)"[^>]*>([\s\S]*?)<\/a>/);
+        if (!a) continue;
+        const loc = row.match(/<span class="jobLocation">([\s\S]*?)<\/span>/)?.[1] ?? "";
+        const location = sfPlace(decodeEntities(loc.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " "));
+        out.push({
+          external_id: a[2],
+          title: decodeEntities(a[3].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim(),
+          company,
+          location,
+          remote: looksRemote(location),
+          url: `https://${host}${decodeEntities(a[1])}`,
+          description: "", // from the job page's structured data
+          compensation: null,
+          posted_at: null,
+        });
+      }
+      const total = Number(html.match(/of <b>(\d+)<\/b>/)?.[1] ?? 0);
+      if (rows.length < SF_PAGE || (page + 1) * SF_PAGE >= total) break;
+    }
+    return out;
+  });
+}
+
+/** Whether a page comes from a SuccessFactors career site (Career Site Builder). */
+export const isSuccessFactorsPage = (html: string) => /rmkcdn\.successfactors|jobs2web|sfjobs/i.test(html);
+
+/** Number of jobs on a SuccessFactors career site, from one search page (Add board shows it). */
+export async function successFactorsTotal(host: string): Promise<number> {
+  const html = await (await get(`https://${host}/search/?q=&startrow=0`, "text/html")).text();
+  return Number(html.match(/of <b>(\d+)<\/b>/)?.[1] ?? 0);
+}
+
+// --- Eightfold (careers sites of Netflix, Ericsson and other large employers) -------------
+// Slug: the careers site host, e.g. "jobs.ericsson.com". Two APIs, both allowed by these
+// sites' robots.txt: the newer /api/pcsx (Ericsson) and the older /api/apply/v2 (Netflix);
+// each site enables one. Both page 10 jobs at a time and take a search query, so the site
+// is searched for its followers' target roles, a few pages per role, spaced out (they
+// rate-limit quick runs). Each job's details (same API) have the description.
+
+const EIGHTFOLD_PAGE = 10;
+const EIGHTFOLD_MAX_PAGES = 5;
+const EIGHTFOLD_SPACING_MS = 2_000;
+
+interface EightfoldPosition {
+  id: number;
+  name: string;
+  posting_name?: string;
+  locations?: string[];
+  location?: string;
+  positionUrl?: string;
+  postedTs?: number;
+  t_create?: number;
+  workLocationOption?: string;
+  work_location_option?: string;
+  jobDescription?: string;
+  job_description?: string;
+}
+
+/** "Los Gatos,California,United States of America" → "Los Gatos, California, United States of America" */
+const eightfoldPlace = (s: string) => s.split(",").map((p) => p.trim()).filter(Boolean).join(", ");
+/** The domain the newer API wants: the site's own ("jobs.ericsson.com" → "ericsson.com"). */
+const eightfoldDomain = (host: string) => host.split(".").slice(-2).join(".");
+
+type EightfoldApi = "pcsx" | "v2";
+
+/** Which API a site has enabled: the newer one answers 200 with positions, else the older. */
+async function eightfoldApi(host: string): Promise<EightfoldApi> {
+  try {
+    const d = await getJson<{ data?: { positions?: unknown[] } }>(
+      `https://${host}/api/pcsx/search?domain=${eightfoldDomain(host)}&query=&start=0`,
+      15_000,
+    );
+    if (Array.isArray(d.data?.positions)) return "pcsx";
+  } catch {
+    // 403 "PCSX is not enabled": the older API
+  }
+  return "v2";
+}
+
+async function eightfoldPage(host: string, api: EightfoldApi, term: string | null, start: number) {
+  const query = encodeURIComponent(term ?? "");
+  if (api === "pcsx") {
+    const d = await getJson<{ data?: { positions?: EightfoldPosition[]; count?: number } }>(
+      `https://${host}/api/pcsx/search?domain=${eightfoldDomain(host)}&query=${query}&start=${start}`,
+    );
+    return { positions: d.data?.positions ?? [], count: d.data?.count ?? 0 };
+  }
+  const d = await getJson<{ positions?: EightfoldPosition[]; count?: number }>(
+    `https://${host}/api/apply/v2/jobs?query=${query}&start=${start}&num=${EIGHTFOLD_PAGE}`,
+  );
+  return { positions: d.positions ?? [], count: d.count ?? 0 };
+}
+
+async function fetchEightfold(host: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  const api = await eightfoldApi(host);
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 0; page < EIGHTFOLD_MAX_PAGES; page++) {
+      await sleep(EIGHTFOLD_SPACING_MS);
+      const { positions, count } = await eightfoldPage(host, api, term, page * EIGHTFOLD_PAGE);
+      for (const p of positions) {
+        const places = [...new Set((p.locations?.length ? p.locations : [p.location ?? ""]).map(eightfoldPlace).filter(Boolean))];
+        const remote = places.some(looksRemote) || /remote/i.test(p.workLocationOption ?? p.work_location_option ?? "");
+        const created = p.postedTs ?? p.t_create;
+        out.push({
+          external_id: String(p.id),
+          title: (p.posting_name || p.name).trim(),
+          company,
+          location: places.join(" | "),
+          remote,
+          url: `https://${host}${p.positionUrl ?? `/careers/job/${p.id}`}`,
+          description: "", // from the job's details
+          compensation: null,
+          posted_at: created ? new Date(created * 1000).toISOString() : null,
+        });
+      }
+      if (positions.length < EIGHTFOLD_PAGE || (page + 1) * EIGHTFOLD_PAGE >= count) break;
+    }
+    return out;
+  });
+}
+
+/** An Eightfold job's description, from its details in whichever API the site has. */
+export async function fetchEightfoldDescription(host: string, id: string): Promise<{ text: string }> {
+  let html: string | undefined;
+  try {
+    const d = await getJson<{ data?: EightfoldPosition }>(
+      `https://${host}/api/pcsx/position_details?position_id=${encodeURIComponent(id)}&domain=${eightfoldDomain(host)}`,
+    );
+    html = d.data?.jobDescription;
+  } catch {
+    html = (await getJson<EightfoldPosition>(`https://${host}/api/apply/v2/jobs/${encodeURIComponent(id)}`)).job_description;
+  }
+  if (!html) throw new Error("Eightfold: no description for this job");
+  return { text: clip(htmlToText(html)) };
+}
+
+/** Number of jobs on an Eightfold careers site (Add board shows it). */
+export async function eightfoldTotal(host: string): Promise<number> {
+  return (await eightfoldPage(host, await eightfoldApi(host), null, 0)).count;
+}
+
+/** Whether a site runs Eightfold's careers API (Add board confirms a guess with it). */
+export async function isEightfoldSite(host: string): Promise<boolean> {
+  try {
+    await eightfoldTotal(host);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- Recruitee (JSON API) -----------------------------------------------------
@@ -1654,6 +2004,16 @@ export function fetchBoard(
       return fetchBreezy(slug, company);
     case "bamboohr":
       return fetchBambooHR(slug, company);
+    case "phenom":
+      return fetchPhenom(slug, company, terms);
+    case "rippling":
+      return fetchRippling(slug, company);
+    case "inrecruiting":
+      return fetchInRecruiting(slug, company);
+    case "successfactors":
+      return fetchSuccessFactors(slug, company, terms);
+    case "eightfold":
+      return fetchEightfold(slug, company, terms);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1713,6 +2073,14 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   hibob: (s) => `https://${s}.careers.hibob.com/`,
   breezy: (s) => `https://${s}.breezy.hr/`,
   bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
+  phenom: (s) => `https://${s}/search-results`,
+  rippling: (s) => `https://ats.rippling.com/${s}/jobs`,
+  successfactors: (s) => `https://${s}/search/`,
+  inrecruiting: (s) => {
+    const [host, org, lang = "en"] = s.split("/");
+    return `https://${host}/${org}/${lang}/career`;
+  },
+  eightfold: (s) => `https://${s}/careers`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

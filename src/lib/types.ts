@@ -15,6 +15,11 @@ export type Ats =
   | "hibob"
   | "breezy"
   | "bamboohr"
+  | "phenom"
+  | "rippling"
+  | "inrecruiting"
+  | "successfactors"
+  | "eightfold"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -36,7 +41,7 @@ export type Ats =
 export type FetchMode = "board" | "paged" | "feed" | "search" | "newest";
 
 export const FETCH_MODES: Record<FetchMode, { label: string; how: string; watchable: boolean }> = {
-  board: { label: "Whole board", how: "The full list in one request.", watchable: true },
+  board: { label: "Whole", how: "The whole board in one request.", watchable: true },
   paged: { label: "Paged", how: "The full list, page by page: many requests for a big board.", watchable: false },
   feed: { label: "Feed", how: "A feed of recent postings: one request or a few.", watchable: true },
   search: { label: "Search", how: "One search per target role, a few pages each: grows with your roles.", watchable: false },
@@ -89,6 +94,40 @@ export const ATS_INFO: Record<
   jobylon: { fetch: "board", label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
   hibob: { fetch: "board", label: "HiBob", slugLabel: "Careers site URL", slugExample: "sumodigitalltd.careers.hibob.com" },
   breezy: { fetch: "board", label: "Breezy HR", slugLabel: "Careers site URL", slugExample: "turbulent.breezy.hr" },
+  phenom: {
+    fetch: "search",
+    label: "Phenom",
+    slugLabel: "Careers site URL",
+    slugExample: "join.disneycareers.com/global/en",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
+  successfactors: {
+    fetch: "search",
+    label: "SuccessFactors",
+    slugLabel: "Career site URL",
+    slugExample: "jobs.volvogroup.com",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
+  inrecruiting: {
+    fetch: "board",
+    label: "InRecruiting",
+    slugLabel: "Career page URL",
+    slugExample: "inrecruitingfr.intervieweb.it/namcobandai/en/career",
+  },
+  rippling: { fetch: "board", label: "Rippling", slugLabel: "Job board URL", slugExample: "ats.rippling.com/kinetic-games-careers/jobs" },
+  eightfold: {
+    fetch: "search",
+    label: "Eightfold",
+    slugLabel: "Careers site URL",
+    slugExample: "jobs.ericsson.com",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
   avature: {
     fetch: "paged",
