@@ -361,6 +361,7 @@ async function syncSource(
       const found = await describe(source, j);
       j.description = found.text;
       if (found.location) j.location = found.location;
+      if (found.remote) j.remote = true; // Avature: the work model is on the posting page
       if (found.company && !j.company) j.company = found.company; // Magnet.me lists have none
       stats.described++;
     } catch (e) {
@@ -479,7 +480,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 
   let described = 0;
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
-    let found: { text: string; location?: string; company?: string } = { text: "" };
+    let found: { text: string; location?: string; company?: string; remote?: boolean } = { text: "" };
     try {
       found = await describe(sources.get(job.source_id)!, job);
       described++;
@@ -492,7 +493,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
       }
       console.warn(`  no description for ${job.title} @ ${job.company}: ${e instanceof Error ? e.message : e}`);
     }
-    const updated = { ...job, description: found.text, location: found.location ?? job.location };
+    const updated = { ...job, description: found.text, location: found.location ?? job.location, remote: job.remote || Boolean(found.remote) };
     const thin = updated.description.length < THIN_THRESHOLD;
     await must(
       db
@@ -500,6 +501,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
         .update({
           description: updated.description,
           location: updated.location,
+          remote: updated.remote,
           thin,
           ...(found.company && !job.company ? { company: found.company } : {}),
         })

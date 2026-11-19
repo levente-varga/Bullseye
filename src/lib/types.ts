@@ -11,6 +11,7 @@ export type Ats =
   | "pinpoint"
   | "jobylon"
   | "apple"
+  | "avature"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -83,6 +84,12 @@ export const ATS_INFO: Record<
   workday: { fetch: "paged", label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
   pinpoint: { fetch: "board", label: "Pinpoint", slugLabel: "Career site URL", slugExample: "workwithus.pinpointhq.com" },
   jobylon: { fetch: "board", label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
+  avature: {
+    fetch: "paged",
+    label: "Avature",
+    slugLabel: "Career site URL",
+    slugExample: "jobs.ea.com/en_US/careers",
+  },
   apple: {
     fetch: "newest",
     label: "Apple",

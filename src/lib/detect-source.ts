@@ -162,9 +162,10 @@ async function fetchText(url: string): Promise<string | null> {
 function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint"].includes(ats)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)
     : slug;
   const clean = base.replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
+  // Short names are usually initials: "ea" → "EA".
+  return clean.length <= 3 ? clean.toUpperCase() : clean.charAt(0).toUpperCase() + clean.slice(1);
 }
