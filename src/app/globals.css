@@ -195,6 +195,8 @@ input[type="radio"]:checked:hover {
   }
   .table td { @apply px-3 py-2.5 align-middle; border-bottom: 1px solid var(--border); }
   .table tr:last-child td { border-bottom: 0; }
+  /* Tighter cells, for tables that share the row with a side column (Sources). */
+  .table-compact th, .table-compact td { @apply px-2; }
   .table tbody tr:hover td { background: var(--surface-2); }
 
   /* Below md, a .table-stack lays each row out as a wrapping card instead of columns,
@@ -220,9 +222,10 @@ input[type="radio"]:checked:hover {
     }
   }
 
-  /* The same card layout below lg, for tables too wide for a tablet next to the sidebar
-     (Sources). Cells opt in with max-lg:* utilities. */
-  @media (max-width: 63.99rem) {
+  /* The same card layout, by the table's own width rather than the window's (Sources,
+     whose tables share the row with a side column): below 32rem of room. The wrapper is
+     an @container; cells opt in with @max-lg:* utilities. */
+  @container (max-width: 31.99rem) {
     .table-stack-lg thead { display: none; }
     .table-stack-lg, .table-stack-lg tbody { display: block; }
     .table-stack-lg tr {

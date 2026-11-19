@@ -105,3 +105,26 @@ export const IconClose = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 4l8 8M12 4l-8 8" />
   </svg>
 );
+export const IconEye = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z" />
+    <circle cx="8" cy="8" r="2" />
+  </svg>
+);
+export const IconPause = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5.5 3.5v9M10.5 3.5v9" />
+  </svg>
+);
+export const IconPlay = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 3.5l7.5 4.5L5 12.5z" />
+  </svg>
+);
+/** Unfollow: a circle with a minus. */
+export const IconUnfollow = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="M5.5 8h5" />
+  </svg>
+);
