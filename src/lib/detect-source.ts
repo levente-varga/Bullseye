@@ -164,6 +164,7 @@ async function fetchText(url: string): Promise<string | null> {
 function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
+  if (ats === "inrecruiting") slug = slug.split("/")[1] ?? slug; // the company segment
   const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;

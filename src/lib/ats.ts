@@ -641,6 +641,38 @@ export async function fetchRipplingDescription(board: string, uuid: string): Pro
   return { text: clip(text), location: location || undefined };
 }
 
+// --- InRecruiting (Zucchetti, *.intervieweb.it) -------------------------------------------
+// Slug: "<host>/<company>/<lang>", e.g. "inrecruitingfr.intervieweb.it/namcobandai/en".
+// The career page lists every job (title, link, location); the job pages' structured data
+// has the description.
+
+async function fetchInRecruiting(slug: string, company: string): Promise<FetchedJob[]> {
+  const [host, org, lang = "en"] = slug.split("/");
+  const html = await (await get(`https://${host}/${org}/${lang}/career`, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const card of html.split(/class="row vacancy__render"/).slice(1)) {
+    const link = card.match(/href="(https?:\/\/[^"]+\/jobs\/[a-z0-9-]+-(\d+)\/[a-z]{2}\/?)"/i);
+    const title = card.match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1];
+    if (!link || !title || out.has(link[2])) continue;
+    // <span title="Location"><i …></i><span class="sr-only">Location </span>Lyon France </span>
+    const loc = card.match(/___vm_location___[\s\S]*?<span class="sr-only">[^<]*<\/span>([^<]*)</)?.[1];
+    const location = decodeEntities((loc ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    out.set(link[2], {
+      external_id: link[2],
+      title: decodeEntities(title.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: link[1],
+      description: "", // from the job page's structured data
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  if (!out.size && !/vacancy__render|tab-annunci/.test(html)) throw new Error("InRecruiting: no job list on the career page (layout changed?)");
+  return [...out.values()];
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1791,6 +1823,8 @@ export function fetchBoard(
       return fetchPhenom(slug, company, terms);
     case "rippling":
       return fetchRippling(slug, company);
+    case "inrecruiting":
+      return fetchInRecruiting(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1852,6 +1886,10 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
   phenom: (s) => `https://${s}/search-results`,
   rippling: (s) => `https://ats.rippling.com/${s}/jobs`,
+  inrecruiting: (s) => {
+    const [host, org, lang = "en"] = s.split("/");
+    return `https://${host}/${org}/${lang}/career`;
+  },
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

@@ -17,6 +17,7 @@ export type Ats =
   | "bamboohr"
   | "phenom"
   | "rippling"
+  | "inrecruiting"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -99,6 +100,12 @@ export const ATS_INFO: Record<
     searchable: true,
     // Searched by role: a job missing from one fetch isn't closed.
     partial: true,
+  },
+  inrecruiting: {
+    fetch: "board",
+    label: "InRecruiting",
+    slugLabel: "Career page URL",
+    slugExample: "inrecruitingfr.intervieweb.it/namcobandai/en/career",
   },
   rippling: { fetch: "board", label: "Rippling", slugLabel: "Job board URL", slugExample: "ats.rippling.com/kinetic-games-careers/jobs" },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
