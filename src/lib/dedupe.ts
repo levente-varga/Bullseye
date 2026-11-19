@@ -22,9 +22,9 @@ export function dedupeKey(url: string): string {
     if (m) return `gh:${m[1]}`;
   }
   // Lever and Ashby: UUIDs after the company slug.
-  if (host === "jobs.lever.co" || host === "jobs.ashbyhq.com") {
+  if (host === "jobs.lever.co" || host === "jobs.eu.lever.co" || host === "jobs.ashbyhq.com") {
     const m = path.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-    if (m) return `${host === "jobs.lever.co" ? "lever" : "ashby"}:${m[1].toLowerCase()}`;
+    if (m) return `${host === "jobs.ashbyhq.com" ? "ashby" : "lever"}:${m[1].toLowerCase()}`;
   }
   // SmartRecruiters: /<Company>/<digits>[-title-slug]
   if (host.endsWith("smartrecruiters.com")) {
@@ -118,6 +118,8 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
   const first = segments[0] ?? "";
   if (host.endsWith("greenhouse.io")) return { ats: "greenhouse", slug: first.toLowerCase() };
   if (host === "jobs.lever.co") return { ats: "lever", slug: first.toLowerCase() };
+  // Lever's EU region: its own hosts, so the slug carries the region.
+  if (host === "jobs.eu.lever.co") return { ats: "lever", slug: `eu/${first.toLowerCase()}` };
   if (host === "jobs.ashbyhq.com") return { ats: "ashby", slug: first.toLowerCase() };
   if (host.endsWith("smartrecruiters.com")) return { ats: "smartrecruiters", slug: first };
   if (/\.jobs\.personio\.(de|com)$/.test(host)) return { ats: "personio", slug: host };
