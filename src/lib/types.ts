@@ -36,7 +36,7 @@ export type Ats =
 export type FetchMode = "board" | "paged" | "feed" | "search" | "newest";
 
 export const FETCH_MODES: Record<FetchMode, { label: string; how: string; watchable: boolean }> = {
-  board: { label: "Whole board", how: "The full list in one request.", watchable: true },
+  board: { label: "Whole", how: "The whole board in one request.", watchable: true },
   paged: { label: "Paged", how: "The full list, page by page: many requests for a big board.", watchable: false },
   feed: { label: "Feed", how: "A feed of recent postings: one request or a few.", watchable: true },
   search: { label: "Search", how: "One search per target role, a few pages each: grows with your roles.", watchable: false },
