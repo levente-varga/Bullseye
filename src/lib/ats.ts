@@ -58,8 +58,8 @@ async function perTerm(terms: string[] | undefined, search: (term: string | null
 const looksRemote = (s: string) => /\bremote\b/i.test(s);
 
 /**
- * GET with one retry after a few seconds when the server hiccups (5xx, timeout, dropped
- * connection): Lever's API returns the odd 502 for big boards. 4xx answers aren't retried.
+ * GET with one retry when the server hiccups (5xx, timeout, dropped connection: Lever's
+ * API returns the odd 502 for big boards) or rate-limits (429). Other 4xx aren't retried.
  */
 async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
@@ -78,9 +78,11 @@ async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Res
       throw e;
     }
     if (res.ok) return res;
-    if (res.status >= 500 && attempt < 2) {
+    // A rate limit (429) waits as long as the site asks (Retry-After, capped), then retries.
+    if ((res.status >= 500 || res.status === 429) && attempt < 2) {
+      const after = Number(res.headers.get("retry-after"));
       await res.body?.cancel();
-      await sleep(RETRY_DELAY_MS);
+      await sleep(res.status === 429 ? Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 10_000, 60_000) : RETRY_DELAY_MS);
       continue;
     }
     throw new Error(`${res.status} ${res.statusText} for ${url}`);
@@ -506,6 +508,85 @@ export async function fetchBambooDescription(url: string): Promise<{ text: strin
   const location = [j.location?.city, j.location?.addressCountry].filter(Boolean).join(", ");
   const pay = j.compensation?.trim() ? `\n\nCompensation: ${j.compensation.trim()}` : "";
   return { text: clip(htmlToText(j.description) + pay), location: location || undefined };
+}
+
+// --- Eightfold (careers site API: Netflix and other large employers) -----------------------
+// Slug: the careers site host, e.g. "explore.jobs.netflix.net". Its /api/apply/v2/jobs
+// lists 10 jobs a page (whatever size is asked) with every location, but no text; each
+// job's own entry in the same API has the description.
+
+const EIGHTFOLD_PAGE = 10;
+const EIGHTFOLD_MAX_PAGES = 200;
+/** Between pages: the API rate-limits a quick run of requests (429 after ~15). */
+const EIGHTFOLD_SPACING_MS = 1_500;
+
+interface EightfoldPosition {
+  id: number;
+  name: string;
+  posting_name?: string;
+  location?: string;
+  locations?: string[];
+  t_create?: number;
+  work_location_option?: string;
+  job_description?: string;
+}
+
+/** "Los Gatos,California,United States of America" → "Los Gatos, California, United States of America" */
+const eightfoldPlace = (s: string) => s.split(",").map((p) => p.trim()).filter(Boolean).join(", ");
+
+async function fetchEightfold(host: string, company: string): Promise<FetchedJob[]> {
+  const out = new Map<string, FetchedJob>();
+  for (let page = 0; page < EIGHTFOLD_MAX_PAGES; page++) {
+    if (page) await sleep(EIGHTFOLD_SPACING_MS);
+    const data = await getJson<{ positions?: EightfoldPosition[]; count?: number }>(
+      `https://${host}/api/apply/v2/jobs?start=${page * EIGHTFOLD_PAGE}&num=${EIGHTFOLD_PAGE}`,
+    );
+    const positions = data.positions ?? [];
+    let added = 0;
+    for (const p of positions) {
+      const id = String(p.id);
+      if (out.has(id)) continue;
+      added++;
+      const places = [...new Set((p.locations?.length ? p.locations : [p.location ?? ""]).map(eightfoldPlace).filter(Boolean))];
+      const remote = places.some(looksRemote) || /remote/i.test(p.work_location_option ?? "");
+      out.set(id, {
+        external_id: id,
+        title: (p.posting_name || p.name).trim(),
+        company,
+        location: places.join(" | "),
+        remote,
+        url: `https://${host}/careers/job/${id}`,
+        description: "", // from the job's own entry
+        compensation: null,
+        posted_at: p.t_create ? new Date(p.t_create * 1000).toISOString() : null,
+      });
+    }
+    if (positions.length < EIGHTFOLD_PAGE || added === 0 || out.size >= (data.count ?? Infinity)) break;
+  }
+  return [...out.values()];
+}
+
+/** An Eightfold job's description, from its entry in the careers API. */
+export async function fetchEightfoldDescription(host: string, id: string): Promise<{ text: string }> {
+  const p = await getJson<EightfoldPosition>(`https://${host}/api/apply/v2/jobs/${encodeURIComponent(id)}`);
+  if (!p.job_description) throw new Error("Eightfold: no description for this job");
+  return { text: clip(htmlToText(p.job_description)) };
+}
+
+/** Number of jobs on an Eightfold careers site, from one request (Add board shows it). */
+export async function eightfoldTotal(host: string): Promise<number> {
+  const d = await getJson<{ count?: number }>(`https://${host}/api/apply/v2/jobs?start=0&num=1`);
+  return d.count ?? 0;
+}
+
+/** Whether a site runs Eightfold's careers API (Add board confirms a guess with it). */
+export async function isEightfoldSite(host: string): Promise<boolean> {
+  try {
+    const d = await getJson<{ positions?: unknown[] }>(`https://${host}/api/apply/v2/jobs?start=0&num=1`, 10_000);
+    return Array.isArray(d.positions);
+  } catch {
+    return false;
+  }
 }
 
 // --- Recruitee (JSON API) -----------------------------------------------------
@@ -1654,6 +1735,8 @@ export function fetchBoard(
       return fetchBreezy(slug, company);
     case "bamboohr":
       return fetchBambooHR(slug, company);
+    case "eightfold":
+      return fetchEightfold(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1713,6 +1796,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   hibob: (s) => `https://${s}.careers.hibob.com/`,
   breezy: (s) => `https://${s}.breezy.hr/`,
   bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
+  eightfold: (s) => `https://${s}/careers`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

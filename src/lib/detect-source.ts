@@ -1,4 +1,4 @@
-import { USER_AGENT, appleTotal, fetchBoard, probeHost, workdayTotal } from "./ats";
+import { USER_AGENT, appleTotal, eightfoldTotal, fetchBoard, isEightfoldSite, probeHost, workdayTotal } from "./ats";
 import { detectAts } from "./dedupe";
 import { ATS_INFO, type Ats } from "./types";
 
@@ -75,6 +75,12 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (board) candidates.push({ ats: "greenhouse", slug: board });
   }
 
+  // 1c. An Eightfold careers site (explore.jobs.netflix.net/careers/job/<id>, *.eightfold.ai):
+  // confirmed by its jobs API answering.
+  if (!candidates.length && (/^\/careers(\/job\/\d+)?\/?$/.test(url.pathname) || url.hostname.endsWith(".eightfold.ai"))) {
+    if (await isEightfoldSite(url.hostname)) candidates.push({ ats: "eightfold", slug: url.hostname.toLowerCase() });
+  }
+
   // 2. A Teamtailor or Recruitee career site on this host.
   if (!candidates.length) {
     const found = await probeHost(url.hostname.toLowerCase());
@@ -108,6 +114,8 @@ export async function detectSource(input: string): Promise<Detected | { error: s
       if (c.ats === "workday") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await workdayTotal(c.slug) };
       // Apple's site is read newest first; its total comes from one search page.
       if (c.ats === "apple") return { ...c, companyGuess: "Apple", jobCount: await appleTotal() };
+      // Eightfold lists 10 a page: its count comes with the first.
+      if (c.ats === "eightfold") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await eightfoldTotal(c.slug) };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -159,8 +167,8 @@ async function fetchText(url: string): Promise<string | null> {
 function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature"].includes(ats)
-    ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "eightfold"].includes(ats)
+    ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|explore)$/i.test(p)) ?? host)
     : slug;
   const clean = base.replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
   // Short names are usually initials: "ea" → "EA".
