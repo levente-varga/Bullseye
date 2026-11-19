@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { SubmitButton } from "@/components/SubmitButton";
-import { ExpandableJobRow } from "@/components/ExpandableJobRow";
+import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
 import { agoText, nowMs } from "@/lib/time";
 import { JOB_LIST_COLUMNS, PIPELINE_STATUSES, type Job, type JobStatus } from "@/lib/types";
@@ -128,10 +128,7 @@ export default async function PipelinePage() {
                                   </SubmitButton>
                                 </form>
                               )}
-                              <span className="btn">
-                                <span className="group-open:hidden">Details</span>
-                                <span className="hidden group-open:inline">Close</span>
-                              </span>
+                              <ExpandToggle />
                             </div>
                           </>
                         }

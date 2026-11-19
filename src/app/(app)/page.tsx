@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ExpandableJobRow } from "@/components/ExpandableJobRow";
+import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
+import { IconExternal } from "@/components/icons";
 import { PendingBar } from "@/components/PendingBar";
 import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -14,8 +15,10 @@ const PAGE = 50;
 
 export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const { all, view: viewParam, n } = await searchParams;
-  // "above" (default), "all" scored, or "skipped" (skipped in the Inbox or dropped from the Pipeline, restorable).
-  const view = viewParam === "skipped" ? "skipped" : viewParam === "all" || all === "1" ? "all" : "above";
+  // "above" (default), "all" scored, "waiting" (passed the filters, not scored yet), or
+  // "skipped" (skipped in the Inbox or dropped from the Pipeline, restorable).
+  const view =
+    viewParam === "skipped" ? "skipped" : viewParam === "waiting" ? "waiting" : viewParam === "all" || all === "1" ? "all" : "above";
   // 50 rows at a time; "Show more" raises the limit.
   const limit = Math.min(500, Math.max(PAGE, Number(n) || PAGE));
   const supabase = await createClient();
@@ -26,13 +29,16 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const rowsQuery =
     view === "skipped"
       ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "skipped").order("status_changed_at", { ascending: false })
-      : view === "all"
-        ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").order("score", { ascending: false })
-        : supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
-  const [{ data, error }, { count: scoredCount }, { count: aboveCount }] = await Promise.all([
+      : view === "waiting"
+        ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "new").order("first_seen_at", { ascending: false })
+        : view === "all"
+          ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").order("score", { ascending: false })
+          : supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
+  const [{ data, error }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }] = await Promise.all([
     rowsQuery.limit(limit + 1), // one extra row tells us whether there's more
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
+    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "new"),
   ]);
   if (error) throw new Error(error.message);
   const hasMore = (data?.length ?? 0) > limit;
@@ -47,7 +53,8 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         meta={
           <>
             <span className="mono text-[var(--fg)]">{above}</span> above your threshold of{" "}
-            <span className="mono">{threshold}</span> · <span className="mono">{scoredCount ?? 0}</span> scored
+            <span className="mono">{threshold}</span> · <span className="mono">{scoredCount ?? 0}</span> scored ·{" "}
+            <span className="mono">{waitingCount ?? 0}</span> waiting to be scored
           </>
         }
         actions={
@@ -55,6 +62,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
             options={[
               { href: "/", label: "Above threshold", active: view === "above" },
               { href: "/?view=all", label: "All scored", active: view === "all" },
+              { href: "/?view=waiting", label: "Waiting", active: view === "waiting" },
               { href: "/?view=skipped", label: "Skipped", active: view === "skipped" },
             ]}
           />
@@ -73,6 +81,8 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         {jobs.length === 0 ? (
           view === "skipped" ? (
             <Empty>Nothing skipped.</Empty>
+          ) : view === "waiting" ? (
+            <Empty>Nothing waiting to be scored.</Empty>
           ) : (
             <Empty>
               Nothing waiting.{" "}
@@ -83,7 +93,9 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
           )
         ) : (
           <ol className="divide">
-            {jobs.map((job, i) => (
+            {view === "waiting"
+              ? jobs.map((job, i) => <WaitingRow key={job.id} job={job} index={i + 1} />)
+              : jobs.map((job, i) => (
               <JobRow
                 key={job.id}
                 job={job}
@@ -144,14 +156,42 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
                 <SubmitButton className="btn">Restore</SubmitButton>
               </form>
             )}
-            <span className="btn">
-              <span className="group-open:hidden">Details</span>
-              <span className="hidden group-open:inline">Close</span>
-            </span>
+            <ExpandToggle />
           </div>
           </>
         }
       />
+    </li>
+  );
+}
+
+/**
+ * A listing that passed the filters and waits to be scored: no score or reasoning yet,
+ * so no decision either. It links to the posting.
+ */
+function WaitingRow({ job, index }: { job: Job; index: number }) {
+  return (
+    <li className="grid grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 lg:grid-cols-[28px_72px_1fr_200px_44px_150px]">
+      <span className="mono faint pt-0.5 text-[12px]">{pad2(index)}</span>
+      <span className="mono faint pt-0.5 text-[11px]">waiting</span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
+          {job.remote && <Pill tone="accent">Remote</Pill>}
+        </div>
+        <div className="muted mt-0.5 text-[12px]">
+          {job.company}
+          {job.compensation && <span className="mono"> · {job.compensation}</span>}
+        </div>
+      </div>
+      <div className="muted col-start-3 truncate text-[12px] lg:col-start-auto lg:pt-0.5">{job.location || "Location n/a"}</div>
+      <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(job.first_seen_at)}</span>
+      <div className="col-start-3 flex lg:col-start-auto lg:justify-end">
+        <a href={job.url} target="_blank" rel="noreferrer" className="btn btn-icon" title="Open posting">
+          <IconExternal />
+          <span className="sr-only">Open posting</span>
+        </a>
+      </div>
     </li>
   );
 }
