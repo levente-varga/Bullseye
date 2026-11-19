@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
-import { BSJ_DEFAULT_CATEGORY, HIMALAYAS_DEFAULT_QUERY, JOBINDEX_DEFAULT_QUERY, JOBSCH_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, MAGNETME_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, fetchBoard, locationNeedsDetail } from "@/lib/ats";
+import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
@@ -267,22 +267,6 @@ function normalizeSlug(ats: Ats, input: string): string {
   const raw = input.trim();
   const fixed = ATS_INFO[ats].fixedSlug;
   if (fixed) return fixed;
-  // JobTech and Himalayas: search parameters (bare, or from a URL); empty means the default search.
-  if (ats === "jobtech") return raw.replace(/^.*\?/, "").trim() || JOBTECH_DEFAULT_QUERY;
-  if (ats === "himalayas") return raw.replace(/^.*\?/, "").trim() || HIMALAYAS_DEFAULT_QUERY;
-  if (ats === "jobindex") return raw.replace(/^.*\?/, "").trim() || JOBINDEX_DEFAULT_QUERY;
-  if (ats === "magnetme") return raw.replace(/^.*\?/, "").trim() || MAGNETME_DEFAULT_QUERY;
-  if (ats === "jobsch") return raw.replace(/^.*\?/, "").trim() || JOBSCH_DEFAULT_QUERY;
-  // Berlin Startup Jobs: a category (bare or from a category URL), or "all".
-  if (ats === "berlinstartupjobs") {
-    const m = raw.match(/berlinstartupjobs\.com\/([a-z0-9-]+)/i);
-    return (m ? m[1] : raw.replace(/\/?feed\/?$/, "")).toLowerCase() || BSJ_DEFAULT_CATEGORY;
-  }
-  // We Work Remotely: a category (bare, or from a category URL or feed), or "all".
-  if (ats === "weworkremotely") {
-    const m = raw.match(/categories\/([a-z0-9-]+)/i);
-    return (m ? m[1] : raw.replace(/\.rss$/, "")).toLowerCase() || WWR_DEFAULT_CATEGORY;
-  }
   // Jobylon: the company id, bare or from a company/embed URL (a posting URL needs Auto-detect).
   if (ats === "jobylon") return raw.match(/companies\/(\d+)/)?.[1] ?? (/^\d+$/.test(raw) ? raw : "");
   const host = raw.replace(/^https?:\/\//, "").split(/[/?#]/)[0].toLowerCase();
@@ -333,16 +317,12 @@ export async function addSource(form: FormData) {
     name ||= ATS_INFO[ats].defaultName ?? slug;
   }
 
-  const { data: sub, error } = await supabase.rpc("subscribe_source", {
-    p_ats: ats!,
-    p_slug: slug!,
-    p_company_name: name,
-    p_country: str(form, "country").toLowerCase() || null,
-    p_watchlist: form.get("watchlist") === "on",
-  });
+  const { data: sub, error } = await supabase.rpc("subscribe_source", { p_ats: ats!, p_slug: slug!, p_company_name: name });
   check(error);
   if ((sub as { already?: boolean } | null)?.already) back({ error: `${name} is already one of your sources.` });
   revalidatePath("/sources");
+  // Following an aggregator from the catalog returns to that section.
+  if (ATS_INFO[ats!].aggregator) redirect(`/sources?${new URLSearchParams({ followed: name })}#aggregators`);
   back({
     added: `${name} · ${ATS_INFO[ats!].label}${jobCount !== null ? ` · ${jobCount} open ${jobCount === 1 ? "job" : "jobs"}` : ""}`,
   });

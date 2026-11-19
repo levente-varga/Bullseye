@@ -41,6 +41,19 @@ function decodeEntities(s: string): string {
 }
 
 const clip = (s: string) => s.slice(0, MAX_DESCRIPTION);
+
+/**
+ * Searchable aggregators run one search per term (built from their followers' target
+ * roles, see search-terms.ts), or one newest-first fetch when there are no terms.
+ * Results are merged by external id.
+ */
+async function perTerm(terms: string[] | undefined, search: (term: string | null) => Promise<FetchedJob[]>): Promise<FetchedJob[]> {
+  const out = new Map<string, FetchedJob>();
+  for (const term of terms?.length ? terms : [null]) {
+    for (const j of await search(term)) if (!out.has(j.external_id)) out.set(j.external_id, j);
+  }
+  return [...out.values()];
+}
 const looksRemote = (s: string) => /\bremote\b/i.test(s);
 
 async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
@@ -547,10 +560,10 @@ async function fetchPinpoint(host: string, company: string): Promise<FetchedJob[
 // (≈900 for the default) and the source is "partial": older ads aren't closed for
 // dropping out of the window.
 
-export const JOBTECH_DEFAULT_QUERY = "occupation-field=apaJ_2ja_LuF&occupation-field=9puE_nYg_crq";
 const JOBTECH_WINDOW_MINUTES = 7 * 24 * 60;
 const JOBTECH_PAGE = 100;
-const JOBTECH_MAX = 2000;
+/** Newest ads per search: plenty for the last week of one role. */
+const JOBTECH_MAX = 300;
 
 interface JobTechAd {
   id: string;
@@ -579,8 +592,13 @@ function jobTechUrl(ad: JobTechAd): string {
   }
 }
 
-async function fetchJobTech(query: string): Promise<FetchedJob[]> {
-  const base = new URLSearchParams(query || JOBTECH_DEFAULT_QUERY);
+async function fetchJobTech(terms?: string[]): Promise<FetchedJob[]> {
+  return perTerm(terms, (term) => searchJobTech(term));
+}
+
+async function searchJobTech(term: string | null): Promise<FetchedJob[]> {
+  const base = new URLSearchParams({ sort: "pubdate-desc" });
+  if (term) base.set("q", term);
   base.set("published-after", String(JOBTECH_WINDOW_MINUTES));
   base.set("limit", String(JOBTECH_PAGE));
   const out: FetchedJob[] = [];
@@ -678,8 +696,9 @@ function remoteWhere(places: string[]): string {
 // Himalayas: remote jobs worldwide (100k+), read through its search API so only matching
 // ads come in. Slug: search parameters, e.g. "q=developer&country=SE"; empty means
 // "q=developer". Newest first, at most 10 pages of 20 per run.
-export const HIMALAYAS_DEFAULT_QUERY = "q=developer";
-const HIMALAYAS_MAX_PAGES = 10;
+const HIMALAYAS_MAX_PAGES = 3;
+/** Its public API allows 60 requests a minute; one per second stays under it with many searches. */
+const HIMALAYAS_SPACING_MS = 1000;
 
 interface HimalayasJob {
   title: string;
@@ -696,12 +715,17 @@ interface HimalayasJob {
   guid: string;
 }
 
-async function fetchHimalayas(query: string): Promise<FetchedJob[]> {
-  const params = new URLSearchParams(query || HIMALAYAS_DEFAULT_QUERY);
-  if (!params.has("sort")) params.set("sort", "recent");
+async function fetchHimalayas(terms?: string[]): Promise<FetchedJob[]> {
+  return perTerm(terms, searchHimalayas);
+}
+
+async function searchHimalayas(term: string | null): Promise<FetchedJob[]> {
+  const params = new URLSearchParams({ sort: "recent" });
+  if (term) params.set("q", term);
   const out = new Map<string, FetchedJob>();
   for (let page = 1; page <= HIMALAYAS_MAX_PAGES; page++) {
     params.set("page", String(page));
+    await new Promise((r) => setTimeout(r, HIMALAYAS_SPACING_MS));
     const data = await getJson<{ totalCount?: number; jobs?: HimalayasJob[] }>(
       `https://himalayas.app/jobs/api/search?${params}`,
     );
@@ -785,11 +809,9 @@ async function fetchRemoteOk(): Promise<FetchedJob[]> {
 
 // We Work Remotely: remote jobs, mostly US; RSS of the latest ads. Slug: a category feed
 // (e.g. "remote-full-stack-programming-jobs"), or "all" for every category.
-export const WWR_DEFAULT_CATEGORY = "remote-full-stack-programming-jobs";
-
-async function fetchWeWorkRemotely(category: string): Promise<FetchedJob[]> {
-  const cat = category || WWR_DEFAULT_CATEGORY;
-  const url = cat === "all" ? "https://weworkremotely.com/remote-jobs.rss" : `https://weworkremotely.com/categories/${encodeURIComponent(cat)}.rss`;
+async function fetchWeWorkRemotely(): Promise<FetchedJob[]> {
+  // Every category: the whole feed is ~100 recent ads; followers' filters do the rest.
+  const url = "https://weworkremotely.com/remote-jobs.rss";
   const xml = await (await get(url, "application/rss+xml")).text();
   const items = xml.match(/<item>[\s\S]*?<\/item>/g) ?? [];
   return items.map((item) => {
@@ -953,11 +975,14 @@ async function fetchJobylon(companyId: string, company: string): Promise<Fetched
 // Jobindex: Denmark's largest job board, through its search RSS (20 a page). Slug: search
 // parameters, e.g. "q=developer"; empty means "q=developer". Titles read "Role, Company";
 // descriptions come from the posting later (the feed has a short teaser only).
-export const JOBINDEX_DEFAULT_QUERY = "q=developer";
-const JOBINDEX_MAX_PAGES = 5;
+const JOBINDEX_MAX_PAGES = 3;
 
-async function fetchJobindex(query: string): Promise<FetchedJob[]> {
-  const params = new URLSearchParams(query || JOBINDEX_DEFAULT_QUERY);
+async function fetchJobindex(terms?: string[]): Promise<FetchedJob[]> {
+  return perTerm(terms, searchJobindex);
+}
+
+async function searchJobindex(term: string | null): Promise<FetchedJob[]> {
+  const params = new URLSearchParams(term ? { q: term } : {});
   const out = new Map<string, FetchedJob>();
   for (let page = 1; page <= JOBINDEX_MAX_PAGES; page++) {
     params.set("page", String(page));
@@ -993,9 +1018,9 @@ async function fetchJobindex(query: string): Promise<FetchedJob[]> {
 // students and graduates. Its public API lists live postings (filtered, 100 a page) but
 // not company names: those, and the description, come from the posting page later.
 // Slug: filter parameters, e.g. "jobFunctions=IT"; empty means "jobFunctions=IT".
-export const MAGNETME_DEFAULT_QUERY = "jobFunctions=IT";
 const MAGNETME_PAGE = 100;
-const MAGNETME_MAX_PAGES = 60;
+/** All live postings (~27,000): Magnet.me has no text search, only fixed job categories. */
+const MAGNETME_MAX_PAGES = 400;
 
 interface MagnetOpportunity {
   id: number;
@@ -1007,9 +1032,8 @@ interface MagnetOpportunity {
 
 const slugify = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-async function fetchMagnetMe(query: string): Promise<FetchedJob[]> {
-  const params = new URLSearchParams(query || MAGNETME_DEFAULT_QUERY);
-  params.set("state", "PUBLISHED");
+async function fetchMagnetMe(): Promise<FetchedJob[]> {
+  const params = new URLSearchParams({ state: "PUBLISHED" });
   params.set("limit", String(MAGNETME_PAGE));
   const out: FetchedJob[] = [];
   for (let page = 0; page < MAGNETME_MAX_PAGES; page++) {
@@ -1039,12 +1063,11 @@ async function fetchMagnetMe(query: string): Promise<FetchedJob[]> {
 // Berlin Startup Jobs: a WordPress board for Berlin startups; RSS per category, 10-12 a
 // page. Slug: a category ("engineering", "design-ux", …) or "all". Titles read
 // "Role // Company"; the feed has a teaser only, so descriptions come from the postings.
-export const BSJ_DEFAULT_CATEGORY = "engineering";
-const BSJ_MAX_PAGES = 5;
+const BSJ_MAX_PAGES = 10;
 
-async function fetchBerlinStartupJobs(category: string): Promise<FetchedJob[]> {
-  const cat = category || BSJ_DEFAULT_CATEGORY;
-  const base = cat === "all" ? "https://berlinstartupjobs.com/feed/" : `https://berlinstartupjobs.com/${encodeURIComponent(cat)}/feed/`;
+async function fetchBerlinStartupJobs(): Promise<FetchedJob[]> {
+  // Every category, newest first; followers' filters do the rest.
+  const base = "https://berlinstartupjobs.com/feed/";
   const out = new Map<string, FetchedJob>();
   for (let page = 1; page <= BSJ_MAX_PAGES; page++) {
     let xml: string;
@@ -1135,8 +1158,7 @@ async function fetchLandingJobs(): Promise<FetchedJob[]> {
 // jobs.ch: Switzerland's largest job board, through its public search API (20 a page, up
 // to 10 pages). Slug: search parameters, e.g. "query=developer"; empty means that.
 // The search has a short preview only; descriptions come from the postings.
-export const JOBSCH_DEFAULT_QUERY = "query=developer";
-const JOBSCH_MAX_PAGES = 10;
+const JOBSCH_MAX_PAGES = 3;
 
 interface JobsChDoc {
   job_id: string;
@@ -1147,8 +1169,12 @@ interface JobsChDoc {
   _links?: { detail_en?: { href?: string }; detail_de?: { href?: string } };
 }
 
-async function fetchJobsCh(query: string): Promise<FetchedJob[]> {
-  const params = new URLSearchParams(query || JOBSCH_DEFAULT_QUERY);
+async function fetchJobsCh(terms?: string[]): Promise<FetchedJob[]> {
+  return perTerm(terms, searchJobsCh);
+}
+
+async function searchJobsCh(term: string | null): Promise<FetchedJob[]> {
+  const params = new URLSearchParams(term ? { query: term } : {});
   const out = new Map<string, FetchedJob>();
   for (let page = 1; page <= JOBSCH_MAX_PAGES; page++) {
     params.set("page", String(page));
@@ -1183,7 +1209,12 @@ export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\
  */
 export const locationNeedsDetail = (url: string) => workdayFromUrl(url) !== null || isJobylonPosting(url);
 
-export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" | "country">): Promise<FetchedJob[]> {
+/**
+ * Fetches a source's current listings. `terms` are the searches for searchable aggregators
+ * (ATS_INFO[ats].searchable), built from their followers' target roles; without them,
+ * those fetch their newest listings.
+ */
+export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" | "country">, terms?: string[]): Promise<FetchedJob[]> {
   const { ats, slug, company_name: company } = source;
   switch (ats) {
     case "greenhouse":
@@ -1209,31 +1240,31 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
     case "jobylon":
       return fetchJobylon(slug, company);
     case "jobtech":
-      return fetchJobTech(slug);
+      return fetchJobTech(terms);
     case "swedengamejobs":
       return fetchSwedenGameJobs();
     case "himalayas":
-      return fetchHimalayas(slug);
+      return fetchHimalayas(terms);
     case "workingnomads":
       return fetchWorkingNomads();
     case "remoteok":
       return fetchRemoteOk();
     case "weworkremotely":
-      return fetchWeWorkRemotely(slug);
+      return fetchWeWorkRemotely();
     case "arbeitnow":
       return fetchArbeitnow();
     case "workwithindies":
       return fetchWorkWithIndies();
     case "jobindex":
-      return fetchJobindex(slug);
+      return fetchJobindex(terms);
     case "magnetme":
-      return fetchMagnetMe(slug);
+      return fetchMagnetMe();
     case "berlinstartupjobs":
-      return fetchBerlinStartupJobs(slug);
+      return fetchBerlinStartupJobs();
     case "landingjobs":
       return fetchLandingJobs();
     case "jobsch":
-      return fetchJobsCh(slug);
+      return fetchJobsCh(terms);
   }
 }
 
@@ -1251,18 +1282,17 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   jobylon: (s) => `https://emp.jobylon.com/companies/${s}/`,
   jobtech: () => "https://arbetsformedlingen.se/platsbanken/",
   swedengamejobs: () => "https://www.swedengamejobs.com/",
-  himalayas: (q) => `https://himalayas.app/jobs?${new URLSearchParams(q)}`,
+  himalayas: () => "https://himalayas.app/jobs",
   workingnomads: () => "https://www.workingnomads.com/jobs",
   remoteok: () => "https://remoteok.com/",
-  weworkremotely: (c) =>
-    c === "all" ? "https://weworkremotely.com/" : `https://weworkremotely.com/categories/${c || WWR_DEFAULT_CATEGORY}`,
+  weworkremotely: () => "https://weworkremotely.com/",
   arbeitnow: () => "https://www.arbeitnow.com/",
   workwithindies: () => "https://www.workwithindies.com/",
-  jobindex: (q) => `https://www.jobindex.dk/jobsoegning?${new URLSearchParams(q || JOBINDEX_DEFAULT_QUERY)}`,
+  jobindex: () => "https://www.jobindex.dk/jobsoegning",
   magnetme: () => "https://magnet.me/en/opportunities",
-  berlinstartupjobs: (c) => (c === "all" ? "https://berlinstartupjobs.com/" : `https://berlinstartupjobs.com/${c || BSJ_DEFAULT_CATEGORY}/`),
+  berlinstartupjobs: () => "https://berlinstartupjobs.com/",
   landingjobs: () => "https://landing.jobs/jobs",
-  jobsch: (q) => `https://www.jobs.ch/en/vacancies/?${new URLSearchParams(q || JOBSCH_DEFAULT_QUERY).toString().replace("query=", "term=")}`,
+  jobsch: () => "https://www.jobs.ch/en/vacancies/",
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */
