@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ErrorDetailsText } from "@/components/ErrorDetails";
-import { IconChevronDown, IconEye, IconPause, IconPlay, IconUnfollow } from "@/components/icons";
+import { IconChevronDown, IconMinus, IconPause, IconPlay, IconPlus, IconStar } from "@/components/icons";
 import { AddBoardForm } from "@/components/AddBoardForm";
 import { Notice } from "@/components/Notice";
 import { SourceName } from "@/components/SourceName";
@@ -135,11 +135,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                         <span className="muted"> · {ATS_INFO[a].blurb}</span>
                         {ATS_INFO[a].searchable && <span className="faint"> · searched for your target roles</span>}
                       </div>
-                      <form action={addSource}>
+                      <form action={addSource} title="Follow">
                         <input type="hidden" name="ats" value={a} />
                         <input type="hidden" name="slug" value="" />
-                        <SubmitButton className="btn" done="Following">
-                          Follow
+                        <SubmitButton className="btn btn-icon" aria-label={`Follow ${ATS_INFO[a].defaultName}`}>
+                          <IconPlus />
                         </SubmitButton>
                       </form>
                     </li>
@@ -300,7 +300,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   <form action={deleteSource} title="Unfollow">
                     <input type="hidden" name="id" value={s.id} />
                     <SubmitButton className="btn btn-icon" aria-label={`Unfollow ${s.company_name}`}>
-                      <IconUnfollow />
+                      <IconMinus />
                     </SubmitButton>
                   </form>
                 </div>
@@ -374,8 +374,8 @@ function SortHeader(props: { sort: Sort; by: SortKey; className?: string; right?
 }
 
 /**
- * An icon button that sets one subscription field. `on` highlights it (watching, paused);
- * `value` is what a click saves. The label is for screen readers, the title for hover.
+ * An icon button that sets one subscription field. Its icon shows the state (a filled
+ * star, a play icon); `on` is that state for screen readers, `value` what a click saves. The label is for screen readers, the title for hover.
  */
 function Toggle(props: { id: string; field: string; on: boolean; value: boolean; label: string; title: string; icon: ReactNode }) {
   return (
@@ -384,7 +384,7 @@ function Toggle(props: { id: string; field: string; on: boolean; value: boolean;
       <input type="hidden" name="field" value={props.field} />
       <input type="hidden" name="value" value={String(props.value)} />
       <SubmitButton
-        className={`btn btn-icon ${props.on ? "border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--accent-strong)]" : ""}`}
+        className="btn btn-icon"
         aria-label={props.label}
         aria-pressed={props.on}
       >
@@ -440,7 +440,7 @@ function WatchToggle({ source, watchEvery }: { source: Source; watchEvery: numbe
     return (
       <span title={`${mode.label} sources take too many requests to check at the watchlist interval.`}>
         <button type="button" className="btn btn-icon" disabled aria-label="Watch (not available)">
-          <IconEye />
+          <IconStar />
         </button>
       </span>
     );
@@ -459,7 +459,7 @@ function WatchToggle({ source, watchEvery }: { source: Source; watchEvery: numbe
       value={!source.watchlist}
       label={source.watchlist ? "Unwatch" : "Watch"}
       title={title}
-      icon={<IconEye />}
+      icon={<IconStar filled={source.watchlist} className={source.watchlist ? "text-[var(--accent-strong)]" : undefined} />}
     />
   );
 }
