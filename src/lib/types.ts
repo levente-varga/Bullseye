@@ -10,6 +10,7 @@ export type Ats =
   | "workday"
   | "pinpoint"
   | "jobylon"
+  | "apple"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -24,8 +25,27 @@ export type Ats =
   | "landingjobs"
   | "jobsch";
 
+/**
+ * How a source type fetches its listings, which decides what it costs to run: requests,
+ * time and load on the site (fetching is free; AI scoring is counted separately).
+ */
+export type FetchMode = "board" | "paged" | "feed" | "search" | "newest";
+
+export const FETCH_MODES: Record<FetchMode, { label: string; how: string; watchable: boolean }> = {
+  board: { label: "Whole board", how: "The full list in one request.", watchable: true },
+  paged: { label: "Paged", how: "The full list, page by page: many requests for a big board.", watchable: false },
+  feed: { label: "Feed", how: "A feed of recent postings: one request or a few.", watchable: true },
+  search: { label: "Search", how: "One search per target role, a few pages each: grows with your roles.", watchable: false },
+  newest: {
+    label: "Newest first",
+    how: "Reads the newest postings back to the last successful check: a few requests on a normal day.",
+    watchable: true,
+  },
+};
+
 /** How each source type is configured on the Sources page. */
 /**
+ * fetch: how it fetches (FETCH_MODES).
  * aggregator: lists other companies' jobs (runs after direct sources, never overrides them).
  * suggests: its links are mined for direct sources to suggest.
  * partial: only shows recent ads, so ads missing from it aren't closed.
@@ -42,6 +62,7 @@ export const ATS_INFO: Record<
     label: string;
     slugLabel: string;
     slugExample: string;
+    fetch: FetchMode;
     aggregator?: boolean;
     suggests?: boolean;
     partial?: boolean;
@@ -51,18 +72,29 @@ export const ATS_INFO: Record<
     blurb?: string;
   }
 > = {
-  greenhouse: { label: "Greenhouse", slugLabel: "Board slug or URL", slugExample: "job-boards.greenhouse.io/mojangab" },
-  lever: { label: "Lever", slugLabel: "Board slug or URL", slugExample: "jobs.lever.co/avalanchestudios" },
-  ashby: { label: "Ashby", slugLabel: "Board slug or URL", slugExample: "jobs.ashbyhq.com/voodoo" },
-  teamtailor: { label: "Teamtailor", slugLabel: "Career site domain", slugExample: "career.paradoxplaza.com" },
-  smartrecruiters: { label: "SmartRecruiters", slugLabel: "Company identifier or URL", slugExample: "jobs.smartrecruiters.com/Ubisoft2" },
-  personio: { label: "Personio", slugLabel: "Career site URL", slugExample: "personio.jobs.personio.de" },
-  recruitee: { label: "Recruitee", slugLabel: "Career site URL", slugExample: "bunq.recruitee.com" },
-  workable: { label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
-  workday: { label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
-  pinpoint: { label: "Pinpoint", slugLabel: "Career site URL", slugExample: "workwithus.pinpointhq.com" },
-  jobylon: { label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
+  greenhouse: { fetch: "board", label: "Greenhouse", slugLabel: "Board slug or URL", slugExample: "job-boards.greenhouse.io/mojangab" },
+  lever: { fetch: "board", label: "Lever", slugLabel: "Board slug or URL", slugExample: "jobs.lever.co/avalanchestudios" },
+  ashby: { fetch: "board", label: "Ashby", slugLabel: "Board slug or URL", slugExample: "jobs.ashbyhq.com/voodoo" },
+  teamtailor: { fetch: "board", label: "Teamtailor", slugLabel: "Career site domain", slugExample: "career.paradoxplaza.com" },
+  smartrecruiters: { fetch: "paged", label: "SmartRecruiters", slugLabel: "Company identifier or URL", slugExample: "jobs.smartrecruiters.com/Ubisoft2" },
+  personio: { fetch: "board", label: "Personio", slugLabel: "Career site URL", slugExample: "personio.jobs.personio.de" },
+  recruitee: { fetch: "board", label: "Recruitee", slugLabel: "Career site URL", slugExample: "bunq.recruitee.com" },
+  workable: { fetch: "board", label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
+  workday: { fetch: "paged", label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
+  pinpoint: { fetch: "board", label: "Pinpoint", slugLabel: "Career site URL", slugExample: "workwithus.pinpointhq.com" },
+  jobylon: { fetch: "board", label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
+  apple: {
+    fetch: "newest",
+    label: "Apple",
+    slugLabel: "—",
+    slugExample: "jobs.apple.com",
+    fixedSlug: "apple",
+    // Reads only recent postings, so one missing from them isn't closed.
+    partial: true,
+    defaultName: "Apple",
+  },
   jobtech: {
+    fetch: "search",
     label: "JobTech / Platsbanken (aggregator)",
     slugLabel: "—",
     slugExample: "platsbanken",
@@ -74,6 +106,7 @@ export const ATS_INFO: Record<
     blurb: "Sweden's public job board, every employer",
   },
   swedengamejobs: {
+    fetch: "board",
     label: "Sweden Game Jobs (aggregator)",
     slugLabel: "—",
     slugExample: "swedengamejobs.com",
@@ -84,6 +117,7 @@ export const ATS_INFO: Record<
     blurb: "Swedish game studios",
   },
   himalayas: {
+    fetch: "search",
     label: "Himalayas (aggregator)",
     slugLabel: "—",
     slugExample: "himalayas.app",
@@ -95,6 +129,7 @@ export const ATS_INFO: Record<
     blurb: "Remote jobs worldwide",
   },
   workingnomads: {
+    fetch: "board",
     label: "Working Nomads (aggregator)",
     slugLabel: "—",
     slugExample: "workingnomads.com",
@@ -105,6 +140,7 @@ export const ATS_INFO: Record<
     blurb: "Remote jobs, many open to Europe",
   },
   remoteok: {
+    fetch: "feed",
     label: "Remote OK (aggregator)",
     slugLabel: "—",
     slugExample: "remoteok.com",
@@ -115,6 +151,7 @@ export const ATS_INFO: Record<
     blurb: "Remote jobs, mostly US",
   },
   weworkremotely: {
+    fetch: "feed",
     label: "We Work Remotely (aggregator)",
     slugLabel: "—",
     slugExample: "weworkremotely.com",
@@ -125,6 +162,7 @@ export const ATS_INFO: Record<
     blurb: "Remote jobs, mostly US",
   },
   arbeitnow: {
+    fetch: "paged",
     label: "Arbeitnow (aggregator)",
     slugLabel: "—",
     slugExample: "arbeitnow.com",
@@ -135,6 +173,7 @@ export const ATS_INFO: Record<
     blurb: "Europe, mostly Germany",
   },
   workwithindies: {
+    fetch: "board",
     label: "Work With Indies (aggregator)",
     slugLabel: "—",
     slugExample: "workwithindies.com",
@@ -144,6 +183,7 @@ export const ATS_INFO: Record<
     blurb: "Indie game studios worldwide",
   },
   jobindex: {
+    fetch: "search",
     label: "Jobindex (aggregator)",
     slugLabel: "—",
     slugExample: "jobindex.dk",
@@ -155,6 +195,7 @@ export const ATS_INFO: Record<
     blurb: "Denmark's largest job board",
   },
   magnetme: {
+    fetch: "paged",
     label: "Magnet.me (aggregator)",
     slugLabel: "—",
     slugExample: "magnet.me",
@@ -165,6 +206,7 @@ export const ATS_INFO: Record<
     blurb: "Netherlands and Belgium, students and graduates",
   },
   berlinstartupjobs: {
+    fetch: "feed",
     label: "Berlin Startup Jobs (aggregator)",
     slugLabel: "—",
     slugExample: "berlinstartupjobs.com",
@@ -175,6 +217,7 @@ export const ATS_INFO: Record<
     blurb: "Startups in Berlin",
   },
   landingjobs: {
+    fetch: "paged",
     label: "Landing.jobs (aggregator)",
     slugLabel: "—",
     slugExample: "landing.jobs",
@@ -184,6 +227,7 @@ export const ATS_INFO: Record<
     blurb: "Tech jobs in Portugal and Europe",
   },
   jobsch: {
+    fetch: "search",
     label: "jobs.ch (aggregator)",
     slugLabel: "—",
     slugExample: "jobs.ch",
@@ -317,6 +361,10 @@ export interface Source {
   last_error: string | null;
   /** Listings returned by the last successful check (an aggregator dropping to 0 is flagged). */
   last_job_count: number | null;
+  /** HTTP requests the last successful fetch made. */
+  last_request_count: number | null;
+  /** When a fetch last succeeded (Apple reads back to here). */
+  last_success_at?: string | null;
   /** Optional ISO country code filter (SmartRecruiters). */
   country: string | null;
 }

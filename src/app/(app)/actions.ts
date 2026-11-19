@@ -10,6 +10,7 @@ import { hardFilter } from "@/lib/filters";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import {
   ATS_INFO,
+  FETCH_MODES,
   DEFAULT_SCORING_MODEL,
   SCORING_MODELS,
   WATCH_INTERVALS,
@@ -352,6 +353,12 @@ export async function updateSource(form: FormData) {
   const supabase = await db();
   const field = str(form, "field");
   if (field !== "watchlist" && field !== "enabled") return;
+  // Paged and search sources are too expensive to fetch at the watchlist interval.
+  if (field === "watchlist" && str(form, "value") === "true") {
+    const { data } = await supabase.from("my_sources").select("ats").eq("id", str(form, "id")).single();
+    const ats = data?.ats as Ats | undefined;
+    if (!ats || !FETCH_MODES[ATS_INFO[ats].fetch].watchable) return;
+  }
   check(
     (await supabase.from("subscriptions").update({ [field]: str(form, "value") === "true" }).eq("source_id", str(form, "id"))).error,
   );

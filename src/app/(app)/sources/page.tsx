@@ -7,7 +7,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
-import { ATS_INFO, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
+import { ATS_INFO, FETCH_MODES, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
 /** "Greenhouse, Lever, … and Jobylon": the company job systems auto-detect recognises. */
@@ -27,10 +27,12 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   const added = typeof sp.added === "string" ? sp.added : null;
   const addError = typeof sp.error === "string" ? sp.error : null;
   const supabase = await createClient();
-  const [{ data, error }, { data: sugg }] = await Promise.all([
+  const [{ data, error }, { data: sugg }, { data: settings }] = await Promise.all([
     supabase.from("my_sources").select("*").order("company_name"),
     supabase.from("source_suggestions").select("*").eq("status", "new").order("job_count", { ascending: false }),
+    supabase.from("settings").select("watch_interval_minutes").single(),
   ]);
+  const watchEvery = (settings?.watch_interval_minutes as number | undefined) ?? 0;
   if (error) throw new Error(error.message);
   const sources = data as Source[];
   const suggestions = (sugg ?? []) as SourceSuggestion[];
@@ -85,7 +87,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {boards.length === 0 ? (
               <Empty>No company boards yet. Paste a careers page below, or pick from the suggestions.</Empty>
             ) : (
-              <SourceTable rows={boards} open={open} sort={sort} />
+              <SourceTable rows={boards} open={open} sort={sort} watchEvery={watchEvery} />
             )}
           </Panel>
           <div id="add" className="scroll-mt-6">
@@ -127,7 +129,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {aggregators.length === 0 ? (
               <Empty>No aggregators yet.</Empty>
             ) : (
-              <SourceTable rows={aggregators} open={open} sort={sort} aggregators />
+              <SourceTable rows={aggregators} open={open} sort={sort} watchEvery={watchEvery} aggregators />
             )}
           </Panel>
           <p className="faint mt-2 text-[12px]">
@@ -223,7 +225,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 }
 
 /** One table of sources (company boards or aggregators), with health, counts and actions. */
-function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort: Sort; aggregators?: boolean }) {
+function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort: Sort; watchEvery: number; aggregators?: boolean }) {
   return (
     <div className="md:overflow-x-auto">
       <table className="table table-stack max-md:block md:min-w-[720px]">
@@ -237,6 +239,9 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                 Type
               </SortHeader>
             )}
+            <SortHeader sort={props.sort} by="requests" className="w-32">
+              Fetch
+            </SortHeader>
             <SortHeader sort={props.sort} by="open" className="w-20" right>
               Open
             </SortHeader>
@@ -268,7 +273,8 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
                   {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
                 </div>
-                {(!ATS_INFO[s.ats]?.aggregator || (!ATS_INFO[s.ats]?.fixedSlug && s.ats !== "jobtech")) && (
+                {/* A fixed slug (aggregators, Apple) says nothing: only a configured board shows its slug. */}
+                {!ATS_INFO[s.ats]?.fixedSlug && (
                   <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
                     {s.slug}
                     {s.country && ` · ${s.country.toUpperCase()} only`}
@@ -285,12 +291,15 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{(ATS_INFO[s.ats]?.label ?? s.ats).replace(" (aggregator)", "")}</Pill>
                 </td>
               )}
+              <td data-label="Fetch">
+                <FetchCell source={s} />
+              </td>
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
               <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
               {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
               <td className="max-md:w-full md:w-px md:whitespace-nowrap">
                 <div className="flex flex-wrap gap-1.5 md:flex-nowrap md:justify-end">
-                  <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />
+                  <WatchToggle source={s} watchEvery={props.watchEvery} />
                   <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
                   <form action={deleteSource}>
                     <input type="hidden" name="id" value={s.id} />
@@ -310,11 +319,11 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
 // Click a column header to sort both tables by it; click again to reverse. Kept in the
 // URL (?sort=open&dir=desc), so it survives reloads and needs no client code.
 
-type SortKey = "name" | "type" | "open" | "checked";
+type SortKey = "name" | "type" | "requests" | "open" | "checked";
 type Sort = { by: SortKey; dir: "asc" | "desc" };
-const SORT_KEYS: SortKey[] = ["name", "type", "open", "checked"];
+const SORT_KEYS: SortKey[] = ["name", "type", "requests", "open", "checked"];
 /** Numbers and dates read best largest/newest first; names A to Z. */
-const FIRST_DIR: Record<SortKey, Sort["dir"]> = { name: "asc", type: "asc", open: "desc", checked: "desc" };
+const FIRST_DIR: Record<SortKey, Sort["dir"]> = { name: "asc", type: "asc", requests: "desc", open: "desc", checked: "desc" };
 
 function parseSort(by: unknown, dir: unknown): Sort {
   const key = SORT_KEYS.includes(by as SortKey) ? (by as SortKey) : "open"; // most open listings first
@@ -328,6 +337,8 @@ function sortSources(rows: Source[], sort: Sort, open: Record<string, number>): 
         return s.company_name.toLowerCase();
       case "type":
         return (ATS_INFO[s.ats]?.label ?? s.ats).toLowerCase();
+      case "requests":
+        return s.last_request_count ?? -1; // not measured yet sorts as cheapest
       case "open":
         return open[s.id] ?? 0;
       case "checked":
@@ -364,13 +375,51 @@ function SortHeader(props: { sort: Sort; by: SortKey; className?: string; right?
   );
 }
 
-function Toggle(props: { id: string; field: string; on: boolean; onLabel: string; offLabel: string }) {
+function Toggle(props: { id: string; field: string; on: boolean; onLabel: string; offLabel: string; title?: string }) {
   return (
-    <form action={updateSource}>
+    <form action={updateSource} title={props.title}>
       <input type="hidden" name="id" value={props.id} />
       <input type="hidden" name="field" value={props.field} />
       <input type="hidden" name="value" value={String(!props.on)} />
       <SubmitButton className="btn">{props.on ? props.onLabel : props.offLabel}</SubmitButton>
     </form>
   );
+}
+
+/** How a source fetches, and how many requests its last fetch took. */
+function FetchCell({ source }: { source: Source }) {
+  const mode = FETCH_MODES[ATS_INFO[source.ats]?.fetch ?? "board"];
+  const n = source.last_request_count;
+  return (
+    <div className="text-[12px]" title={mode.how}>
+      <div>{mode.label}</div>
+      <div className="mono faint whitespace-nowrap" title={n == null ? "Measured on its next fetch" : undefined}>
+        {n == null ? "–" : `${n} ${n === 1 ? "request" : "requests"}`}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Watch, with what it costs at the watchlist interval. Paged and search sources can't be
+ * watched (a few hundred requests every check); one watched before keeps its Unwatch.
+ */
+function WatchToggle({ source, watchEvery }: { source: Source; watchEvery: number }) {
+  const mode = FETCH_MODES[ATS_INFO[source.ats]?.fetch ?? "board"];
+  if (!mode.watchable && !source.watchlist) {
+    return (
+      <button type="button" className="btn" disabled title={`${mode.label} sources take too many requests to check at the watchlist interval.`}>
+        Watch
+      </button>
+    );
+  }
+  const perDay = watchEvery > 0 && source.last_request_count != null ? Math.round((source.last_request_count * 1440) / watchEvery) : null;
+  const title = source.watchlist
+    ? undefined
+    : watchEvery === 0
+      ? "The watchlist check is off (Criteria)."
+      : perDay != null
+        ? `About ${perDay} requests a day at the watchlist interval.`
+        : undefined;
+  return <Toggle id={source.id} field="watchlist" on={source.watchlist} onLabel="Unwatch" offLabel="Watch" title={title} />;
 }
