@@ -29,6 +29,9 @@ Checked on 2026-11-20.
 | Digital Sun | digitalsungames.com/jobs/ | WordPress: links on the jobs page (9 at the time); its jobs feed is empty; apply through its own system | From each job page (no structured data) |
 | Original Games | originalgames.io/careers | Tilda site, one page per job (e.g. `/marketing_data_analyst`); apply by email | From each job page (no structured data) |
 | Kaiko | kaikogames.com/jobs.html | Static site: `jobs.html` links one page per job (`job_anm.html`); apply by email | From each job page |
+| GameXcite | gamexcite.de/jobs | Wix site: links on the jobs page (7 at the time); apply by email | From each job page |
+| Hello Games | hellogames.org (e.g. `/jobs/build-engineer`) | One page per job; `/jobs` itself is a 404, so the list lives elsewhere; apply by email | From each job page |
+| Mighty Koi | mighty-koi.com/careers | Its own site and application form; the careers page shows no job links (likely added by JavaScript) | From each job page |
 | Bohemia Interactive | careers.bohemia.net/en/open-positions | Links on the careers page or `sitemap.xml` (7 at the time) | Titles only: the job pages render in the browser, and `robots.txt` disallows `/api/` |
 
 ## Not covered by it
