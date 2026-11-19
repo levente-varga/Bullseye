@@ -19,6 +19,7 @@ import { fetchBoard, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
+import { searchTerms } from "../src/lib/search-terms";
 import { costUsd } from "../src/lib/pricing";
 import { dueNow } from "../src/lib/schedule";
 import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "../src/lib/scoring";
@@ -254,9 +255,12 @@ async function syncSource(
   const stats = { fetched: 0, inserted: 0, closed: 0, duplicates: 0, adopted: 0, described: 0, stale: 0 };
   const subscribers = followers(people, source.id);
   const isAggregator = Boolean(ATS_INFO[source.ats]?.aggregator);
+  // A searchable aggregator is searched for its followers' target roles (too big to fetch whole).
+  const terms = ATS_INFO[source.ats]?.searchable ? searchTerms(subscribers.map((p) => p.criteria.roles)) : undefined;
+  if (terms) console.log(`[${source.company_name}] searching: ${terms.length ? terms.join(", ") : "(no target roles: newest listings)"}`);
   let fetched: (FetchedJob & { dedupe_key: string })[];
   try {
-    fetched = (await fetchBoard(source)).map((j) => ({ ...j, dedupe_key: dedupeKey(j.url) }));
+    fetched = (await fetchBoard(source, terms)).map((j) => ({ ...j, dedupe_key: dedupeKey(j.url) }));
     // A company board can really have no openings, but an aggregator going from some
     // listings to none almost always means its site changed and the adapter reads nothing.
     if (isAggregator && fetched.length === 0 && (source.last_job_count ?? 0) > 0) {

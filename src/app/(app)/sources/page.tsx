@@ -9,6 +9,14 @@ import { agoText, pad2 } from "@/lib/time";
 import { ATS_INFO, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
+/** The company job systems a board can be added for (aggregators are followed from the catalog). */
+const COMPANY_SYSTEMS = (Object.keys(ATS_INFO) as Ats[]).filter((a) => !ATS_INFO[a].aggregator);
+/** "Platsbanken, Himalayas, Jobindex and jobs.ch" */
+const SEARCHABLE_NAMES = (() => {
+  const names = (Object.keys(ATS_INFO) as Ats[]).filter((a) => ATS_INFO[a].searchable).map((a) => ATS_INFO[a].defaultName ?? a);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join("");
+})();
+
 export default async function SourcesPage({ searchParams }: PageProps<"/sources">) {
   const sp = await searchParams;
   const sort = parseSort(sp.sort, sp.dir);
@@ -78,8 +86,13 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           </Panel>
         </section>
 
-        <section>
+        <section id="aggregators" className="scroll-mt-6">
           <SectionHeader title="Aggregators" count={aggregators.length} />
+          {typeof sp.followed === "string" && (
+            <Notice key={crypto.randomUUID()} tone="ok" params={["followed"]}>
+              Following {sp.followed}. Its listings arrive with the next daily run.
+            </Notice>
+          )}
           <Panel>
             {aggregators.length === 0 ? (
               <Empty>No aggregators yet.</Empty>
@@ -87,18 +100,38 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
               <SourceTable rows={aggregators} open={open} sort={sort} aggregators />
             )}
           </Panel>
+          <p className="faint mt-2 text-[12px]">
+            {SEARCHABLE_NAMES} are searched for your target roles; the others are read whole.
+          </p>
           {missingAggregators.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[13px]">
-              {missingAggregators.map((a) => (
-                <form key={a} action={addSource}>
-                  <input type="hidden" name="ats" value={a} />
-                  <input type="hidden" name="slug" value="" />
-                  <SubmitButton className="btn" done="Added">
-                    <span title={ATS_INFO[a].blurb}>+ {ATS_INFO[a].defaultName}</span>
-                  </SubmitButton>
-                </form>
-              ))}
-            </div>
+            <details className="group mt-4" open={aggregators.length === 0}>
+              <summary className="link mb-2 cursor-pointer list-none text-[13px] [&::-webkit-details-marker]:hidden">
+                <span className="group-open:hidden">Browse {missingAggregators.length} more aggregators</span>
+                <span className="hidden group-open:inline">Hide the catalog</span>
+              </summary>
+              <Panel>
+                <ul className="divide">
+                  {missingAggregators.map((a) => (
+                    <li key={a} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5 text-[13px]">
+                      <div className="min-w-0 flex-1">
+                        <a href={ATS_BOARD_URL[a]("")} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+                          {ATS_INFO[a].defaultName}
+                        </a>
+                        <span className="muted"> · {ATS_INFO[a].blurb}</span>
+                        {ATS_INFO[a].searchable && <span className="faint"> · searched for your target roles</span>}
+                      </div>
+                      <form action={addSource}>
+                        <input type="hidden" name="ats" value={a} />
+                        <input type="hidden" name="slug" value="" />
+                        <SubmitButton className="btn" done="Following">
+                          Follow
+                        </SubmitButton>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            </details>
           )}
         </section>
 
@@ -155,7 +188,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         )}
 
         <section id="add" className="scroll-mt-6">
-          <SectionHeader title="Add a source" />
+          <SectionHeader title="Add a company board" />
           {added && (
             <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
               Added {added}
@@ -172,7 +205,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 <span className="label">Type</span>
                 <select name="ats" className="input" defaultValue="auto">
                   <option value="auto">Auto-detect from URL</option>
-                  {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
+                  {COMPANY_SYSTEMS.map((a) => (
                     <option key={a} value={a}>{ATS_INFO[a].label}</option>
                   ))}
                 </select>
@@ -186,16 +219,8 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 <input name="company_name" className="input" placeholder="Guessed if empty" />
               </label>
             </div>
-            <div className="flex flex-wrap items-center gap-4 border-t border-[var(--border)] px-3 py-2.5">
-              <label className="flex items-center gap-2 text-[13px]">
-                <span className="muted">Country</span>
-                <input name="country" className="input mono w-16" placeholder="se" maxLength={2} />
-              </label>
-              <label className="flex items-center gap-2 text-[13px]">
-                <input type="checkbox" name="watchlist" />
-                <span className="muted">Watchlist (hourly + instant email)</span>
-              </label>
-              <SubmitButton className="btn-primary ml-auto">Add source</SubmitButton>
+            <div className="flex justify-end border-t border-[var(--border)] px-3 py-2.5">
+              <SubmitButton className="btn-primary">Add board</SubmitButton>
             </div>
             <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
               <summary className="faint cursor-pointer">How does this work?</summary>
@@ -203,22 +228,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                 With <b>Auto-detect</b>, paste a careers page or any job posting. Otherwise pick the type and enter:
               </p>
               <ul className="muted mt-2 grid gap-1 sm:grid-cols-2">
-                {(Object.keys(ATS_INFO) as Ats[]).map((a) => (
+                {COMPANY_SYSTEMS.map((a) => (
                   <li key={a}>
-                    {ATS_INFO[a].label}:{" "}
-                    {ATS_INFO[a].fixedSlug ? (
-                      <span className="faint">leave empty</span>
-                    ) : (
-                      <>
-                        <code className="mono faint">{ATS_INFO[a].slugExample}</code>
-                        {a === "jobtech" && <span className="faint"> (or leave empty for IT + design jobs)</span>}
-                        {a === "himalayas" && <span className="faint"> (or leave empty for “developer”)</span>}
-                        {a === "weworkremotely" && <span className="faint"> (or empty for full-stack, “all” for everything)</span>}
-                      </>
-                    )}
+                    {ATS_INFO[a].label}: <code className="mono faint">{ATS_INFO[a].slugExample}</code>
                   </li>
                 ))}
-                <li>The country filter (two letters) only applies to SmartRecruiters.</li>
               </ul>
             </details>
           </form>
@@ -301,7 +315,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
                   <form action={deleteSource}>
                     <input type="hidden" name="id" value={s.id} />
-                    <SubmitButton className="btn btn-danger">Remove</SubmitButton>
+                    <SubmitButton className="btn">Unfollow</SubmitButton>
                   </form>
                 </div>
               </td>
