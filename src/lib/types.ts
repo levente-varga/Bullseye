@@ -17,7 +17,9 @@ export type Ats =
   | "remoteok"
   | "weworkremotely"
   | "arbeitnow"
-  | "workwithindies";
+  | "workwithindies"
+  | "jobindex"
+  | "magnetme";
 
 /** How each source type is configured on the Sources page. */
 /**
@@ -128,6 +130,24 @@ export const ATS_INFO: Record<
     fixedSlug: "workwithindies.com",
     defaultName: "Work With Indies",
     blurb: "Indie game studios worldwide",
+  },
+  jobindex: {
+    label: "Jobindex (aggregator)",
+    slugLabel: "Search parameters (optional)",
+    slugExample: "q=developer",
+    aggregator: true,
+    partial: true,
+    defaultName: "Jobindex",
+    blurb: "Denmark's largest job board",
+  },
+  magnetme: {
+    label: "Magnet.me (aggregator)",
+    slugLabel: "Filter parameters (optional)",
+    slugExample: "jobFunctions=IT",
+    aggregator: true,
+    partial: true,
+    defaultName: "Magnet.me",
+    blurb: "Netherlands and Belgium, students and graduates",
   },
 };
 

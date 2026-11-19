@@ -24,7 +24,7 @@ const CLOSED_RE =
 export async function describe(
   source: Pick<Source, "ats" | "slug">,
   job: { external_id: string; url: string },
-): Promise<{ text: string; location?: string }> {
+): Promise<{ text: string; location?: string; company?: string }> {
   if (source.ats === "smartrecruiters") {
     return { text: await fetchSmartRecruitersDescription(source.slug, job.external_id) };
   }
@@ -35,8 +35,14 @@ export async function describe(
     const { text, location } = await fetchWorkdayPosting(wd.slug, wd.path);
     return { text, location: location || undefined };
   }
-  // Jobylon lists name the city only; the posting's structured data adds the country.
+  // Jobylon lists name the city only: the posting's structured data adds the country.
   if (isJobylonPosting(job.url)) return describePage(job.url);
+  // Magnet.me's API has no company names; its list already has the full location
+  // ("Utrecht, Netherlands"), which the page would shorten to a country code.
+  if (/^https:\/\/magnet\.me\/en\/opportunity\//.test(job.url)) {
+    const { text, company } = await describePage(job.url);
+    return { text, company };
+  }
   return { text: await describeFromPage(job.url) };
 }
 
@@ -46,7 +52,7 @@ export async function describeFromPage(url: string): Promise<string> {
 }
 
 /** The posting's text, and its location ("City, Country") when its structured data has one. */
-async function describePage(url: string): Promise<{ text: string; location?: string }> {
+async function describePage(url: string): Promise<{ text: string; location?: string; company?: string }> {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     redirect: "follow",
@@ -62,7 +68,11 @@ async function describePage(url: string): Promise<{ text: string; location?: str
       const found = findJobPosting(JSON.parse(m[1]));
       if (found?.description) {
         const text = htmlToText(String(found.description));
-        if (text.length >= THIN_THRESHOLD) return { text: text.slice(0, MAX), location: postingLocation(found) };
+        if (text.length >= THIN_THRESHOLD) {
+          const org = found.hiringOrganization;
+          const company = org && typeof org === "object" && !Array.isArray(org) && typeof org.name === "string" ? org.name.trim() : undefined;
+          return { text: text.slice(0, MAX), location: postingLocation(found), company: company || undefined };
+        }
       }
     } catch {
       // malformed JSON-LD: ignore and keep looking
@@ -126,7 +136,7 @@ function innerDiv(html: string, open: RegExp): string | null {
 
 type Json = null | string | number | boolean | Json[] | { [k: string]: Json };
 
-function findJobPosting(node: Json): { description?: Json; jobLocation?: Json } | null {
+function findJobPosting(node: Json): { description?: Json; jobLocation?: Json; hiringOrganization?: Json } | null {
   if (Array.isArray(node)) {
     for (const n of node) {
       const f = findJobPosting(n);

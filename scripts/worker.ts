@@ -353,6 +353,7 @@ async function syncSource(
       const found = await describe(source, j);
       j.description = found.text;
       if (found.location) j.location = found.location;
+      if (found.company && !j.company) j.company = found.company; // Magnet.me lists have none
       stats.described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
@@ -470,7 +471,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 
   let described = 0;
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
-    let found: { text: string; location?: string } = { text: "" };
+    let found: { text: string; location?: string; company?: string } = { text: "" };
     try {
       found = await describe(sources.get(job.source_id)!, job);
       described++;
@@ -485,7 +486,17 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
     }
     const updated = { ...job, description: found.text, location: found.location ?? job.location };
     const thin = updated.description.length < THIN_THRESHOLD;
-    await must(db.from("jobs").update({ description: updated.description, location: updated.location, thin }).eq("id", job.id));
+    await must(
+      db
+        .from("jobs")
+        .update({
+          description: updated.description,
+          location: updated.location,
+          thin,
+          ...(found.company && !job.company ? { company: found.company } : {}),
+        })
+        .eq("id", job.id),
+    );
     for (const m of byJob.get(job.id)!) {
       const c = criteriaOf.get(m.user_id);
       const reason = c ? verdict({ ...updated, thin }, c) : null;
