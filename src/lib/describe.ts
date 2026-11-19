@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, isAvaturePosting, isBambooPosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, ripplingJob, isAvaturePosting, isBambooPosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -35,6 +35,9 @@ export async function describe(
     const { text, location } = await fetchWorkdayPosting(wd.slug, wd.path);
     return { text, location: location || undefined };
   }
+  // Rippling: the job's detail in the board API has the description.
+  const rippling = ripplingJob(job.url);
+  if (rippling) return fetchRipplingDescription(...rippling);
   // BambooHR: the job's detail JSON has the description and the country.
   if (isBambooPosting(job.url)) return fetchBambooDescription(job.url);
   // Avature: description, locations and work model are fields on the posting page.

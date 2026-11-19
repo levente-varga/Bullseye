@@ -34,6 +34,7 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
   },
   { ats: "hibob", re: /([a-z0-9-]+)\.careers\.hibob\.com/i, slug: (m) => m[1].toLowerCase() },
   { ats: "breezy", re: /([a-z0-9-]+)\.breezy\.hr/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "rippling", re: /ats\.rippling\.com\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?([a-z0-9-]+)\/jobs/i, slug: (m) => m[1].toLowerCase() },
   { ats: "bamboohr", re: /([a-z0-9-]+)\.bamboohr\.com\/(?:careers|jobs)/i, slug: (m) => m[1].toLowerCase() },
   // Jobylon: the widget on a careers page (jbl_company_id = 2986), a posting page
   // (company_id = 2986;), or a company/embed link.
@@ -166,8 +167,8 @@ function guessName(ats: Ats, slug: string): string {
   const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
-  // "disneycareers" → "disney"
-  const clean = base.replace(/(?<=.)(careers?|jobs)$/i, "").replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
+  // "disneycareers" → "disney"; a Rippling board "kinetic-games-careers" → "kinetic-games"
+  const clean = base.replace(/-(careers?|jobs)$/i, "").replace(/(?<=.)(careers?|jobs)$/i, "").replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
   // Short names are usually initials: "ea" → "EA".
   return clean.length <= 3 ? clean.toUpperCase() : clean.charAt(0).toUpperCase() + clean.slice(1);
 }
