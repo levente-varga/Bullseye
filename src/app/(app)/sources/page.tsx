@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ErrorDetails } from "@/components/ErrorDetails";
 import { Notice } from "@/components/Notice";
@@ -10,6 +11,7 @@ import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSou
 
 export default async function SourcesPage({ searchParams }: PageProps<"/sources">) {
   const sp = await searchParams;
+  const sort = parseSort(sp.sort, sp.dir);
   const added = typeof sp.added === "string" ? sp.added : null;
   const addError = typeof sp.error === "string" ? sp.error : null;
   const supabase = await createClient();
@@ -38,8 +40,9 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
   // Healthy means fetched successfully; a source that hasn't been fetched yet is unknown, not healthy.
   // Company boards (one employer each) and aggregators (many employers) are listed apart.
-  const boards = sources.filter((s) => !ATS_INFO[s.ats]?.aggregator);
-  const aggregators = sources.filter((s) => ATS_INFO[s.ats]?.aggregator);
+  const sorted = sortSources(sources, sort, open);
+  const boards = sorted.filter((s) => !ATS_INFO[s.ats]?.aggregator);
+  const aggregators = sorted.filter((s) => ATS_INFO[s.ats]?.aggregator);
   // Aggregators not added yet: one click each, with their default search.
   const missingAggregators = (Object.keys(ATS_INFO) as Ats[]).filter(
     (a) => ATS_INFO[a].aggregator && !sources.some((s) => s.ats === a),
@@ -70,7 +73,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {boards.length === 0 ? (
               <Empty>No company boards yet. Add one below, or pick from the suggestions.</Empty>
             ) : (
-              <SourceTable rows={boards} open={open} />
+              <SourceTable rows={boards} open={open} sort={sort} />
             )}
           </Panel>
         </section>
@@ -81,7 +84,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
             {aggregators.length === 0 ? (
               <Empty>No aggregators yet.</Empty>
             ) : (
-              <SourceTable rows={aggregators} open={open} aggregators />
+              <SourceTable rows={aggregators} open={open} sort={sort} aggregators />
             )}
           </Panel>
           {missingAggregators.length > 0 && (
@@ -226,18 +229,26 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 }
 
 /** One table of sources (company boards or aggregators), with health, counts and actions. */
-function SourceTable(props: { rows: Source[]; open: Record<string, number>; aggregators?: boolean }) {
+function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort: Sort; aggregators?: boolean }) {
   return (
     <div className="md:overflow-x-auto">
       <table className="table table-stack max-md:block md:min-w-[720px]">
         <thead>
           <tr>
             <th className="w-10">#</th>
-            <th>Source</th>
+            <SortHeader sort={props.sort} by="name">Source</SortHeader>
             {/* An aggregator's type is its name: no column for it. */}
-            {!props.aggregators && <th className="w-40">Type</th>}
-            <th className="w-20 text-right">Open</th>
-            <th className="w-28">Checked</th>
+            {!props.aggregators && (
+              <SortHeader sort={props.sort} by="type" className="w-40">
+                Type
+              </SortHeader>
+            )}
+            <SortHeader sort={props.sort} by="open" className="w-20" right>
+              Open
+            </SortHeader>
+            <SortHeader sort={props.sort} by="checked" className="w-28">
+              Checked
+            </SortHeader>
             <th className="w-64" />
           </tr>
         </thead>
@@ -299,6 +310,64 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; aggr
         </tbody>
       </table>
     </div>
+  );
+}
+
+// --- Sorting -----------------------------------------------------------------
+// Click a column header to sort both tables by it; click again to reverse. Kept in the
+// URL (?sort=open&dir=desc), so it survives reloads and needs no client code.
+
+type SortKey = "name" | "type" | "open" | "checked";
+type Sort = { by: SortKey; dir: "asc" | "desc" };
+const SORT_KEYS: SortKey[] = ["name", "type", "open", "checked"];
+/** Numbers and dates read best largest/newest first; names A to Z. */
+const FIRST_DIR: Record<SortKey, Sort["dir"]> = { name: "asc", type: "asc", open: "desc", checked: "desc" };
+
+function parseSort(by: unknown, dir: unknown): Sort {
+  const key = SORT_KEYS.includes(by as SortKey) ? (by as SortKey) : "name";
+  return { by: key, dir: dir === "asc" || dir === "desc" ? dir : FIRST_DIR[key] };
+}
+
+function sortSources(rows: Source[], sort: Sort, open: Record<string, number>): Source[] {
+  const value = (s: Source): string | number => {
+    switch (sort.by) {
+      case "name":
+        return s.company_name.toLowerCase();
+      case "type":
+        return (ATS_INFO[s.ats]?.label ?? s.ats).toLowerCase();
+      case "open":
+        return open[s.id] ?? 0;
+      case "checked":
+        return s.last_checked_at ? Date.parse(s.last_checked_at) : 0; // never checked sorts as oldest
+    }
+  };
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+    // Ties keep a stable, readable order: by name.
+    return c * sign || a.company_name.localeCompare(b.company_name);
+  });
+}
+
+/** A column header that sorts by its column; the active one shows an arrow. */
+function SortHeader(props: { sort: Sort; by: SortKey; className?: string; right?: boolean; children: string }) {
+  const active = props.sort.by === props.by;
+  const dir = active ? (props.sort.dir === "asc" ? "desc" : "asc") : FIRST_DIR[props.by];
+  const href = `/sources?${new URLSearchParams({ sort: props.by, dir })}`;
+  return (
+    <th
+      className={`${props.className ?? ""} ${props.right ? "text-right" : ""}`}
+      aria-sort={active ? (props.sort.dir === "asc" ? "ascending" : "descending") : undefined}
+    >
+      <Link href={href} scroll={false} className={`inline-flex items-center gap-1 hover:text-[var(--fg)] ${active ? "text-[var(--fg)]" : ""}`}>
+        {props.children}
+        <span aria-hidden className={active ? "" : "invisible"}>
+          {props.sort.dir === "asc" ? "↑" : "↓"}
+        </span>
+      </Link>
+    </th>
   );
 }
 

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
-import { HIMALAYAS_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, fetchBoard, locationNeedsDetail } from "@/lib/ats";
+import { BSJ_DEFAULT_CATEGORY, HIMALAYAS_DEFAULT_QUERY, JOBINDEX_DEFAULT_QUERY, JOBSCH_DEFAULT_QUERY, JOBTECH_DEFAULT_QUERY, MAGNETME_DEFAULT_QUERY, WWR_DEFAULT_CATEGORY, fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
@@ -270,6 +270,14 @@ function normalizeSlug(ats: Ats, input: string): string {
   // JobTech and Himalayas: search parameters (bare, or from a URL); empty means the default search.
   if (ats === "jobtech") return raw.replace(/^.*\?/, "").trim() || JOBTECH_DEFAULT_QUERY;
   if (ats === "himalayas") return raw.replace(/^.*\?/, "").trim() || HIMALAYAS_DEFAULT_QUERY;
+  if (ats === "jobindex") return raw.replace(/^.*\?/, "").trim() || JOBINDEX_DEFAULT_QUERY;
+  if (ats === "magnetme") return raw.replace(/^.*\?/, "").trim() || MAGNETME_DEFAULT_QUERY;
+  if (ats === "jobsch") return raw.replace(/^.*\?/, "").trim() || JOBSCH_DEFAULT_QUERY;
+  // Berlin Startup Jobs: a category (bare or from a category URL), or "all".
+  if (ats === "berlinstartupjobs") {
+    const m = raw.match(/berlinstartupjobs\.com\/([a-z0-9-]+)/i);
+    return (m ? m[1] : raw.replace(/\/?feed\/?$/, "")).toLowerCase() || BSJ_DEFAULT_CATEGORY;
+  }
   // We Work Remotely: a category (bare, or from a category URL or feed), or "all".
   if (ats === "weworkremotely") {
     const m = raw.match(/categories\/([a-z0-9-]+)/i);

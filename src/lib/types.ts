@@ -17,7 +17,12 @@ export type Ats =
   | "remoteok"
   | "weworkremotely"
   | "arbeitnow"
-  | "workwithindies";
+  | "workwithindies"
+  | "jobindex"
+  | "magnetme"
+  | "berlinstartupjobs"
+  | "landingjobs"
+  | "jobsch";
 
 /** How each source type is configured on the Sources page. */
 /**
@@ -128,6 +133,51 @@ export const ATS_INFO: Record<
     fixedSlug: "workwithindies.com",
     defaultName: "Work With Indies",
     blurb: "Indie game studios worldwide",
+  },
+  jobindex: {
+    label: "Jobindex (aggregator)",
+    slugLabel: "Search parameters (optional)",
+    slugExample: "q=developer",
+    aggregator: true,
+    partial: true,
+    defaultName: "Jobindex",
+    blurb: "Denmark's largest job board",
+  },
+  magnetme: {
+    label: "Magnet.me (aggregator)",
+    slugLabel: "Filter parameters (optional)",
+    slugExample: "jobFunctions=IT",
+    aggregator: true,
+    partial: true,
+    defaultName: "Magnet.me",
+    blurb: "Netherlands and Belgium, students and graduates",
+  },
+  berlinstartupjobs: {
+    label: "Berlin Startup Jobs (aggregator)",
+    slugLabel: "Category (optional)",
+    slugExample: "engineering",
+    aggregator: true,
+    partial: true,
+    defaultName: "Berlin Startup Jobs",
+    blurb: "Startups in Berlin",
+  },
+  landingjobs: {
+    label: "Landing.jobs (aggregator)",
+    slugLabel: "—",
+    slugExample: "landing.jobs",
+    aggregator: true,
+    fixedSlug: "landing.jobs",
+    defaultName: "Landing.jobs",
+    blurb: "Tech jobs in Portugal and Europe",
+  },
+  jobsch: {
+    label: "jobs.ch (aggregator)",
+    slugLabel: "Search parameters (optional)",
+    slugExample: "query=developer",
+    aggregator: true,
+    partial: true,
+    defaultName: "jobs.ch",
+    blurb: "Switzerland's largest job board",
   },
 };
 

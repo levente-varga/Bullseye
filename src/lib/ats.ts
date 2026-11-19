@@ -950,6 +950,230 @@ async function fetchJobylon(companyId: string, company: string): Promise<Fetched
     });
 }
 
+// Jobindex: Denmark's largest job board, through its search RSS (20 a page). Slug: search
+// parameters, e.g. "q=developer"; empty means "q=developer". Titles read "Role, Company";
+// descriptions come from the posting later (the feed has a short teaser only).
+export const JOBINDEX_DEFAULT_QUERY = "q=developer";
+const JOBINDEX_MAX_PAGES = 5;
+
+async function fetchJobindex(query: string): Promise<FetchedJob[]> {
+  const params = new URLSearchParams(query || JOBINDEX_DEFAULT_QUERY);
+  const out = new Map<string, FetchedJob>();
+  for (let page = 1; page <= JOBINDEX_MAX_PAGES; page++) {
+    params.set("page", String(page));
+    const xml = await (await get(`https://www.jobindex.dk/jobsoegning.rss?${params}`, "application/rss+xml")).text();
+    const items = xml.match(/<item>[\s\S]*?<\/item>/g) ?? [];
+    for (const item of items) {
+      const link = decodeEntities(xmlTag(item, "link"));
+      const id = link.match(/\/vis-job\/([a-z0-9]+)/i)?.[1] ?? link;
+      if (!link || out.has(id)) continue;
+      const full = decodeEntities(xmlTag(item, "title"));
+      const comma = full.lastIndexOf(", ");
+      const teaser = decodeEntities(xmlTag(item, "description"));
+      const area = decodeEntities(teaser.match(/jix_robotjob--area[^>]*>([^<]*)</)?.[1] ?? "").trim();
+      const pub = xmlTag(item, "pubDate");
+      out.set(id, {
+        external_id: id,
+        title: (comma > 0 ? full.slice(0, comma) : full).trim(),
+        company: comma > 0 ? full.slice(comma + 2).trim() : "Unknown company",
+        location: area ? `${area}, Denmark` : "Denmark",
+        remote: looksRemote(area),
+        url: link,
+        description: "", // the feed only has a teaser; the posting is fetched later
+        compensation: null,
+        posted_at: pub && Number.isFinite(Date.parse(pub)) ? new Date(pub).toISOString() : null,
+      });
+    }
+    if (items.length < 20) break;
+  }
+  return [...out.values()];
+}
+
+// Magnet.me: jobs, traineeships and internships in the Netherlands and Belgium, mostly for
+// students and graduates. Its public API lists live postings (filtered, 100 a page) but
+// not company names: those, and the description, come from the posting page later.
+// Slug: filter parameters, e.g. "jobFunctions=IT"; empty means "jobFunctions=IT".
+export const MAGNETME_DEFAULT_QUERY = "jobFunctions=IT";
+const MAGNETME_PAGE = 100;
+const MAGNETME_MAX_PAGES = 60;
+
+interface MagnetOpportunity {
+  id: number;
+  name: string;
+  remote?: boolean;
+  publishedAt?: string | null;
+  geolocation?: { city?: string; translatedCountry?: string; country?: string } | null;
+}
+
+const slugify = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+async function fetchMagnetMe(query: string): Promise<FetchedJob[]> {
+  const params = new URLSearchParams(query || MAGNETME_DEFAULT_QUERY);
+  params.set("state", "PUBLISHED");
+  params.set("limit", String(MAGNETME_PAGE));
+  const out: FetchedJob[] = [];
+  for (let page = 0; page < MAGNETME_MAX_PAGES; page++) {
+    params.set("offset", String(page * MAGNETME_PAGE));
+    const data = await getJson<{ data?: MagnetOpportunity[]; totalSize?: number }>(`https://magnet.me/api/opportunities?${params}`);
+    const rows = data.data ?? [];
+    for (const o of rows) {
+      const g = o.geolocation ?? {};
+      const place = [g.city, g.translatedCountry || g.country].filter(Boolean).join(", ");
+      out.push({
+        external_id: String(o.id),
+        title: o.name.trim(),
+        company: "", // filled in from the posting page
+        location: o.remote ? [place, "Remote"].filter(Boolean).join(" / ") : place,
+        remote: Boolean(o.remote),
+        url: `https://magnet.me/en/opportunity/${o.id}/${slugify(o.name) || "opportunity"}`,
+        description: "",
+        compensation: null,
+        posted_at: o.publishedAt ?? null,
+      });
+    }
+    if (rows.length < MAGNETME_PAGE || (page + 1) * MAGNETME_PAGE >= (data.totalSize ?? 0)) break;
+  }
+  return out;
+}
+
+// Berlin Startup Jobs: a WordPress board for Berlin startups; RSS per category, 10-12 a
+// page. Slug: a category ("engineering", "design-ux", …) or "all". Titles read
+// "Role // Company"; the feed has a teaser only, so descriptions come from the postings.
+export const BSJ_DEFAULT_CATEGORY = "engineering";
+const BSJ_MAX_PAGES = 5;
+
+async function fetchBerlinStartupJobs(category: string): Promise<FetchedJob[]> {
+  const cat = category || BSJ_DEFAULT_CATEGORY;
+  const base = cat === "all" ? "https://berlinstartupjobs.com/feed/" : `https://berlinstartupjobs.com/${encodeURIComponent(cat)}/feed/`;
+  const out = new Map<string, FetchedJob>();
+  for (let page = 1; page <= BSJ_MAX_PAGES; page++) {
+    let xml: string;
+    try {
+      xml = await (await get(page === 1 ? base : `${base}?paged=${page}`, "application/rss+xml")).text();
+    } catch (e) {
+      if (page > 1 && e instanceof Error && e.message.startsWith("404")) break; // past the last page
+      throw e;
+    }
+    const items = xml.match(/<item>[\s\S]*?<\/item>/g) ?? [];
+    for (const item of items) {
+      const link = xmlTag(item, "link");
+      if (!link || out.has(link)) continue;
+      const full = decodeEntities(xmlTag(item, "title"));
+      const sep = full.lastIndexOf(" // ");
+      const pub = xmlTag(item, "pubDate");
+      out.set(link, {
+        external_id: xmlTag(item, "guid") || link,
+        title: (sep > 0 ? full.slice(0, sep) : full).trim(),
+        company: sep > 0 ? full.slice(sep + 4).trim() : "Unknown company",
+        location: "Berlin, Germany",
+        remote: false,
+        url: link,
+        description: "", // teaser only; the posting is fetched later
+        compensation: null,
+        posted_at: pub && Number.isFinite(Date.parse(pub)) ? new Date(pub).toISOString() : null,
+      });
+    }
+    if (items.length < 10) break;
+  }
+  return [...out.values()];
+}
+
+// Landing.jobs: curated tech jobs, mostly Portugal and elsewhere in Europe, through its
+// public API (50 a page, the whole board). No company field: it's in the URL
+// (landing.jobs/at/<company>/<job>).
+interface LandingJob {
+  id: string | number;
+  title: string;
+  url: string;
+  remote?: boolean;
+  role_description?: string | null;
+  main_requirements?: string | null;
+  nice_to_have?: string | null;
+  perks?: string | null;
+  currency_code?: string | null;
+  gross_salary_low?: number | null;
+  gross_salary_high?: number | null;
+  published_at?: string | null;
+  locations?: { city?: string | null; country_code?: string | null }[];
+}
+
+const countryName = (code?: string | null) => {
+  if (!code) return "";
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+};
+
+async function fetchLandingJobs(): Promise<FetchedJob[]> {
+  const out: FetchedJob[] = [];
+  for (let offset = 0; offset < 2000; offset += 50) {
+    const jobs = await getJson<LandingJob[]>(`https://landing.jobs/api/v1/jobs?offset=${offset}`);
+    for (const j of jobs) {
+      const company = j.url.match(/\/at\/([^/]+)\//)?.[1] ?? "";
+      const places = (j.locations ?? []).map((l) => [l.city, countryName(l.country_code)].filter(Boolean).join(", ")).filter(Boolean);
+      out.push({
+        external_id: String(j.id),
+        title: j.title.trim(),
+        company: company ? company.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Unknown company",
+        location: [...places, j.remote ? "Remote" : ""].filter(Boolean).join(" | "),
+        remote: Boolean(j.remote),
+        url: j.url,
+        description: clip(
+          [j.role_description, j.main_requirements, j.nice_to_have, j.perks].filter(Boolean).map((h) => htmlToText(String(h))).join("\n\n"),
+        ),
+        compensation: salary(j.gross_salary_low, j.gross_salary_high, j.currency_code),
+        posted_at: j.published_at ?? null,
+      });
+    }
+    if (jobs.length < 50) break;
+  }
+  return out;
+}
+
+// jobs.ch: Switzerland's largest job board, through its public search API (20 a page, up
+// to 10 pages). Slug: search parameters, e.g. "query=developer"; empty means that.
+// The search has a short preview only; descriptions come from the postings.
+export const JOBSCH_DEFAULT_QUERY = "query=developer";
+const JOBSCH_MAX_PAGES = 10;
+
+interface JobsChDoc {
+  job_id: string;
+  title: string;
+  company_name?: string | null;
+  place?: string | null;
+  publication_date?: string | null;
+  _links?: { detail_en?: { href?: string }; detail_de?: { href?: string } };
+}
+
+async function fetchJobsCh(query: string): Promise<FetchedJob[]> {
+  const params = new URLSearchParams(query || JOBSCH_DEFAULT_QUERY);
+  const out = new Map<string, FetchedJob>();
+  for (let page = 1; page <= JOBSCH_MAX_PAGES; page++) {
+    params.set("page", String(page));
+    const data = await getJson<{ documents?: JobsChDoc[]; num_pages?: number }>(`https://www.jobs.ch/api/v1/public/search?${params}`);
+    for (const d of data.documents ?? []) {
+      const url = d._links?.detail_en?.href ?? d._links?.detail_de?.href;
+      if (!url || out.has(d.job_id)) continue;
+      const place = d.place?.trim() ?? "";
+      out.set(d.job_id, {
+        external_id: d.job_id,
+        title: d.title.trim(),
+        company: d.company_name?.trim() || "Unknown company",
+        location: place ? `${place}, Switzerland` : "Switzerland",
+        remote: looksRemote(place),
+        url,
+        description: "", // from the posting later
+        compensation: null,
+        posted_at: d.publication_date ? new Date(d.publication_date).toISOString() : null,
+      });
+    }
+    if (page >= (data.num_pages ?? 0)) break;
+  }
+  return [...out.values()];
+}
+
 /** A Jobylon posting URL (emp.jobylon.com/jobs/<id>-…). */
 export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\/jobs\/\d+/i.test(url);
 
@@ -1000,6 +1224,16 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchArbeitnow();
     case "workwithindies":
       return fetchWorkWithIndies();
+    case "jobindex":
+      return fetchJobindex(slug);
+    case "magnetme":
+      return fetchMagnetMe(slug);
+    case "berlinstartupjobs":
+      return fetchBerlinStartupJobs(slug);
+    case "landingjobs":
+      return fetchLandingJobs();
+    case "jobsch":
+      return fetchJobsCh(slug);
   }
 }
 
@@ -1024,6 +1258,11 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
     c === "all" ? "https://weworkremotely.com/" : `https://weworkremotely.com/categories/${c || WWR_DEFAULT_CATEGORY}`,
   arbeitnow: () => "https://www.arbeitnow.com/",
   workwithindies: () => "https://www.workwithindies.com/",
+  jobindex: (q) => `https://www.jobindex.dk/jobsoegning?${new URLSearchParams(q || JOBINDEX_DEFAULT_QUERY)}`,
+  magnetme: () => "https://magnet.me/en/opportunities",
+  berlinstartupjobs: (c) => (c === "all" ? "https://berlinstartupjobs.com/" : `https://berlinstartupjobs.com/${c || BSJ_DEFAULT_CATEGORY}/`),
+  landingjobs: () => "https://landing.jobs/jobs",
+  jobsch: (q) => `https://www.jobs.ch/en/vacancies/?${new URLSearchParams(q || JOBSCH_DEFAULT_QUERY).toString().replace("query=", "term=")}`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

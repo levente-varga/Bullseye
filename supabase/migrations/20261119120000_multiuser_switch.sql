@@ -54,7 +54,12 @@ begin
 end;
 $$;
 
-select backfill_multiuser();
+do $$
+begin
+  if exists (select 1 from members where is_admin) then
+    perform backfill_multiuser();
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- criteria / profile: one row per person, keyed by user_id.

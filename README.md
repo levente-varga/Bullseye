@@ -17,7 +17,7 @@ Every 15 min (Supabase cron → GitHub Actions): worker tick → runs what the s
                                        Inbox · Pipeline · Criteria · Sources · Profile · Report
 ```
 
-1. **Fetch.** Listings come from companies' own job boards through public endpoints: Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, Workday and Pinpoint APIs, Teamtailor and Personio feeds, and Jobylon's careers widget. Aggregators catch everything else. Two are Swedish: [JobTech](https://jobtechdev.se), the open API behind the public job board Platsbanken (by default the last 7 days of IT and design ads), and [Sweden Game Jobs](https://www.swedengamejobs.com) for games. The others are remote and international boards: Himalayas, Working Nomads, Remote OK, We Work Remotely, Arbeitnow and Work With Indies. Where an aggregator has no description, it's fetched from the original posting.
+1. **Fetch.** Listings come from companies' own job boards through public endpoints: Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, Workday and Pinpoint APIs, Teamtailor and Personio feeds, and Jobylon's careers widget. Aggregators catch everything else. Two are Swedish: [JobTech](https://jobtechdev.se), the open API behind the public job board Platsbanken (by default the last 7 days of IT and design ads), and [Sweden Game Jobs](https://www.swedengamejobs.com) for games. The others are remote and international boards: Himalayas, Working Nomads, Remote OK, We Work Remotely, Arbeitnow, Work With Indies, Jobindex (Denmark), jobs.ch (Switzerland), Landing.jobs (Portugal and Europe), Berlin Startup Jobs and Magnet.me (Netherlands and Belgium). Where an aggregator has no description, it's fetched from the original posting.
    - **Deduplication:** the same posting from two sources is stored once, keyed on the ATS job ID (or a cleaned-up URL). The company's own board wins. If it's added later, it adopts the aggregator's copy along with your decisions on it.
    - **Discovery:** companies seen on the aggregator are suggested as direct sources on the Sources page.
 2. **Filter.** Cheap hard filters (role in the title, location or remote, excluded title words, must-have keywords) run first, at no cost.
@@ -36,12 +36,13 @@ Your personal data (CV, profile, answers) lives only in the database. Nothing pe
 1. Create a project at [supabase.com](https://supabase.com).
 2. Apply the migrations in [`supabase/migrations`](supabase/migrations) in order: `supabase link` then `supabase db push`, or paste each file into the SQL Editor.
 3. **Authentication → Users → Add user**: create your login (email + password, tick *Auto confirm*).
-4. Allow that email to see the data. In the SQL Editor:
+4. Make that login the admin. In the SQL Editor:
    ```sql
-   insert into allowed_users (email) values ('you@example.com');
+   insert into members (user_id, email, is_admin)
+   select id, email, true from auth.users where email = 'you@example.com';
    ```
 5. **Authentication → Sign In / Providers → turn off "Allow new users to sign up"**, so nobody else can register.
-   Then run `select backfill_multiuser();` once in the SQL Editor: the first allowed email becomes the admin member. Everyone after that is invited from the Members page. The worker creates their account and emails the link, so `APP_URL` and `RESEND_API_KEY` must be set for it.
+   Everyone else is invited from the Members page. The worker creates their account and emails the link, so `APP_URL` and `RESEND_API_KEY` must be set for it.
 6. **Project Settings → API**: copy the URL, the `anon` key and the `service_role` key.
 
 ### 2. Local
