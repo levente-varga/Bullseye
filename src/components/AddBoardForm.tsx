@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { addBoard, type AddBoardResult } from "@/app/(app)/actions";
 import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
+import { IconChevronDown } from "@/components/icons";
 import { Panel } from "@/components/ui";
 
 /**
@@ -26,7 +27,13 @@ export function AddBoardForm({ systems }: { systems: string }) {
             <input name="company_name" className="input" placeholder="Guessed if empty" />
           </label>
           <SubmitButton className="btn-primary btn-field w-full">Add board</SubmitButton>
-          <p className="hint">Works with {systems}.</p>
+          <details className="group hint">
+            <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+              <span className="link">Supported sites</span>{" "}
+              <IconChevronDown width={10} height={10} className="inline transition-transform group-open:rotate-180" />
+            </summary>
+            <p className="mt-1.5">{systems}.</p>
+          </details>
         </form>
       </Panel>
       {result && (
