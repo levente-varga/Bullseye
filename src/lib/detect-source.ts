@@ -1,4 +1,4 @@
-import { USER_AGENT, appleTotal, fetchBoard, probeHost, workdayTotal } from "./ats";
+import { USER_AGENT, appleTotal, fetchBoard, phenomBase, phenomTotal, probeHost, workdayTotal } from "./ats";
 import { detectAts } from "./dedupe";
 import { ATS_INFO, type Ats } from "./types";
 
@@ -81,10 +81,12 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (found) candidates.push({ ats: found, slug: url.hostname.toLowerCase() });
   }
 
-  // 3. ATS links inside the page.
+  // 3. A Phenom careers site (its pages carry Phenom's page data), or ATS links inside the page.
   if (!candidates.length) {
     const html = await fetchText(url.toString());
-    if (html) {
+    const phenom = html ? phenomBase(url, html) : null;
+    if (phenom) candidates.push({ ats: "phenom", slug: phenom });
+    if (html && !phenom) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
         if (m && !IGNORED_SLUGS.test(slug(m).split("/").pop() ?? "")) candidates.push({ ats, slug: slug(m) });
@@ -108,6 +110,8 @@ export async function detectSource(input: string): Promise<Detected | { error: s
       if (c.ats === "workday") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await workdayTotal(c.slug) };
       // Apple's site is read newest first; its total comes from one search page.
       if (c.ats === "apple") return { ...c, companyGuess: "Apple", jobCount: await appleTotal() };
+      // Phenom is searched by role; its total comes from one search page.
+      if (c.ats === "phenom") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await phenomTotal(c.slug) };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -159,10 +163,11 @@ async function fetchText(url: string): Promise<string | null> {
 function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature"].includes(ats)
-    ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom"].includes(ats)
+    ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
-  const clean = base.replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
+  // "disneycareers" → "disney"
+  const clean = base.replace(/(?<=.)(careers?|jobs)$/i, "").replace(/[-_]+/g, " ").replace(/\d+$/, "").trim();
   // Short names are usually initials: "ea" → "EA".
   return clean.length <= 3 ? clean.toUpperCase() : clean.charAt(0).toUpperCase() + clean.slice(1);
 }

@@ -508,6 +508,91 @@ export async function fetchBambooDescription(url: string): Promise<{ text: strin
   return { text: clip(htmlToText(j.description) + pay), location: location || undefined };
 }
 
+// --- Phenom (careers sites of Disney and other large employers) ----------------------------
+// Slug: the site's base, "<host>/<region>/<lang>", e.g. "join.disneycareers.com/global/en".
+// Its search results page embeds the results as data (10 a page). Searched for the
+// followers' target roles, a few pages each (its search does narrow by role); the job
+// pages' structured data has the description.
+
+const PHENOM_PAGE = 10;
+const PHENOM_MAX_PAGES = 5;
+const PHENOM_SPACING_MS = 1_000;
+
+interface PhenomJob {
+  jobId: string;
+  title: string;
+  location?: string;
+  multi_location?: string[];
+  postedDate?: string;
+  locationType?: string;
+}
+
+/** The JSON object after `"<key>":` in a page, scanned string-aware (descriptions hold braces). */
+function embeddedObject(html: string, key: string): unknown {
+  const at = html.indexOf(`"${key}"`);
+  if (at < 0) return null;
+  const start = html.indexOf("{", at);
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return JSON.parse(html.slice(start, i + 1));
+  }
+  return null;
+}
+
+async function fetchPhenom(base: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  let first = true;
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 0; page < PHENOM_MAX_PAGES; page++) {
+      if (!first) await sleep(PHENOM_SPACING_MS);
+      first = false;
+      const params = new URLSearchParams(term ? { keywords: term } : {});
+      if (page) params.set("from", String(page * PHENOM_PAGE));
+      const html = await (await get(`https://${base}/search-results?${params}`, "text/html")).text();
+      const search = embeddedObject(html, "eagerLoadRefineSearch") as { totalHits?: number; data?: { jobs?: PhenomJob[] } } | null;
+      if (!search) throw new Error("Phenom: search results not found on the page (site layout changed?)");
+      const jobs = search.data?.jobs ?? [];
+      for (const j of jobs) {
+        const places = [...new Set((j.multi_location?.length ? j.multi_location : [j.location ?? ""]).filter(Boolean))];
+        const remote = places.some(looksRemote) || /remote/i.test(j.locationType ?? "");
+        out.push({
+          external_id: String(j.jobId),
+          title: j.title.trim(),
+          company,
+          location: places.join(" | "),
+          remote,
+          url: `https://${base}/job/${j.jobId}`,
+          description: "", // from the job page's structured data
+          compensation: null,
+          posted_at: j.postedDate ?? null,
+        });
+      }
+      if (jobs.length < PHENOM_PAGE || (page + 1) * PHENOM_PAGE >= (search.totalHits ?? 0)) break;
+    }
+    return out;
+  });
+}
+
+/** Number of jobs on a Phenom careers site, from one search page (Add board shows it). */
+export async function phenomTotal(base: string): Promise<number> {
+  const html = await (await get(`https://${base}/search-results`, "text/html")).text();
+  return (embeddedObject(html, "eagerLoadRefineSearch") as { totalHits?: number } | null)?.totalHits ?? 0;
+}
+
+/** Whether a page is a Phenom careers site; its base ("<host>/<region>/<lang>") if so. */
+export function phenomBase(url: URL, html: string): string | null {
+  if (!/phApp\.ddo|eagerLoadRefineSearch|phenompeople/i.test(html)) return null;
+  const m = url.pathname.match(/^\/([a-z-]+)\/([a-z]{2}(?:-[a-z]{2})?)\//i);
+  return m ? `${url.hostname.toLowerCase()}/${m[1]}/${m[2]}` : null;
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1654,6 +1739,8 @@ export function fetchBoard(
       return fetchBreezy(slug, company);
     case "bamboohr":
       return fetchBambooHR(slug, company);
+    case "phenom":
+      return fetchPhenom(slug, company, terms);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1713,6 +1800,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   hibob: (s) => `https://${s}.careers.hibob.com/`,
   breezy: (s) => `https://${s}.breezy.hr/`,
   bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
+  phenom: (s) => `https://${s}/search-results`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

@@ -71,6 +71,11 @@ export function dedupeKey(url: string): string {
     const m = path.match(/\/jobs\/([0-9a-f-]{36})/i);
     if (m) return `hibob:${m[1].toLowerCase()}`;
   }
+  // Phenom: <host>/<region>/<lang>/job/<id>[/<title>]; region, language and title vary.
+  {
+    const m = path.match(/^\/[a-z-]+\/[a-z]{2}(?:-[a-z]{2})?\/job\/([a-z0-9]+)(?:\/|$)/i);
+    if (m) return `phenom:${host}:${m[1].toLowerCase()}`;
+  }
   // BambooHR: <company>.bamboohr.com/careers/<id> (ids are per company)
   if (host.endsWith(".bamboohr.com")) {
     const m = path.match(/\/careers\/(\d+)/);

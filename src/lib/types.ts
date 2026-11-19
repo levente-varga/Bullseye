@@ -15,6 +15,7 @@ export type Ats =
   | "hibob"
   | "breezy"
   | "bamboohr"
+  | "phenom"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -89,6 +90,15 @@ export const ATS_INFO: Record<
   jobylon: { fetch: "board", label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
   hibob: { fetch: "board", label: "HiBob", slugLabel: "Careers site URL", slugExample: "sumodigitalltd.careers.hibob.com" },
   breezy: { fetch: "board", label: "Breezy HR", slugLabel: "Careers site URL", slugExample: "turbulent.breezy.hr" },
+  phenom: {
+    fetch: "search",
+    label: "Phenom",
+    slugLabel: "Careers site URL",
+    slugExample: "join.disneycareers.com/global/en",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
   avature: {
     fetch: "paged",
