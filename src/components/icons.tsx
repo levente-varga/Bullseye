@@ -85,6 +85,11 @@ export const IconMonitor = (p: SVGProps<SVGSVGElement>) => (
     <path d="M5.5 14h5M8 11v3" />
   </svg>
 );
+export const IconChevronDown = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base({ width: 14, height: 14, ...p })}>
+    <path d="M3.5 6l4.5 4.5L12.5 6" />
+  </svg>
+);
 export const IconExternal = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base({ width: 12, height: 12, ...p })}>
     <path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5M12 10v3.5H2.5V4H6" />
