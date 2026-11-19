@@ -309,7 +309,14 @@ export async function fetchSmartRecruitersDescription(company: string, id: strin
 // Slug: the career site host, e.g. "personio.jobs.personio.de" (also .com).
 
 async function fetchPersonio(host: string, company: string): Promise<FetchedJob[]> {
-  const xml = await (await get(`https://${host}/xml?language=en`, "application/xml")).text();
+  let xml: string;
+  try {
+    xml = await (await get(`https://${host}/xml?language=en`, "application/xml")).text();
+  } catch (e) {
+    // A company can switch the XML feed off (404): read its careers page instead.
+    if (e instanceof Error && e.message.startsWith("404 ")) return fetchPersonioPage(host, company);
+    throw e;
+  }
   const positions = xml.match(/<position>[\s\S]*?<\/position>/g) ?? [];
   return positions.map((p) => {
     const id = xmlTag(p, "id");
@@ -333,6 +340,35 @@ async function fetchPersonio(host: string, company: string): Promise<FetchedJob[
       posted_at: created ? new Date(created).toISOString() : null,
     };
   });
+}
+
+/**
+ * A Personio careers page, for companies with the XML feed switched off: each job is a
+ * link with its title and first location (matched on Personio's stable class names, not
+ * the generated ones). Descriptions come from the job pages' structured data later.
+ */
+async function fetchPersonioPage(host: string, company: string): Promise<FetchedJob[]> {
+  const html = await (await get(`https://${host}/?language=en`, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const card of html.split(/<a [^>]*class="[^"]*\bjob-box\b/).slice(1)) {
+    const id = card.match(/^[^>]*href="\/job\/(\d+)/)?.[1];
+    const title = card.match(/class="[^"]*\bjb-title\b[^"]*"[^>]*>([\s\S]*?)<\/h3>/)?.[1];
+    if (!id || !title || out.has(id)) continue;
+    const location = decodeEntities(card.match(/class="[^"]*jobMetaText[^"]*"[^>]*>([\s\S]*?)</)?.[1] ?? "").trim();
+    out.set(id, {
+      external_id: id,
+      title: decodeEntities(title.replace(/<[^>]+>/g, "")).trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: `https://${host}/job/${id}?language=en`,
+      description: "",
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  if (!out.size && !/jobs-group|job-box/.test(html)) throw new Error("Personio: no XML feed and no jobs found on the careers page");
+  return [...out.values()];
 }
 
 // --- Recruitee (JSON API) -----------------------------------------------------
@@ -1156,7 +1192,7 @@ interface LandingJob {
   locations?: { city?: string | null; country_code?: string | null }[];
 }
 
-const countryName = (code?: string | null) => {
+export const countryName = (code?: string | null) => {
   if (!code) return "";
   try {
     return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase()) ?? code;
@@ -1243,7 +1279,11 @@ export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\
  * Whether a listing's real location comes with its details, so the location filter has
  * to wait: Workday lists say "Best" or "3 Locations", Jobylon lists name the city only.
  */
-export const locationNeedsDetail = (url: string) => workdayFromUrl(url) !== null || isJobylonPosting(url) || isAvaturePosting(url);
+export const locationNeedsDetail = (url: string) =>
+  workdayFromUrl(url) !== null || isJobylonPosting(url) || isAvaturePosting(url) || isPersonioPosting(url);
+
+/** A Personio job link. Read from a careers page, its list location is a city only. */
+export const isPersonioPosting = (url: string) => /\.jobs\.personio\.(?:de|com)\/job\/\d+/i.test(url);
 
 // --- Avature (careers sites of EA and other large employers) -------------------------
 // Slug: the career site's base, "<host>[/<locale>]/careers", e.g. "jobs.ea.com/en_US/careers".
