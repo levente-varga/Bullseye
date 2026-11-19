@@ -105,10 +105,13 @@ export const IconClose = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 4l8 8M12 4l-8 8" />
   </svg>
 );
-export const IconEye = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...base(p)}>
-    <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z" />
-    <circle cx="8" cy="8" r="2" />
+/** Watch: outlined, or `filled` while watching (in the current colour). */
+export const IconStar = ({ filled, ...p }: SVGProps<SVGSVGElement> & { filled?: boolean }) => (
+  <svg {...base(p)} strokeLinejoin="round">
+    <path
+      d="M8 1.9l1.85 3.76 4.15.6-3 2.93.71 4.13L8 11.37l-3.71 1.95.71-4.13-3-2.93 4.15-.6z"
+      fill={filled ? "currentColor" : "none"}
+    />
   </svg>
 );
 export const IconPause = (p: SVGProps<SVGSVGElement>) => (
@@ -121,10 +124,15 @@ export const IconPlay = (p: SVGProps<SVGSVGElement>) => (
     <path d="M5 3.5l7.5 4.5L5 12.5z" />
   </svg>
 );
-/** Unfollow: a circle with a minus. */
-export const IconUnfollow = (p: SVGProps<SVGSVGElement>) => (
+/** Follow. */
+export const IconPlus = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <circle cx="8" cy="8" r="5.75" />
-    <path d="M5.5 8h5" />
+    <path d="M8 3v10M3 8h10" />
+  </svg>
+);
+/** Unfollow. */
+export const IconMinus = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M3 8h10" />
   </svg>
 );
