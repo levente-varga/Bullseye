@@ -19,7 +19,10 @@ export type Ats =
   | "arbeitnow"
   | "workwithindies"
   | "jobindex"
-  | "magnetme";
+  | "magnetme"
+  | "berlinstartupjobs"
+  | "landingjobs"
+  | "jobsch";
 
 /** How each source type is configured on the Sources page. */
 /**
@@ -148,6 +151,33 @@ export const ATS_INFO: Record<
     partial: true,
     defaultName: "Magnet.me",
     blurb: "Netherlands and Belgium, students and graduates",
+  },
+  berlinstartupjobs: {
+    label: "Berlin Startup Jobs (aggregator)",
+    slugLabel: "Category (optional)",
+    slugExample: "engineering",
+    aggregator: true,
+    partial: true,
+    defaultName: "Berlin Startup Jobs",
+    blurb: "Startups in Berlin",
+  },
+  landingjobs: {
+    label: "Landing.jobs (aggregator)",
+    slugLabel: "—",
+    slugExample: "landing.jobs",
+    aggregator: true,
+    fixedSlug: "landing.jobs",
+    defaultName: "Landing.jobs",
+    blurb: "Tech jobs in Portugal and Europe",
+  },
+  jobsch: {
+    label: "jobs.ch (aggregator)",
+    slugLabel: "Search parameters (optional)",
+    slugExample: "query=developer",
+    aggregator: true,
+    partial: true,
+    defaultName: "jobs.ch",
+    blurb: "Switzerland's largest job board",
   },
 };
 
