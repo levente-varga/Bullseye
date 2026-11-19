@@ -51,6 +51,16 @@ export function dedupeKey(url: string): string {
     const m = path.match(/\/postings\/([0-9a-f-]{36})/i);
     if (m) return `pinpoint:${m[1].toLowerCase()}`;
   }
+  // Magnet.me: /<lang>/opportunity/<id>/<slug>; the slug and language vary.
+  if (host === "magnet.me") {
+    const m = path.match(/\/opportunit(?:y|ies)\/(\d+)/);
+    if (m) return `magnet:${m[1]}`;
+  }
+  // Jobindex: /vis-job/<id>
+  if (host === "jobindex.dk") {
+    const m = path.match(/\/vis-job\/([a-z0-9]+)/i);
+    if (m) return `jobindex:${m[1].toLowerCase()}`;
+  }
   // Jobylon uses a Teamtailor-like path; keep its IDs in their own namespace.
   if (host.endsWith("jobylon.com")) {
     const m = path.match(/\/jobs\/(\d+)/);
