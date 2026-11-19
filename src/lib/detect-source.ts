@@ -1,4 +1,14 @@
-import { USER_AGENT, appleTotal, fetchBoard, phenomBase, phenomTotal, probeHost, workdayTotal } from "./ats";
+import {
+  USER_AGENT,
+  appleTotal,
+  fetchBoard,
+  isSuccessFactorsPage,
+  phenomBase,
+  phenomTotal,
+  probeHost,
+  successFactorsTotal,
+  workdayTotal,
+} from "./ats";
 import { detectAts } from "./dedupe";
 import { ATS_INFO, type Ats } from "./types";
 
@@ -87,7 +97,10 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     const html = await fetchText(url.toString());
     const phenom = html ? phenomBase(url, html) : null;
     if (phenom) candidates.push({ ats: "phenom", slug: phenom });
-    if (html && !phenom) {
+    // A SAP SuccessFactors career site (Career Site Builder): searched on its own host.
+    const sf = !phenom && html && isSuccessFactorsPage(html);
+    if (sf) candidates.push({ ats: "successfactors", slug: url.hostname.toLowerCase() });
+    if (html && !phenom && !sf) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
         if (m && !IGNORED_SLUGS.test(slug(m).split("/").pop() ?? "")) candidates.push({ ats, slug: slug(m) });
@@ -113,6 +126,7 @@ export async function detectSource(input: string): Promise<Detected | { error: s
       if (c.ats === "apple") return { ...c, companyGuess: "Apple", jobCount: await appleTotal() };
       // Phenom is searched by role; its total comes from one search page.
       if (c.ats === "phenom") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await phenomTotal(c.slug) };
+      if (c.ats === "successfactors") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await successFactorsTotal(c.slug) };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -165,7 +179,7 @@ function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
   if (ats === "inrecruiting") slug = slug.split("/")[1] ?? slug; // the company segment
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom"].includes(ats)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
   // "disneycareers" → "disney"; a Rippling board "kinetic-games-careers" → "kinetic-games"
