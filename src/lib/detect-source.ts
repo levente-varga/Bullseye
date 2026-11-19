@@ -32,6 +32,9 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
     re: /([a-z0-9-]+\.wd\d+\.myworkdayjobs\.com)\/(?:[a-z]{2}-[A-Z]{2}\/)?([A-Za-z0-9_-]+)/,
     slug: (m) => `${m[1].toLowerCase()}/${m[2]}`,
   },
+  { ats: "hibob", re: /([a-z0-9-]+)\.careers\.hibob\.com/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "breezy", re: /([a-z0-9-]+)\.breezy\.hr/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "bamboohr", re: /([a-z0-9-]+)\.bamboohr\.com\/(?:careers|jobs)/i, slug: (m) => m[1].toLowerCase() },
   // Jobylon: the widget on a careers page (jbl_company_id = 2986), a posting page
   // (company_id = 2986;), or a company/embed link.
   {
@@ -40,12 +43,6 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
     slug: (m) => m[1],
   },
 ];
-
-/** "Greenhouse, Lever, …": every company job system (aggregators excluded). */
-const SUPPORTED = (Object.keys(ATS_INFO) as Ats[])
-  .filter((a) => !ATS_INFO[a].aggregator)
-  .map((a) => ATS_INFO[a].label)
-  .join(", ");
 
 const IGNORED_SLUGS = /^(embed|v\d|api|www|app|static|assets)$/i;
 
@@ -98,7 +95,7 @@ export async function detectSource(input: string): Promise<Detected | { error: s
   if (!candidates.length) {
     return {
       error:
-        `Couldn't recognize the job system behind that page. Supported: ${SUPPORTED}. ` +
+        "Couldn't recognize the job system behind that page (the supported ones are listed under the form). " +
         "Try a link to one of the company's job postings instead of the careers homepage.",
     };
   }
