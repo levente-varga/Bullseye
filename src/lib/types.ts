@@ -19,6 +19,7 @@ export type Ats =
   | "rippling"
   | "inrecruiting"
   | "successfactors"
+  | "eightfold"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -118,6 +119,15 @@ export const ATS_INFO: Record<
     slugExample: "inrecruitingfr.intervieweb.it/namcobandai/en/career",
   },
   rippling: { fetch: "board", label: "Rippling", slugLabel: "Job board URL", slugExample: "ats.rippling.com/kinetic-games-careers/jobs" },
+  eightfold: {
+    fetch: "search",
+    label: "Eightfold",
+    slugLabel: "Careers site URL",
+    slugExample: "jobs.ericsson.com",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
   avature: {
     fetch: "paged",
