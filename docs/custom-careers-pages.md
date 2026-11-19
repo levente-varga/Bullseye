@@ -25,6 +25,10 @@ Checked on 2026-11-20.
 | Anshar Studios | ansharstudios.com/careers | Links on the careers page to Traffit (`ansharstudios.traffit.com/public/an/<hash>`, 6 at the time); Traffit's own public list is empty for them | From each Traffit job page |
 | Innovecs | jobs.innovecs.com/vacancies/ | WordPress (no jobs feed): job links on the vacancies page or its Yoast sitemap | From each job page (no structured data) |
 | 4A Games | 4a-games.com.mt | Squarespace site, one page per job (e.g. `/principal-ai-designer`) | From each job page |
+| THQ Nordic Mobile | thqnordicmobile.com/en/jobs/ | Links on the jobs page (5 at the time); apply by email | From each job page, with structured data (so a location too) |
+| Digital Sun | digitalsungames.com/jobs/ | WordPress: links on the jobs page (9 at the time); its jobs feed is empty; apply through its own system | From each job page (no structured data) |
+| Original Games | originalgames.io/careers | Tilda site, one page per job (e.g. `/marketing_data_analyst`); apply by email | From each job page (no structured data) |
+| Kaiko | kaikogames.com/jobs.html | Static site: `jobs.html` links one page per job (`job_anm.html`); apply by email | From each job page |
 | Bohemia Interactive | careers.bohemia.net/en/open-positions | Links on the careers page or `sitemap.xml` (7 at the time) | Titles only: the job pages render in the browser, and `robots.txt` disallows `/api/` |
 
 ## Not covered by it
@@ -34,6 +38,8 @@ Checked on 2026-11-20.
   Digital's HiBob site.
 - **Nintendo Europe** (Cornerstone OnDemand, `nintendoeurope.csod.com`): its job search
   needs the anonymous token the careers page issues; skipped for now.
+- **Super Spline Studios** (`supersplinestudios.com/jobs/`): answers Bullseye with 403
+  Forbidden, like gamejobs.co.
 - **Playtouch** (`playtouch.net/career`): the jobs are added by JavaScript (the linked
   `#qa-release-ops-…` job isn't in the page's HTML); no job system behind it.
 - **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL
