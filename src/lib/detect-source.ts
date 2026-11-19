@@ -19,7 +19,8 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
     re: /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/(?:embed\/job_board\?for=)?([a-z0-9_-]+)/i,
     slug: (m) => m[1].toLowerCase(),
   },
-  { ats: "lever", re: /jobs\.lever\.co\/([a-z0-9_-]+)/i, slug: (m) => m[1].toLowerCase() },
+  // EU-hosted Lever boards (jobs.eu.lever.co) keep the region in the slug: "eu/<name>".
+  { ats: "lever", re: /jobs\.(eu\.)?lever\.co\/([a-z0-9_-]+)/i, slug: (m) => `${m[1] ? "eu/" : ""}${m[2].toLowerCase()}` },
   { ats: "ashby", re: /jobs\.ashbyhq\.com\/([a-z0-9_.-]+)/i, slug: (m) => m[1].toLowerCase() },
   { ats: "smartrecruiters", re: /(?:jobs|careers)\.smartrecruiters\.com\/([A-Za-z0-9_-]+)/, slug: (m) => m[1] },
   { ats: "personio", re: /([a-z0-9-]+\.jobs\.personio\.(?:de|com))/i, slug: (m) => m[1].toLowerCase() },
@@ -80,7 +81,7 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (html) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
-        if (m && !IGNORED_SLUGS.test(m[1])) candidates.push({ ats, slug: slug(m) });
+        if (m && !IGNORED_SLUGS.test(slug(m).split("/").pop() ?? "")) candidates.push({ ats, slug: slug(m) });
       }
     }
   }
@@ -128,6 +129,7 @@ async function fetchText(url: string): Promise<string | null> {
 
 /** "career.paradoxplaza.com" → "Paradoxplaza", "bunq.recruitee.com" → "Bunq". Editable later. */
 function guessName(ats: Ats, slug: string): string {
+  if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
   const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)

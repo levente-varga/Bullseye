@@ -153,8 +153,11 @@ interface LeverJob {
 async function fetchLever(slug: string, company: string): Promise<FetchedJob[]> {
   // Lever returns every posting with its full description in one response (800KB for
   // ~70 jobs), and it has taken anywhere from 2s to 15s+; 20s cut off real boards.
+  // EU-hosted boards (jobs.eu.lever.co) have the slug "eu/<name>" and their own API host.
+  const eu = slug.startsWith("eu/");
+  const name = eu ? slug.slice(3) : slug;
   const data = await getJson<LeverJob[]>(
-    `https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`,
+    `https://api${eu ? ".eu" : ""}.lever.co/v0/postings/${encodeURIComponent(name)}?mode=json`,
     60_000,
   );
   return data.map((j) => {
@@ -1422,7 +1425,7 @@ export function fetchBoard(
 
 export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   greenhouse: (s) => `https://job-boards.greenhouse.io/${s}`,
-  lever: (s) => `https://jobs.lever.co/${s}`,
+  lever: (s) => (s.startsWith("eu/") ? `https://jobs.eu.lever.co/${s.slice(3)}` : `https://jobs.lever.co/${s}`),
   ashby: (s) => `https://jobs.ashbyhq.com/${s}`,
   teamtailor: (s) => `https://${s}/jobs`,
   smartrecruiters: (s) => `https://jobs.smartrecruiters.com/${s}`,

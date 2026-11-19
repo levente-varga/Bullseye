@@ -137,7 +137,6 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
-              {job.remote && <Pill tone="accent">Remote</Pill>}
               {job.thin && <Pill tone="warn">Limited info</Pill>}
             </div>
             <div className="muted mt-0.5 text-[12px]">
@@ -145,9 +144,7 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
               {job.compensation && <span className="mono"> · {job.compensation}</span>}
             </div>
           </div>
-          <div className="muted col-start-3 truncate text-[12px] lg:col-start-auto lg:pt-0.5">
-            {job.location || "Location n/a"}
-          </div>
+          <LocationCell job={job} />
           <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(skipped ? job.status_changed_at : job.first_seen_at)}</span>
           <div className="col-start-3 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
             {skipped && (
@@ -165,6 +162,22 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
   );
 }
 
+/** The location column: a Remote pill (remote is where you'd work), then the places. */
+function LocationCell({ job }: { job: Pick<Job, "location" | "remote"> }) {
+  return (
+    <div className="muted col-start-3 flex min-w-0 items-center gap-1.5 text-[12px] lg:col-start-auto lg:pt-0.5">
+      {job.remote && (
+        <span className="shrink-0">
+          <Pill tone="accent">Remote</Pill>
+        </span>
+      )}
+      <span className="truncate" title={job.location || undefined}>
+        {job.location || (job.remote ? "" : "Location n/a")}
+      </span>
+    </div>
+  );
+}
+
 /**
  * A listing that passed the filters and waits to be scored: no score or reasoning yet,
  * so no decision either. It links to the posting.
@@ -177,14 +190,13 @@ function WaitingRow({ job, index }: { job: Job; index: number }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
-          {job.remote && <Pill tone="accent">Remote</Pill>}
         </div>
         <div className="muted mt-0.5 text-[12px]">
           {job.company}
           {job.compensation && <span className="mono"> · {job.compensation}</span>}
         </div>
       </div>
-      <div className="muted col-start-3 truncate text-[12px] lg:col-start-auto lg:pt-0.5">{job.location || "Location n/a"}</div>
+      <LocationCell job={job} />
       <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(job.first_seen_at)}</span>
       <div className="col-start-3 flex lg:col-start-auto lg:justify-end">
         <a href={job.url} target="_blank" rel="noreferrer" className="btn btn-icon" title="Open posting">
