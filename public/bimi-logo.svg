@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg version="1.2" baseProfile="tiny-ps" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Bullseye</title>
+  <rect width="64" height="64" fill="#ffffff"/>
+  <circle cx="32" cy="32" r="19" fill="none" stroke="#9e4c03" stroke-width="4.2"/>
+  <circle cx="32" cy="32" r="11.3" fill="none" stroke="#9e4c03" stroke-width="4.2"/>
+  <circle cx="32" cy="32" r="4.9" fill="#9e4c03"/>
+</svg>
