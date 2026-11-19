@@ -233,7 +233,13 @@ function SettingsForm(props: {
 }) {
   const { settings, member, isAdmin, next } = props;
   return (
-    <form action={saveSettings} className="space-y-6">
+    // Keyed by what was saved: a <select>'s defaultValue only applies when it mounts, so
+    // without the remount the form would keep showing the old choice after saving.
+    <form
+      key={`${settings.updated_at}|${member.max_run_cost_usd}|${member.max_daily_cost_usd}`}
+      action={saveSettings}
+      className="space-y-6"
+    >
       <fieldset disabled={!isAdmin} className="space-y-6">
         <Panel title="Schedule" aside={`times in ${settings.timezone.replace(/_/g, " ")}${isAdmin ? "" : " · set by the admin"}`}>
           <div className="divide">
