@@ -100,3 +100,8 @@ export const IconPencil = (p: SVGProps<SVGSVGElement>) => (
     <path d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5zM8.5 4.5l3 3" />
   </svg>
 );
+export const IconClose = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 4l8 8M12 4l-8 8" />
+  </svg>
+);
