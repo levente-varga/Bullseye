@@ -66,6 +66,11 @@ export function dedupeKey(url: string): string {
     const m = path.match(/\/vis-job\/([a-z0-9]+)/i);
     if (m) return `jobindex:${m[1].toLowerCase()}`;
   }
+  // Avature: …/careers/JobDetail/<title>/<id>; the locale prefix and title vary.
+  {
+    const m = path.match(/\/careers\/jobdetail\/[^/]+\/(\d+)/i);
+    if (m) return `avature:${host}:${m[1]}`;
+  }
   // Apple: /<locale>/details/<job number>/<title>; the locale, title and ?team= vary.
   if (host === "jobs.apple.com") {
     const m = path.match(/\/details\/([0-9a-z-]+)/i);
@@ -99,6 +104,7 @@ export type DetectedAts =
   | "workday"
   | "pinpoint"
   | "apple"
+  | "avature"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -136,8 +142,26 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
   if (host.endsWith(".pinpointhq.com")) return { ats: "pinpoint", slug: host };
   if (host.endsWith("jobylon.com")) return { ats: "custom", slug: host };
   if (host === "jobs.apple.com") return { ats: "apple", slug: "apple" };
+  {
+    const base = avatureBase(url);
+    if (base) return { ats: "avature", slug: base };
+  }
   // Teamtailor's (/jobs/<id>-title) and Recruitee's (/o/<title>) URL shapes on custom domains.
   if (/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?jobs\/\d{5,}-/i.test(u.pathname)) return { ats: "probe?", slug: host };
   if (/^\/o\/[a-z0-9-]+/i.test(u.pathname)) return { ats: "probe?", slug: host };
   return { ats: "custom", slug: host };
+}
+
+/** The career site base of an Avature link ("jobs.ea.com/en_US/careers"), or null. */
+export function avatureBase(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/^((?:\/[a-z]{2}[_-][A-Za-z]{2})?\/careers)(?:\/|$)/);
+    if (!m) return null;
+    const avatureHost = u.hostname.endsWith(".avature.net");
+    if (!avatureHost && !/\/careers\/(JobDetail|SearchJobs)\b/i.test(u.pathname)) return null;
+    return `${u.hostname.toLowerCase()}${m[1]}`;
+  } catch {
+    return null;
+  }
 }

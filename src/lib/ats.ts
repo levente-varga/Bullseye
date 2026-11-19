@@ -1243,7 +1243,82 @@ export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\
  * Whether a listing's real location comes with its details, so the location filter has
  * to wait: Workday lists say "Best" or "3 Locations", Jobylon lists name the city only.
  */
-export const locationNeedsDetail = (url: string) => workdayFromUrl(url) !== null || isJobylonPosting(url);
+export const locationNeedsDetail = (url: string) => workdayFromUrl(url) !== null || isJobylonPosting(url) || isAvaturePosting(url);
+
+// --- Avature (careers sites of EA and other large employers) -------------------------
+// Slug: the career site's base, "<host>[/<locale>]/careers", e.g. "jobs.ea.com/en_US/careers".
+// Read from its search pages, 20 postings each (the RSS feed ignores the offset). Each
+// result has a title, link and first location; the posting page adds every location,
+// the work model and the description, for postings that pass someone's title filter.
+
+const AVATURE_PAGE = 20;
+const AVATURE_MAX_PAGES = 150;
+
+/** An Avature posting link: …/careers/JobDetail/<title>/<id>. */
+export const isAvaturePosting = (url: string) => /\/careers\/JobDetail\/[^/?#]+\/\d+/i.test(url);
+
+async function fetchAvature(base: string, company: string): Promise<FetchedJob[]> {
+  const out = new Map<string, FetchedJob>();
+  for (let page = 0; page < AVATURE_MAX_PAGES; page++) {
+    const html = await (
+      await get(`https://${base}/SearchJobs?jobRecordsPerPage=${AVATURE_PAGE}&jobOffset=${page * AVATURE_PAGE}`, "text/html")
+    ).text();
+    const results = html.split(/<article class="article article--result/).slice(1);
+    let added = 0;
+    for (const r of results) {
+      const a = r.match(/<a class="link link_result" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+      const id = a?.[1].match(/\/(\d+)\/?(?:[?#]|$)/)?.[1];
+      if (!a || !id || out.has(id)) continue;
+      added++;
+      const location = decodeEntities(r.match(/class="list-item-location">([\s\S]*?)</)?.[1] ?? "").trim();
+      out.set(id, {
+        external_id: id,
+        title: decodeEntities(a[2]).replace(/\s+/g, " ").trim(),
+        company,
+        location, // the first one; the posting page lists them all
+        remote: looksRemote(location),
+        url: decodeEntities(a[1]),
+        description: "",
+        compensation: null,
+        posted_at: null,
+      });
+    }
+    // A short page is the last; a page with nothing new means the offset stopped moving.
+    if (results.length < AVATURE_PAGE || added === 0) break;
+  }
+  return [...out.values()];
+}
+
+/**
+ * An Avature posting page: its description (the unlabelled fields), its locations
+ * ("Location: Madrid Country: Spain" pairs) and whether its work model is remote.
+ */
+export async function fetchAvatureDescription(url: string): Promise<{ text: string; location?: string; remote?: boolean }> {
+  const res = await get(url, "text/html");
+  const html = await res.text();
+  const fields = [...html.matchAll(/<div class="article__content__view__field([^"]*)"[^>]*>([\s\S]*?)(?=<div class="article__content__view__field[ "]|<\/article>)/g)];
+  const text: string[] = [];
+  let location: string | undefined;
+  let remote = false;
+  for (const [, cls, body] of fields) {
+    if (/visibility--hidden/.test(cls)) continue;
+    let plain = htmlToText(body);
+    if (/field--locations/.test(cls)) {
+      plain = plain.replace(/[•\u00a0]/g, " ").replace(/\s+/g, " ");
+      const pairs = [...plain.matchAll(/Location:\s*([^]+?)\s*Country:\s*([^]+?)(?=\s*Location:|$)/g)].map((m) => `${m[1].trim()}, ${m[2].trim()}`);
+      location = pairs.length ? [...new Set(pairs)].join(" | ") : plain.replace(/^Locations?\s*:?\s*/i, "").trim() || undefined;
+      continue;
+    }
+    const label = body.match(/__label[^>]*>([\s\S]*?)</)?.[1]?.trim();
+    if (label) {
+      if (/work model/i.test(label) && /remote/i.test(plain)) remote = true;
+      continue; // Role ID, Worker Type, Studio…: not the description
+    }
+    if (plain.trim()) text.push(plain.trim());
+  }
+  if (!text.length) throw new Error("Avature: no description found on the posting page");
+  return { text: clip(text.join("\n\n")), location, remote };
+}
 
 // --- Apple (jobs.apple.com) -------------------------------------------------------
 // Apple's own careers site. No public API, but its search pages carry their results as
@@ -1394,6 +1469,8 @@ export function fetchBoard(
       return fetchJobylon(slug, company);
     case "apple":
       return fetchApple(source.last_success_at);
+    case "avature":
+      return fetchAvature(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1449,6 +1526,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   landingjobs: () => "https://landing.jobs/jobs",
   jobsch: () => "https://www.jobs.ch/en/vacancies/",
   apple: () => "https://jobs.apple.com/en-us/search?sort=newest",
+  avature: (s) => `https://${s}/SearchJobs`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

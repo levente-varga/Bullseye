@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchAppleDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, isAvaturePosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -24,7 +24,7 @@ const CLOSED_RE =
 export async function describe(
   source: Pick<Source, "ats" | "slug">,
   job: { external_id: string; url: string },
-): Promise<{ text: string; location?: string; company?: string }> {
+): Promise<{ text: string; location?: string; company?: string; remote?: boolean }> {
   if (source.ats === "smartrecruiters") {
     return { text: await fetchSmartRecruitersDescription(source.slug, job.external_id) };
   }
@@ -35,6 +35,8 @@ export async function describe(
     const { text, location } = await fetchWorkdayPosting(wd.slug, wd.path);
     return { text, location: location || undefined };
   }
+  // Avature: description, locations and work model are fields on the posting page.
+  if (isAvaturePosting(job.url)) return fetchAvatureDescription(job.url);
   // Apple's posting pages render in the browser; their page data has the text.
   if (isAppleUrl(job.url)) return fetchAppleDescription(job.url);
   // Jobylon lists name the city only: the posting's structured data adds the country.
