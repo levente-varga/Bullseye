@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getJobDetails } from "@/app/(app)/actions";
 import type { JobDetails } from "@/lib/types";
-import { IconExternal } from "./icons";
+import { IconChevronDown, IconExternal } from "./icons";
 
 /**
  * A job row that opens to show the scorer's reasoning. Only the summary line
@@ -79,5 +79,18 @@ export function ExpandableJobRow(props: {
         </div>
       )}
     </details>
+  );
+}
+
+/** The open/close control of an expandable row: a square button with an arrow (down when closed, up when open). Sits inside the row's <summary>, which does the toggling. */
+export function ExpandToggle() {
+  return (
+    <span className="btn btn-icon" title="Show details">
+      <IconChevronDown className="transition-transform group-open:rotate-180" />
+      <span className="sr-only">
+        <span className="group-open:hidden">Show details</span>
+        <span className="hidden group-open:inline">Hide details</span>
+      </span>
+    </span>
   );
 }

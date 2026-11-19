@@ -9,8 +9,11 @@ import { agoText, pad2 } from "@/lib/time";
 import { ATS_INFO, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
-/** The company job systems a board can be added for (aggregators are followed from the catalog). */
-const COMPANY_SYSTEMS = (Object.keys(ATS_INFO) as Ats[]).filter((a) => !ATS_INFO[a].aggregator);
+/** "Greenhouse, Lever, … and Jobylon": the company job systems auto-detect recognises. */
+const COMPANY_SYSTEM_NAMES = (() => {
+  const names = (Object.keys(ATS_INFO) as Ats[]).filter((a) => !ATS_INFO[a].aggregator).map((a) => ATS_INFO[a].label);
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+})();
 /** "Platsbanken, Himalayas, Jobindex and jobs.ch" */
 const SEARCHABLE_NAMES = (() => {
   const names = (Object.keys(ATS_INFO) as Ats[]).filter((a) => ATS_INFO[a].searchable).map((a) => ATS_INFO[a].defaultName ?? a);
@@ -79,11 +82,37 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           <SectionHeader title="Company boards" count={boards.length} />
           <Panel>
             {boards.length === 0 ? (
-              <Empty>No company boards yet. Add one below, or pick from the suggestions.</Empty>
+              <Empty>No company boards yet. Paste a careers page below, or pick from the suggestions.</Empty>
             ) : (
               <SourceTable rows={boards} open={open} sort={sort} />
             )}
           </Panel>
+          <div id="add" className="scroll-mt-6">
+            {added && (
+              <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
+                Added {added}
+              </Notice>
+            )}
+            {addError && (
+              <Notice key={crypto.randomUUID()} tone="bad" params={["added", "error"]}>
+                {addError}
+              </Notice>
+            )}
+          </div>
+          {/* Auto-detect finds the job system and board from any careers page or posting link. */}
+          <form action={addSource} className="panel mt-3 flex flex-wrap items-end gap-3 p-3">
+            <input type="hidden" name="ats" value="auto" />
+            <label className="field min-w-[240px] flex-[3]">
+              <span className="label">Add a careers page or job posting</span>
+              <input name="slug" required className="input mono" placeholder="https://career.paradoxplaza.com" />
+            </label>
+            <label className="field min-w-[160px] flex-1">
+              <span className="label">Company name</span>
+              <input name="company_name" className="input" placeholder="Guessed if empty" />
+            </label>
+            <SubmitButton className="btn-primary btn-field">Add board</SubmitButton>
+            <p className="hint w-full">Works with {COMPANY_SYSTEM_NAMES}.</p>
+          </form>
         </section>
 
         <section id="aggregators" className="scroll-mt-6">
@@ -187,56 +216,6 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           </section>
         )}
 
-        <section id="add" className="scroll-mt-6">
-          <SectionHeader title="Add a company board" />
-          {added && (
-            <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
-              Added {added}
-            </Notice>
-          )}
-          {addError && (
-            <Notice key={crypto.randomUUID()} tone="bad" params={["added", "error"]}>
-              {addError}
-            </Notice>
-          )}
-          <form action={addSource} className="panel">
-            <div className="grid gap-3 p-3 sm:grid-cols-[200px_1fr_220px]">
-              <label className="field">
-                <span className="label">Type</span>
-                <select name="ats" className="input" defaultValue="auto">
-                  <option value="auto">Auto-detect from URL</option>
-                  {COMPANY_SYSTEMS.map((a) => (
-                    <option key={a} value={a}>{ATS_INFO[a].label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span className="label">Careers page, job posting or board</span>
-                <input name="slug" className="input mono" placeholder="https://career.paradoxplaza.com" />
-              </label>
-              <label className="field">
-                <span className="label">Company name</span>
-                <input name="company_name" className="input" placeholder="Guessed if empty" />
-              </label>
-            </div>
-            <div className="flex justify-end border-t border-[var(--border)] px-3 py-2.5">
-              <SubmitButton className="btn-primary">Add board</SubmitButton>
-            </div>
-            <details className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
-              <summary className="faint cursor-pointer">How does this work?</summary>
-              <p className="muted mt-2 leading-relaxed">
-                With <b>Auto-detect</b>, paste a careers page or any job posting. Otherwise pick the type and enter:
-              </p>
-              <ul className="muted mt-2 grid gap-1 sm:grid-cols-2">
-                {COMPANY_SYSTEMS.map((a) => (
-                  <li key={a}>
-                    {ATS_INFO[a].label}: <code className="mono faint">{ATS_INFO[a].slugExample}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          </form>
-        </section>
       </div>
     </>
   );
@@ -338,7 +317,7 @@ const SORT_KEYS: SortKey[] = ["name", "type", "open", "checked"];
 const FIRST_DIR: Record<SortKey, Sort["dir"]> = { name: "asc", type: "asc", open: "desc", checked: "desc" };
 
 function parseSort(by: unknown, dir: unknown): Sort {
-  const key = SORT_KEYS.includes(by as SortKey) ? (by as SortKey) : "name";
+  const key = SORT_KEYS.includes(by as SortKey) ? (by as SortKey) : "open"; // most open listings first
   return { by: key, dir: dir === "asc" || dir === "desc" ? dir : FIRST_DIR[key] };
 }
 
