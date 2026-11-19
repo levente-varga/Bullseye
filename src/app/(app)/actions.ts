@@ -358,6 +358,18 @@ export async function updateSource(form: FormData) {
   revalidatePath("/sources");
 }
 
+/**
+ * Renames a source: your own label always; the shared name and its postings' company too
+ * when you're its only follower or the admin (see rename_source in the migrations).
+ */
+export async function renameSource(form: FormData) {
+  const supabase = await db();
+  const name = str(form, "name");
+  if (!name) return;
+  check((await supabase.rpc("rename_source", { p_source: str(form, "id"), p_name: name })).error);
+  revalidatePath("/", "layout");
+}
+
 export async function deleteSource(form: FormData) {
   const supabase = await db();
   // Unfollow: drops the listings you haven't acted on; the Pipeline and skipped ones stay.
