@@ -282,6 +282,7 @@ export interface Settings {
   /** The caps (USD) a new member starts with. */
   default_run_cost_usd: number;
   default_daily_cost_usd: number;
+  updated_at: string;
 }
 
 /** Someone who may use the app. Their AI spend caps (USD; 0 = no scoring) are set by the admin. */
