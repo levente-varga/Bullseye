@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchBoard, probeHost, workdayTotal } from "./ats";
+import { USER_AGENT, appleTotal, fetchBoard, probeHost, workdayTotal } from "./ats";
 import { detectAts } from "./dedupe";
 import { ATS_INFO, type Ats } from "./types";
 
@@ -19,7 +19,8 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
     re: /(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/(?:embed\/job_board\?for=)?([a-z0-9_-]+)/i,
     slug: (m) => m[1].toLowerCase(),
   },
-  { ats: "lever", re: /jobs\.lever\.co\/([a-z0-9_-]+)/i, slug: (m) => m[1].toLowerCase() },
+  // EU-hosted Lever boards (jobs.eu.lever.co) keep the region in the slug: "eu/<name>".
+  { ats: "lever", re: /jobs\.(eu\.)?lever\.co\/([a-z0-9_-]+)/i, slug: (m) => `${m[1] ? "eu/" : ""}${m[2].toLowerCase()}` },
   { ats: "ashby", re: /jobs\.ashbyhq\.com\/([a-z0-9_.-]+)/i, slug: (m) => m[1].toLowerCase() },
   { ats: "smartrecruiters", re: /(?:jobs|careers)\.smartrecruiters\.com\/([A-Za-z0-9_-]+)/, slug: (m) => m[1] },
   { ats: "personio", re: /([a-z0-9-]+\.jobs\.personio\.(?:de|com))/i, slug: (m) => m[1].toLowerCase() },
@@ -80,7 +81,7 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (html) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
-        if (m && !IGNORED_SLUGS.test(m[1])) candidates.push({ ats, slug: slug(m) });
+        if (m && !IGNORED_SLUGS.test(slug(m).split("/").pop() ?? "")) candidates.push({ ats, slug: slug(m) });
       }
     }
   }
@@ -99,6 +100,8 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     try {
       // A big Workday site lists hundreds of jobs 20 at a time: one request for the count is enough.
       if (c.ats === "workday") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await workdayTotal(c.slug) };
+      // Apple's site is read newest first; its total comes from one search page.
+      if (c.ats === "apple") return { ...c, companyGuess: "Apple", jobCount: await appleTotal() };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -126,6 +129,7 @@ async function fetchText(url: string): Promise<string | null> {
 
 /** "career.paradoxplaza.com" → "Paradoxplaza", "bunq.recruitee.com" → "Bunq". Editable later. */
 function guessName(ats: Ats, slug: string): string {
+  if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
   const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work)$/i.test(p)) ?? host)

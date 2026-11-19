@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Ats, FetchedJob, Source } from "./types";
 
 /**
@@ -56,14 +57,45 @@ async function perTerm(terms: string[] | undefined, search: (term: string | null
 }
 const looksRemote = (s: string) => /\bremote\b/i.test(s);
 
+/**
+ * GET with one retry after a few seconds when the server hiccups (5xx, timeout, dropped
+ * connection): Lever's API returns the odd 502 for big boards. 4xx answers aren't retried.
+ */
 async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
-  const res = await fetch(url, {
-    headers: { Accept: accept, "User-Agent": USER_AGENT },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
-  return res;
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    countRequest();
+    try {
+      res = await fetch(url, {
+        headers: { Accept: accept, "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      if (attempt < 2) {
+        await sleep(RETRY_DELAY_MS);
+        continue;
+      }
+      throw e;
+    }
+    if (res.ok) return res;
+    if (res.status >= 500 && attempt < 2) {
+      await res.body?.cancel();
+      await sleep(RETRY_DELAY_MS);
+      continue;
+    }
+    throw new Error(`${res.status} ${res.statusText} for ${url}`);
+  }
 }
+
+const RETRY_DELAY_MS = 5_000;
+
+/** Counts the HTTP requests of one fetchBoardCounted() call (retries included). */
+const requestCount = new AsyncLocalStorage<{ n: number }>();
+const countRequest = () => {
+  const c = requestCount.getStore();
+  if (c) c.n++;
+};
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
   return (await (await get(url, "application/json", timeoutMs)).json()) as T;
@@ -121,8 +153,11 @@ interface LeverJob {
 async function fetchLever(slug: string, company: string): Promise<FetchedJob[]> {
   // Lever returns every posting with its full description in one response (800KB for
   // ~70 jobs), and it has taken anywhere from 2s to 15s+; 20s cut off real boards.
+  // EU-hosted boards (jobs.eu.lever.co) have the slug "eu/<name>" and their own API host.
+  const eu = slug.startsWith("eu/");
+  const name = eu ? slug.slice(3) : slug;
   const data = await getJson<LeverJob[]>(
-    `https://api.lever.co/v0/postings/${encodeURIComponent(slug)}?mode=json`,
+    `https://api${eu ? ".eu" : ""}.lever.co/v0/postings/${encodeURIComponent(name)}?mode=json`,
     60_000,
   );
   return data.map((j) => {
@@ -421,6 +456,7 @@ function workdayPostedOn(text: string | undefined, now = Date.now()): string | n
 async function fetchWorkday(slug: string, company: string): Promise<FetchedJob[]> {
   const { api, site } = workdayBase(slug);
   const page = async (offset: number) => {
+    countRequest();
     const res = await fetch(`${api}/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": USER_AGENT },
@@ -1209,12 +1245,129 @@ export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\
  */
 export const locationNeedsDetail = (url: string) => workdayFromUrl(url) !== null || isJobylonPosting(url);
 
+// --- Apple (jobs.apple.com) -------------------------------------------------------
+// Apple's own careers site. No public API, but its search pages carry their results as
+// page data (20 a page). The search can't narrow by role (common words match nearly
+// every posting), so it's read newest first back to the last successful check; the
+// followers' filters do the rest. Descriptions come from the posting pages' data.
+
+const APPLE_BASE = "https://jobs.apple.com/en-us";
+/** Read back to the last success minus this margin: postings can appear a little late. */
+const APPLE_MARGIN_MS = 24 * 3_600_000;
+/** How far back the first fetch reads. */
+const APPLE_FIRST_WINDOW_MS = 14 * 24 * 3_600_000;
+/** At most this many pages (20 postings each) per fetch. */
+const APPLE_MAX_PAGES = 50;
+
+interface ApplePosting {
+  id: string;
+  positionId: string;
+  type?: string;
+  postingTitle: string;
+  transformedPostingTitle: string;
+  postDateInGMT?: string;
+  jobSummary?: string;
+  homeOffice?: boolean | string;
+  locations?: { name?: string; city?: string; countryName?: string }[];
+  team?: { teamCode?: string };
+}
+
+/** The JSON a jobs.apple.com page embeds (React Router hydration data). */
+function applePageData(html: string): { loaderData?: Record<string, unknown> } {
+  const m = html.match(/window\.__staticRouterHydrationData = JSON\.parse\(("(?:[^"\\]|\\.)*")\);/);
+  if (!m) throw new Error("Apple: page data not found (site layout changed?)");
+  return JSON.parse(JSON.parse(m[1]));
+}
+
+/** "Cupertino, United States of America"; a country-level location is just the country. */
+const applePlace = (l: { name?: string; city?: string; countryName?: string }) =>
+  [...new Set([l.name || l.city, l.countryName].filter(Boolean))].join(", ");
+
+const appleTrue = (v: unknown) => v === true || v === "True" || v === "true";
+
+async function fetchApple(since: string | null | undefined): Promise<FetchedJob[]> {
+  const stop = since ? Date.parse(since) - APPLE_MARGIN_MS : Date.now() - APPLE_FIRST_WINDOW_MS;
+  const out = new Map<string, FetchedJob>();
+  for (let page = 1; page <= APPLE_MAX_PAGES; page++) {
+    const html = await (await get(`${APPLE_BASE}/search?sort=newest&page=${page}`, "text/html")).text();
+    const search = applePageData(html).loaderData?.search as { searchResults?: ApplePosting[] } | undefined;
+    const results = search?.searchResults ?? [];
+    for (const r of results) {
+      // Retail hiring pipelines link by position id, other roles by their job number.
+      const id = r.type === "PIPE" ? r.positionId : r.id;
+      if (out.has(id)) continue;
+      const places = (r.locations ?? []).map(applePlace).filter(Boolean);
+      const remote = appleTrue(r.homeOffice);
+      const team = r.team?.teamCode ? `?team=${encodeURIComponent(r.team.teamCode)}` : "";
+      out.set(id, {
+        external_id: id,
+        title: r.postingTitle.trim(),
+        company: "Apple",
+        location: [...new Set(places), remote ? "Remote" : ""].filter(Boolean).join(" | "),
+        remote,
+        url: `${APPLE_BASE}/details/${encodeURIComponent(id)}/${r.transformedPostingTitle}${team}`,
+        description: "", // the summary is boilerplate; the posting page has the real text
+        compensation: null,
+        posted_at: r.postDateInGMT ?? null,
+      });
+    }
+    const oldest = results.at(-1)?.postDateInGMT;
+    if (results.length < 20 || (oldest && Date.parse(oldest) < stop)) break;
+  }
+  return [...out.values()];
+}
+
+/** A jobs.apple.com posting's text and locations, from its page data. */
+export async function fetchAppleDescription(url: string): Promise<{ text: string; location?: string }> {
+  const html = await (await get(url, "text/html")).text();
+  const d = (applePageData(html).loaderData?.jobDetails as { jobsData?: Record<string, unknown> } | undefined)?.jobsData;
+  if (!d) throw new Error("Apple: posting data not found");
+  const part = (title: string, key: string) => (typeof d[key] === "string" && d[key] ? `${title}\n${htmlToText(String(d[key]))}` : "");
+  const text = [
+    part("Summary", "jobSummary"),
+    part("Description", "description"),
+    part("Responsibilities", "responsibilities"),
+    part("Minimum qualifications", "minimumQualifications"),
+    part("Preferred qualifications", "preferredQualifications"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const locs = (d.locations as { name?: string; city?: string; countryName?: string }[] | undefined) ?? [];
+  const location = [...new Set(locs.map(applePlace).filter(Boolean))].join(" | ");
+  return { text: clip(text), location: location || undefined };
+}
+
+/** A jobs.apple.com link. */
+export const isAppleUrl = (url: string) => /^https?:\/\/jobs\.apple\.com\//i.test(url);
+
+/** Number of postings on Apple's careers site, from one request (Add board shows it). */
+export async function appleTotal(): Promise<number> {
+  const html = await (await get(`${APPLE_BASE}/search`, "text/html")).text();
+  return (applePageData(html).loaderData?.search as { totalRecords?: number } | undefined)?.totalRecords ?? 0;
+}
+
+/**
+ * Fetches a source's listings and counts the HTTP requests it made (retries included),
+ * which the Sources page shows as what the source costs to run.
+ */
+export async function fetchBoardCounted(
+  source: Pick<Source, "ats" | "slug" | "company_name" | "country" | "last_success_at">,
+  terms?: string[],
+): Promise<{ jobs: FetchedJob[]; requests: number }> {
+  const counter = { n: 0 };
+  const jobs = await requestCount.run(counter, () => fetchBoard(source, terms));
+  return { jobs, requests: counter.n };
+}
+
 /**
  * Fetches a source's current listings. `terms` are the searches for searchable aggregators
  * (ATS_INFO[ats].searchable), built from their followers' target roles; without them,
  * those fetch their newest listings.
  */
-export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" | "country">, terms?: string[]): Promise<FetchedJob[]> {
+export function fetchBoard(
+  source: Pick<Source, "ats" | "slug" | "company_name" | "country" | "last_success_at">,
+  terms?: string[],
+): Promise<FetchedJob[]> {
   const { ats, slug, company_name: company } = source;
   switch (ats) {
     case "greenhouse":
@@ -1239,6 +1392,8 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
       return fetchPinpoint(slug, company);
     case "jobylon":
       return fetchJobylon(slug, company);
+    case "apple":
+      return fetchApple(source.last_success_at);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1270,7 +1425,7 @@ export function fetchBoard(source: Pick<Source, "ats" | "slug" | "company_name" 
 
 export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   greenhouse: (s) => `https://job-boards.greenhouse.io/${s}`,
-  lever: (s) => `https://jobs.lever.co/${s}`,
+  lever: (s) => (s.startsWith("eu/") ? `https://jobs.eu.lever.co/${s.slice(3)}` : `https://jobs.lever.co/${s}`),
   ashby: (s) => `https://jobs.ashbyhq.com/${s}`,
   teamtailor: (s) => `https://${s}/jobs`,
   smartrecruiters: (s) => `https://jobs.smartrecruiters.com/${s}`,
@@ -1293,6 +1448,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   berlinstartupjobs: () => "https://berlinstartupjobs.com/",
   landingjobs: () => "https://landing.jobs/jobs",
   jobsch: () => "https://www.jobs.ch/en/vacancies/",
+  apple: () => "https://jobs.apple.com/en-us/search?sort=newest",
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

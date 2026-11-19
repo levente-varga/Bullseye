@@ -10,6 +10,7 @@ import { hardFilter } from "@/lib/filters";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import {
   ATS_INFO,
+  FETCH_MODES,
   DEFAULT_SCORING_MODEL,
   SCORING_MODELS,
   WATCH_INTERVALS,
@@ -287,11 +288,10 @@ function normalizeSlug(ats: Ats, input: string): string {
   return ats === "smartrecruiters" ? value : value.toLowerCase();
 }
 
-export async function addSource(form: FormData) {
+/** Follows a source from the form: auto-detected from a link, or a type picked from the catalog. */
+async function follow(form: FormData): Promise<{ ok: string; aggregator: boolean } | { error: string }> {
   const supabase = await db();
   const chosen = str(form, "ats");
-  const back = (q: Record<string, string>) => redirect(`/sources?${new URLSearchParams(q)}#add`);
-
   let ats: Ats;
   let slug: string;
   let name = str(form, "company_name");
@@ -299,33 +299,50 @@ export async function addSource(form: FormData) {
 
   if (chosen === "auto") {
     const found = await detectSource(str(form, "slug"));
-    if ("error" in found) back({ error: found.error });
-    else {
-      ({ ats, slug } = found);
-      name ||= found.companyGuess;
-      jobCount = found.jobCount;
-    }
+    if ("error" in found) return { error: found.error };
+    ({ ats, slug } = found);
+    name ||= found.companyGuess;
+    jobCount = found.jobCount;
   } else {
-    if (!(chosen in ATS_INFO)) back({ error: "Pick a source type." });
+    if (!(chosen in ATS_INFO)) return { error: "Pick a source type." };
     ats = chosen as Ats;
     slug = normalizeSlug(ats, str(form, "slug"));
-    if (!slug) back({ error: "Enter the board, domain or URL." });
+    if (!slug) return { error: "Enter the board, domain or URL." };
     // A Jobylon id says nothing about the company: take the name from its listings.
     if (!name && ats === "jobylon") {
-      name = (await fetchBoard({ ats, slug: slug!, company_name: "", country: null }).catch(() => []))[0]?.company ?? "";
+      name = (await fetchBoard({ ats, slug, company_name: "", country: null }).catch(() => []))[0]?.company ?? "";
     }
     name ||= ATS_INFO[ats].defaultName ?? slug;
   }
 
-  const { data: sub, error } = await supabase.rpc("subscribe_source", { p_ats: ats!, p_slug: slug!, p_company_name: name });
+  const { data: sub, error } = await supabase.rpc("subscribe_source", { p_ats: ats, p_slug: slug, p_company_name: name });
   check(error);
-  if ((sub as { already?: boolean } | null)?.already) back({ error: `${name} is already one of your sources.` });
-  revalidatePath("/sources");
-  // Following an aggregator from the catalog returns to that section.
-  if (ATS_INFO[ats!].aggregator) redirect(`/sources?${new URLSearchParams({ followed: name })}#aggregators`);
-  back({
-    added: `${name} · ${ATS_INFO[ats!].label}${jobCount !== null ? ` · ${jobCount} open ${jobCount === 1 ? "job" : "jobs"}` : ""}`,
-  });
+  if ((sub as { already?: boolean } | null)?.already) return { error: `${name} is already one of your sources.` };
+  revalidatePath("/", "layout");
+  return {
+    ok: `${name} · ${ATS_INFO[ats].label}${jobCount !== null ? ` · ${jobCount} open ${jobCount === 1 ? "job" : "jobs"}` : ""}`,
+    aggregator: Boolean(ATS_INFO[ats].aggregator),
+  };
+}
+
+/** Follow from the aggregator catalog: back to that section with a note. */
+export async function addSource(form: FormData) {
+  const result = await follow(form);
+  if ("error" in result) redirect(`/sources?${new URLSearchParams({ error: result.error })}#aggregators`);
+  redirect(`/sources?${new URLSearchParams({ followed: str(form, "company_name") || result.ok.split(" · ")[0] })}#aggregators`);
+}
+
+export type AddBoardResult = { tone: "ok" | "bad"; message: string; at: number } | null;
+
+/**
+ * The Add board form (useActionState): returns its result to the form instead of
+ * redirecting, so the page doesn't navigate or jump and the result shows under the form.
+ */
+export async function addBoard(_prev: AddBoardResult, form: FormData): Promise<AddBoardResult> {
+  const result = await follow(form);
+  return "error" in result
+    ? { tone: "bad", message: result.error, at: Date.now() }
+    : { tone: "ok", message: `Added ${result.ok}`, at: Date.now() };
 }
 
 export async function acceptSuggestion(form: FormData) {
@@ -352,10 +369,28 @@ export async function updateSource(form: FormData) {
   const supabase = await db();
   const field = str(form, "field");
   if (field !== "watchlist" && field !== "enabled") return;
+  // Paged and search sources are too expensive to fetch at the watchlist interval.
+  if (field === "watchlist" && str(form, "value") === "true") {
+    const { data } = await supabase.from("my_sources").select("ats").eq("id", str(form, "id")).single();
+    const ats = data?.ats as Ats | undefined;
+    if (!ats || !FETCH_MODES[ATS_INFO[ats].fetch].watchable) return;
+  }
   check(
     (await supabase.from("subscriptions").update({ [field]: str(form, "value") === "true" }).eq("source_id", str(form, "id"))).error,
   );
   revalidatePath("/sources");
+}
+
+/**
+ * Renames a source: your own label always; the shared name and its postings' company too
+ * when you're its only follower or the admin (see rename_source in the migrations).
+ */
+export async function renameSource(form: FormData) {
+  const supabase = await db();
+  const name = str(form, "name");
+  if (!name) return;
+  check((await supabase.rpc("rename_source", { p_source: str(form, "id"), p_name: name })).error);
+  revalidatePath("/", "layout");
 }
 
 export async function deleteSource(form: FormData) {
