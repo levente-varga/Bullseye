@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ErrorDetails } from "@/components/ErrorDetails";
+import { AddBoardForm } from "@/components/AddBoardForm";
 import { Notice } from "@/components/Notice";
 import { SourceName } from "@/components/SourceName";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -24,7 +25,6 @@ const SEARCHABLE_NAMES = (() => {
 export default async function SourcesPage({ searchParams }: PageProps<"/sources">) {
   const sp = await searchParams;
   const sort = parseSort(sp.sort, sp.dir);
-  const added = typeof sp.added === "string" ? sp.added : null;
   const addError = typeof sp.error === "string" ? sp.error : null;
   const supabase = await createClient();
   const [{ data, error }, { data: sugg }, { data: settings }] = await Promise.all([
@@ -90,32 +90,8 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
               <SourceTable rows={boards} open={open} sort={sort} watchEvery={watchEvery} />
             )}
           </Panel>
-          <div id="add" className="scroll-mt-6">
-            {added && (
-              <Notice key={crypto.randomUUID()} tone="ok" params={["added", "error"]}>
-                Added {added}
-              </Notice>
-            )}
-            {addError && (
-              <Notice key={crypto.randomUUID()} tone="bad" params={["added", "error"]}>
-                {addError}
-              </Notice>
-            )}
-          </div>
           {/* Auto-detect finds the job system and board from any careers page or posting link. */}
-          <form action={addSource} className="panel mt-3 flex flex-wrap items-end gap-3 p-3">
-            <input type="hidden" name="ats" value="auto" />
-            <label className="field min-w-[240px] flex-[3]">
-              <span className="label">Add a careers page or job posting</span>
-              <input name="slug" required className="input mono" placeholder="https://career.paradoxplaza.com" />
-            </label>
-            <label className="field min-w-[160px] flex-1">
-              <span className="label">Company name</span>
-              <input name="company_name" className="input" placeholder="Guessed if empty" />
-            </label>
-            <SubmitButton className="btn-primary btn-field">Add board</SubmitButton>
-            <p className="hint w-full">Works with {COMPANY_SYSTEM_NAMES}.</p>
-          </form>
+          <AddBoardForm systems={COMPANY_SYSTEM_NAMES} />
         </section>
 
         <section id="aggregators" className="scroll-mt-6">
@@ -123,6 +99,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
           {typeof sp.followed === "string" && (
             <Notice key={crypto.randomUUID()} tone="ok" params={["followed"]}>
               Following {sp.followed}. Its listings arrive with the next daily run.
+            </Notice>
+          )}
+          {addError && (
+            <Notice key={crypto.randomUUID()} tone="bad" params={["error"]}>
+              {addError}
             </Notice>
           )}
           <Panel>
@@ -392,7 +373,7 @@ function FetchCell({ source }: { source: Source }) {
   const n = source.last_request_count;
   return (
     <div className="text-[12px]" title={mode.how}>
-      <div>{mode.label}</div>
+      <div className="whitespace-nowrap">{mode.label}</div>
       <div className="mono faint whitespace-nowrap" title={n == null ? "Measured on its next fetch" : undefined}>
         {n == null ? "–" : `${n} ${n === 1 ? "request" : "requests"}`}
       </div>
