@@ -9,6 +9,14 @@ const newsreader = Newsreader({ variable: "--font-newsreader", subsets: ["latin"
 export const metadata: Metadata = {
   title: "Bullseye",
   description: "Automated job search: find, score and track job listings.",
+  // Transparent bullseye in the accent color; the browser picks by the system theme
+  // (its tab strip follows that, not the app's theme toggle).
+  icons: {
+    icon: [
+      { url: "/icon-light.svg", type: "image/svg+xml", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark.svg", type: "image/svg+xml", media: "(prefers-color-scheme: dark)" },
+    ],
+  },
 };
 
 // Applies a saved theme before first paint, so there's no flash.
