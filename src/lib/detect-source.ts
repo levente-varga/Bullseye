@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchBoard, probeHost, workdayTotal } from "./ats";
+import { USER_AGENT, appleTotal, fetchBoard, probeHost, workdayTotal } from "./ats";
 import { detectAts } from "./dedupe";
 import { ATS_INFO, type Ats } from "./types";
 
@@ -99,6 +99,8 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     try {
       // A big Workday site lists hundreds of jobs 20 at a time: one request for the count is enough.
       if (c.ats === "workday") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await workdayTotal(c.slug) };
+      // Apple's site is read newest first; its total comes from one search page.
+      if (c.ats === "apple") return { ...c, companyGuess: "Apple", jobCount: await appleTotal() };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);

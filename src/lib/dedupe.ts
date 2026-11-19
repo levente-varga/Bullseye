@@ -66,6 +66,11 @@ export function dedupeKey(url: string): string {
     const m = path.match(/\/vis-job\/([a-z0-9]+)/i);
     if (m) return `jobindex:${m[1].toLowerCase()}`;
   }
+  // Apple: /<locale>/details/<job number>/<title>; the locale, title and ?team= vary.
+  if (host === "jobs.apple.com") {
+    const m = path.match(/\/details\/([0-9a-z-]+)/i);
+    if (m) return `apple:${m[1].toLowerCase()}`;
+  }
   // Jobylon uses a Teamtailor-like path; keep its IDs in their own namespace.
   if (host.endsWith("jobylon.com")) {
     const m = path.match(/\/jobs\/(\d+)/);
@@ -93,6 +98,7 @@ export type DetectedAts =
   | "workable"
   | "workday"
   | "pinpoint"
+  | "apple"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -127,6 +133,7 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
   }
   if (host.endsWith(".pinpointhq.com")) return { ats: "pinpoint", slug: host };
   if (host.endsWith("jobylon.com")) return { ats: "custom", slug: host };
+  if (host === "jobs.apple.com") return { ats: "apple", slug: "apple" };
   // Teamtailor's (/jobs/<id>-title) and Recruitee's (/o/<title>) URL shapes on custom domains.
   if (/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?jobs\/\d{5,}-/i.test(u.pathname)) return { ats: "probe?", slug: host };
   if (/^\/o\/[a-z0-9-]+/i.test(u.pathname)) return { ats: "probe?", slug: host };

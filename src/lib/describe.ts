@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isJobylonPosting, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchAppleDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -35,6 +35,8 @@ export async function describe(
     const { text, location } = await fetchWorkdayPosting(wd.slug, wd.path);
     return { text, location: location || undefined };
   }
+  // Apple's posting pages render in the browser; their page data has the text.
+  if (isAppleUrl(job.url)) return fetchAppleDescription(job.url);
   // Jobylon lists name the city only: the posting's structured data adds the country.
   if (isJobylonPosting(job.url)) return describePage(job.url);
   // Magnet.me's API has no company names; its list already has the full location

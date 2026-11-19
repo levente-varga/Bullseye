@@ -15,7 +15,7 @@
 import "./env";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchBoard, locationNeedsDetail, probeHost } from "../src/lib/ats";
+import { fetchBoardCounted, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
@@ -26,6 +26,7 @@ import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from 
 import { renderDigest, renderInvite, renderWatchlistAlert, sendEmail } from "../src/lib/email";
 import {
   ATS_INFO,
+  FETCH_MODES,
   type Criteria,
   type FetchedJob,
   type Job,
@@ -259,8 +260,11 @@ async function syncSource(
   const terms = ATS_INFO[source.ats]?.searchable ? searchTerms(subscribers.map((p) => p.criteria.roles)) : undefined;
   if (terms) console.log(`[${source.company_name}] searching: ${terms.length ? terms.join(", ") : "(no target roles: newest listings)"}`);
   let fetched: (FetchedJob & { dedupe_key: string })[];
+  let requests = 0;
   try {
-    fetched = (await fetchBoard(source, terms)).map((j) => ({ ...j, dedupe_key: dedupeKey(j.url) }));
+    const result = await fetchBoardCounted(source, terms);
+    requests = result.requests;
+    fetched = result.jobs.map((j) => ({ ...j, dedupe_key: dedupeKey(j.url) }));
     // A company board can really have no openings, but an aggregator going from some
     // listings to none almost always means its site changed and the adapter reads nothing.
     if (isAggregator && fetched.length === 0 && (source.last_job_count ?? 0) > 0) {
@@ -397,12 +401,12 @@ async function syncSource(
 
   await db
     .from("sources")
-    .update({ last_error: null, last_checked_at: now, last_job_count: fetched.length })
+    .update({ last_error: null, last_checked_at: now, last_success_at: now, last_job_count: fetched.length, last_request_count: requests })
     .eq("id", source.id);
   console.log(
     `[${source.company_name}] ${stats.fetched} live, ${stats.inserted} new (${stats.described} described), ` +
       `${stats.duplicates} duplicates, ${stats.adopted} adopted, ${stats.stale} stale skipped, ${stats.closed} closed, ` +
-      `${subscribers.length} following`,
+      `${subscribers.length} following, ${requests} requests`,
   );
   return { ...stats, errors: 0 };
 }
@@ -673,7 +677,8 @@ async function runFetch(mode: "watchlist" | "full"): Promise<RunResult> {
   // A board is fetched if anyone follows it (watched, for a watchlist run).
   const wanted = new Set(people.flatMap((p) => p.subs.filter((s) => mode === "full" || s.watchlist).map((s) => s.source_id)));
   const all = await must<Source[]>(db.from("sources").select("*"));
-  const sources = all.filter((s) => wanted.has(s.id));
+  // Watchlist runs skip sources too expensive to fetch that often (paged, search).
+  const sources = all.filter((s) => wanted.has(s.id) && (mode === "full" || FETCH_MODES[ATS_INFO[s.ats]?.fetch]?.watchable));
   if (!sources.length) {
     console.log(`No ${mode === "watchlist" ? "watched " : ""}sources followed.`);
     return { stats: { sources: 0, cost_usd: 0 }, perPerson: acc };
