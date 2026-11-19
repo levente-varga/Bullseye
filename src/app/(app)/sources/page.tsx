@@ -18,11 +18,6 @@ const COMPANY_SYSTEM_NAMES = (() => {
   const names = (Object.keys(ATS_INFO) as Ats[]).filter((a) => !ATS_INFO[a].aggregator).map((a) => ATS_INFO[a].label);
   return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 })();
-/** "Platsbanken, Himalayas, Jobindex and jobs.ch" */
-const SEARCHABLE_NAMES = (() => {
-  const names = (Object.keys(ATS_INFO) as Ats[]).filter((a) => ATS_INFO[a].searchable).map((a) => ATS_INFO[a].defaultName ?? a);
-  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join("");
-})();
 
 export default async function SourcesPage({ searchParams }: PageProps<"/sources">) {
   const sp = await searchParams;
@@ -83,7 +78,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
       />
 
       {/* The add form sits beside the tables (sticky), so its result is in view without scrolling. */}
-      <div className="split">
+      <div className="split split-narrow">
       <div className="space-y-10">
         <section>
           <SectionHeader title="Company boards" count={boards.length} />
@@ -115,9 +110,6 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
               <SourceTable rows={aggregators} open={open} sort={sort} watchEvery={watchEvery} aggregators />
             )}
           </Panel>
-          <p className="faint mt-2 text-[12px]">
-            {SEARCHABLE_NAMES} are searched for your target roles; the others are read whole.
-          </p>
           {missingAggregators.length > 0 && (
             <details className="group mt-4" open={aggregators.length === 0}>
               <summary className="link mb-2 cursor-pointer list-none text-[13px] [&::-webkit-details-marker]:hidden">
@@ -203,9 +195,16 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         )}
 
       </div>
-        <aside className="lg:sticky lg:top-6">
-          {/* Auto-detect finds the job system and board from any careers page or posting link. */}
-          <AddBoardForm systems={COMPANY_SYSTEM_NAMES} />
+        {/* Full height, so the panel can stay in view while the page scrolls. The invisible
+            heading lines the panel up with the top of the Company boards table. */}
+        <aside className="lg:self-stretch">
+          <div aria-hidden className="invisible max-lg:hidden">
+            <SectionHeader title="Company boards" />
+          </div>
+          <div className="lg:sticky lg:top-6">
+            {/* Auto-detect finds the job system and board from any careers page or posting link. */}
+            <AddBoardForm systems={COMPANY_SYSTEM_NAMES} />
+          </div>
         </aside>
       </div>
     </>
@@ -221,19 +220,18 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
       <table className="table table-compact table-stack-lg @max-lg:block">
         <thead>
           <tr>
-            <SortHeader sort={props.sort} by="name" className="min-w-[9rem]">
+            <SortHeader sort={props.sort} by="name" className="min-w-[6.5rem]">
               Source
             </SortHeader>
-            {/* An aggregator's type is its name: its column only says how it fetches. */}
-            {props.aggregators ? (
-              <SortHeader sort={props.sort} by="requests">
-                Fetch
-              </SortHeader>
-            ) : (
+            {/* An aggregator's type is its name: no Type column for it. */}
+            {!props.aggregators && (
               <SortHeader sort={props.sort} by="type">
                 Type
               </SortHeader>
             )}
+            <SortHeader sort={props.sort} by="requests">
+              Fetch
+            </SortHeader>
             <SortHeader sort={props.sort} by="open" right>
               Open
             </SortHeader>
@@ -247,8 +245,8 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
           {props.rows.map((s) => (
             <tr key={s.id} className={`group ${s.enabled ? "" : "opacity-55"}`}>
               <td className="@max-lg:w-full">
-                {/* At least 9rem: names wrap anywhere, so without it the column would shrink to a letter. */}
-                <div className="flex min-w-[9rem] flex-wrap items-center gap-2">
+                {/* A minimum: names wrap anywhere, so without it the column would shrink to a letter. */}
+                <div className="flex min-w-[6.5rem] flex-wrap items-center gap-2">
                   <Dot
                     tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
                     title={
@@ -262,7 +260,6 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                     }
                   />
                   <SourceName id={s.id} name={s.company_name} href={ATS_BOARD_URL[s.ats](s.slug)} />
-                  {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
                   {s.enabled && s.last_error && <FailingBadge error={s.last_error} />}
                 </div>
                 {/* A fixed slug (aggregators, Apple) says nothing: only a configured board shows its slug. */}
@@ -273,20 +270,19 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   </div>
                 )}
               </td>
-              {/* Company boards: the job system, with how it fetches under it. Aggregators: only the fetch. */}
-              <td data-label={props.aggregators ? "Fetch" : "Type"}>
-                {!props.aggregators && (
-                  <div className="mb-1">
-                    <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
-                  </div>
-                )}
+              {!props.aggregators && (
+                <td data-label="Type">
+                  <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
+                </td>
+              )}
+              <td data-label="Fetch">
                 <FetchCell source={s} />
               </td>
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
               <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
               {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
               <td className="@max-lg:w-full @lg:w-px @lg:whitespace-nowrap">
-                <div className="flex flex-wrap gap-1.5 @lg:flex-nowrap @lg:justify-end">
+                <div className="flex flex-wrap gap-1 @lg:flex-nowrap @lg:justify-end">
                   <WatchToggle source={s} watchEvery={props.watchEvery} />
                   <Toggle
                     id={s.id}
@@ -365,9 +361,8 @@ function SortHeader(props: { sort: Sort; by: SortKey; className?: string; right?
     >
       <Link href={href} scroll={false} className={`inline-flex items-center gap-1 hover:text-[var(--fg)] ${active ? "text-[var(--fg)]" : ""}`}>
         {props.children}
-        <span aria-hidden className={active ? "" : "invisible"}>
-          {props.sort.dir === "asc" ? "↑" : "↓"}
-        </span>
+        {/* Only the sorted column shows (and takes room for) its arrow. */}
+        {active && <span aria-hidden>{props.sort.dir === "asc" ? "↑" : "↓"}</span>}
       </Link>
     </th>
   );
@@ -375,7 +370,8 @@ function SortHeader(props: { sort: Sort; by: SortKey; className?: string; right?
 
 /**
  * An icon button that sets one subscription field. Its icon shows the state (a filled
- * star, a play icon); `on` is that state for screen readers, `value` what a click saves. The label is for screen readers, the title for hover.
+ * star, a play icon); `on` is that state for screen readers, `value` what a click saves.
+ * The label is for screen readers, the title for hover.
  */
 function Toggle(props: { id: string; field: string; on: boolean; value: boolean; label: string; title: string; icon: ReactNode }) {
   return (
@@ -422,7 +418,7 @@ function FetchCell({ source }: { source: Source }) {
   const n = source.last_request_count;
   return (
     <div className="text-[12px]" title={mode.how}>
-      <div className="whitespace-nowrap">{mode.label}</div>
+      <div>{mode.label}</div>
       <div className="mono faint whitespace-nowrap" title={n == null ? "Measured on its next fetch" : undefined}>
         {n == null ? "–" : `${n} ${n === 1 ? "request" : "requests"}`}
       </div>

@@ -184,6 +184,8 @@ input[type="radio"]:checked:hover {
   /* The app's one two-column layout: a main column plus a fixed 320px side column.
      Use it for every side-by-side pair, so the gap falls in the same place on every page. */
   .split { @apply grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]; }
+  /* A narrower side column, for pages whose main column holds wide tables (Sources). */
+  .split-narrow { @apply lg:grid-cols-[minmax(0,1fr)_288px]; }
 
   /* --- tables ------------------------------------------------------------- */
   .table { @apply w-full border-collapse text-left; }
@@ -197,6 +199,7 @@ input[type="radio"]:checked:hover {
   .table tr:last-child td { border-bottom: 0; }
   /* Tighter cells, for tables that share the row with a side column (Sources). */
   .table-compact th, .table-compact td { @apply px-2; }
+  .table-compact th { letter-spacing: 0.04em; }
   .table tbody tr:hover td { background: var(--surface-2); }
 
   /* Below md, a .table-stack lays each row out as a wrapping card instead of columns,
