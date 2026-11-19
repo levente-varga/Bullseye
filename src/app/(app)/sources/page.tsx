@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ErrorDetails } from "@/components/ErrorDetails";
 import { Notice } from "@/components/Notice";
+import { SourceName } from "@/components/SourceName";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
@@ -247,7 +248,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
         </thead>
         <tbody>
           {props.rows.map((s, i) => (
-            <tr key={s.id} className={s.enabled ? "" : "opacity-55"}>
+            <tr key={s.id} className={`group ${s.enabled ? "" : "opacity-55"}`}>
               <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
               <td className="max-md:w-full">
                 <div className="flex flex-wrap items-center gap-2">
@@ -263,9 +264,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                             : "Not checked yet: fetched with the next daily run"
                     }
                   />
-                  <a href={ATS_BOARD_URL[s.ats](s.slug)} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-                    {s.company_name}
-                  </a>
+                  <SourceName id={s.id} name={s.company_name} href={ATS_BOARD_URL[s.ats](s.slug)} />
                   {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
                   {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
                 </div>
