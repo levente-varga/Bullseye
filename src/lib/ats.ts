@@ -371,6 +371,91 @@ async function fetchPersonioPage(host: string, company: string): Promise<Fetched
   return [...out.values()];
 }
 
+// --- HiBob (careers site API) ---------------------------------------------------------
+// Slug: the company's careers subdomain, "<company>" in <company>.careers.hibob.com.
+// One request returns every job ad with its full text; the API wants the company in a header.
+
+interface HiBobJobAd {
+  id: string;
+  title: string;
+  site?: string | null;
+  country?: string | null;
+  description?: string | null;
+  responsibilities?: string | null;
+  requirements?: string | null;
+  benefits?: string | null;
+  publishedAt?: string | null;
+  workspaceType?: string | null;
+  postingLocations?: { name?: string; city?: string; country?: string }[] | null;
+  hideLocationInformation?: boolean | null;
+}
+
+async function fetchHiBob(company: string, name: string): Promise<FetchedJob[]> {
+  countRequest();
+  const res = await fetch(`https://${company}.careers.hibob.com/api/job-ad`, {
+    headers: { Accept: "application/json", "User-Agent": USER_AGENT, companyIdentifier: company },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for https://${company}.careers.hibob.com/api/job-ad`);
+  const data = (await res.json()) as { jobAdDetails?: HiBobJobAd[] };
+  return (data.jobAdDetails ?? []).map((j) => {
+    const places = (j.postingLocations ?? []).map((l) => [l.city || l.name, l.country].filter(Boolean).join(", ")).filter(Boolean);
+    // "site" is the office ("United Kingdom - Sumo Digital"); the country is the useful part.
+    const remote = /remote/i.test(j.workspaceType ?? "");
+    const location = [...new Set(places.length ? places : [j.country ?? ""].filter(Boolean)), remote ? "Remote" : ""].filter(Boolean).join(" | ");
+    const section = (title: string, html?: string | null) => (html ? `${title}\n${htmlToText(html)}` : "");
+    return {
+      external_id: j.id,
+      title: j.title.trim(),
+      company: name,
+      location,
+      remote,
+      url: `https://${company}.careers.hibob.com/jobs/${j.id}`,
+      description: clip(
+        [section("About the role", j.description), section("Responsibilities", j.responsibilities), section("Requirements", j.requirements), section("Benefits", j.benefits)]
+          .filter(Boolean)
+          .join("\n\n"),
+      ),
+      compensation: null,
+      posted_at: j.publishedAt ?? null,
+    };
+  });
+}
+
+// --- Breezy HR (JSON list) ---------------------------------------------------------------
+// Slug: the company's subdomain, "<company>" in <company>.breezy.hr. The list has no
+// descriptions; the posting pages' structured data has them.
+
+interface BreezyPosition {
+  id: string;
+  name: string;
+  url: string;
+  published_date?: string;
+  location?: { city?: string; country?: { name?: string }; is_remote?: boolean; name?: string };
+  locations?: { city?: string; country?: { name?: string }; is_remote?: boolean }[];
+  salary?: string;
+}
+
+async function fetchBreezy(company: string, name: string): Promise<FetchedJob[]> {
+  const positions = await getJson<BreezyPosition[]>(`https://${company}.breezy.hr/json`);
+  return positions.map((p) => {
+    const locs = p.locations?.length ? p.locations : p.location ? [p.location] : [];
+    const places = locs.map((l) => [l.city, l.country?.name].filter(Boolean).join(", ")).filter(Boolean);
+    const remote = locs.some((l) => l.is_remote);
+    return {
+      external_id: p.id,
+      title: p.name.trim(),
+      company: name,
+      location: [...new Set(places), remote ? "Remote" : ""].filter(Boolean).join(" | "),
+      remote,
+      url: p.url,
+      description: "", // from the posting page
+      compensation: p.salary?.trim() || null,
+      posted_at: p.published_date ?? null,
+    };
+  });
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1511,6 +1596,10 @@ export function fetchBoard(
       return fetchApple(source.last_success_at);
     case "avature":
       return fetchAvature(slug, company);
+    case "hibob":
+      return fetchHiBob(slug, company);
+    case "breezy":
+      return fetchBreezy(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1567,6 +1656,8 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   jobsch: () => "https://www.jobs.ch/en/vacancies/",
   apple: () => "https://jobs.apple.com/en-us/search?sort=newest",
   avature: (s) => `https://${s}/SearchJobs`,
+  hibob: (s) => `https://${s}.careers.hibob.com/`,
+  breezy: (s) => `https://${s}.breezy.hr/`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */
