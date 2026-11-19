@@ -456,6 +456,58 @@ async function fetchBreezy(company: string, name: string): Promise<FetchedJob[]>
   });
 }
 
+// --- BambooHR (careers JSON) ----------------------------------------------------------
+// Slug: the company's subdomain, "<company>" in <company>.bamboohr.com. The list gives
+// city and region; each job's detail adds the country, description and pay.
+
+interface BambooListing {
+  id: string;
+  jobOpeningName: string;
+  location?: { city?: string | null; state?: string | null };
+  atsLocation?: { city?: string | null; state?: string | null; country?: string | null };
+  isRemote?: boolean | null;
+  /** "0" on-site, "1" remote, "2" hybrid. */
+  locationType?: string | null;
+}
+
+async function fetchBambooHR(company: string, name: string): Promise<FetchedJob[]> {
+  const data = await getJson<{ result?: BambooListing[] }>(`https://${company}.bamboohr.com/careers/list`);
+  return (data.result ?? []).map((j) => {
+    const remote = Boolean(j.isRemote) || j.locationType === "1";
+    const place = [j.atsLocation?.city || j.location?.city, j.atsLocation?.country || j.atsLocation?.state || j.location?.state]
+      .filter(Boolean)
+      .join(", ");
+    return {
+      external_id: String(j.id),
+      title: j.jobOpeningName.trim(),
+      company: name,
+      location: [place, remote ? "Remote" : ""].filter(Boolean).join(" | "),
+      remote,
+      url: `https://${company}.bamboohr.com/careers/${j.id}`,
+      description: "", // from the job's detail
+      compensation: null,
+      posted_at: null,
+    };
+  });
+}
+
+/** A BambooHR job link: <company>.bamboohr.com/careers/<id>. */
+export const isBambooPosting = (url: string) => /^https:\/\/[a-z0-9-]+\.bamboohr\.com\/careers\/\d+/i.test(url);
+
+/** A BambooHR job's description and full location ("Glasgow, United Kingdom"). */
+export async function fetchBambooDescription(url: string): Promise<{ text: string; location?: string }> {
+  const m = url.match(/^https:\/\/([a-z0-9-]+)\.bamboohr\.com\/careers\/(\d+)/i);
+  if (!m) throw new Error(`Not a BambooHR job link: ${url}`);
+  const data = await getJson<{
+    result?: { jobOpening?: { description?: string; compensation?: string | null; location?: { city?: string; addressCountry?: string } } };
+  }>(`https://${m[1]}.bamboohr.com/careers/${m[2]}/detail`);
+  const j = data.result?.jobOpening;
+  if (!j?.description) throw new Error("BambooHR: no description in the job's detail");
+  const location = [j.location?.city, j.location?.addressCountry].filter(Boolean).join(", ");
+  const pay = j.compensation?.trim() ? `\n\nCompensation: ${j.compensation.trim()}` : "";
+  return { text: clip(htmlToText(j.description) + pay), location: location || undefined };
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1365,7 +1417,7 @@ export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\
  * to wait: Workday lists say "Best" or "3 Locations", Jobylon lists name the city only.
  */
 export const locationNeedsDetail = (url: string) =>
-  workdayFromUrl(url) !== null || isJobylonPosting(url) || isAvaturePosting(url) || isPersonioPosting(url);
+  workdayFromUrl(url) !== null || isJobylonPosting(url) || isAvaturePosting(url) || isPersonioPosting(url) || isBambooPosting(url);
 
 /** A Personio job link. Read from a careers page, its list location is a city only. */
 export const isPersonioPosting = (url: string) => /\.jobs\.personio\.(?:de|com)\/job\/\d+/i.test(url);
@@ -1600,6 +1652,8 @@ export function fetchBoard(
       return fetchHiBob(slug, company);
     case "breezy":
       return fetchBreezy(slug, company);
+    case "bamboohr":
+      return fetchBambooHR(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1658,6 +1712,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   avature: (s) => `https://${s}/SearchJobs`,
   hibob: (s) => `https://${s}.careers.hibob.com/`,
   breezy: (s) => `https://${s}.breezy.hr/`,
+  bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */
