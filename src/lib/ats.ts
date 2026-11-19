@@ -56,14 +56,37 @@ async function perTerm(terms: string[] | undefined, search: (term: string | null
 }
 const looksRemote = (s: string) => /\bremote\b/i.test(s);
 
+/**
+ * GET with one retry after a few seconds when the server hiccups (5xx, timeout, dropped
+ * connection): Lever's API returns the odd 502 for big boards. 4xx answers aren't retried.
+ */
 async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
-  const res = await fetch(url, {
-    headers: { Accept: accept, "User-Agent": USER_AGENT },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
-  return res;
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Accept: accept, "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (e) {
+      if (attempt < 2) {
+        await sleep(RETRY_DELAY_MS);
+        continue;
+      }
+      throw e;
+    }
+    if (res.ok) return res;
+    if (res.status >= 500 && attempt < 2) {
+      await res.body?.cancel();
+      await sleep(RETRY_DELAY_MS);
+      continue;
+    }
+    throw new Error(`${res.status} ${res.statusText} for ${url}`);
+  }
 }
+
+const RETRY_DELAY_MS = 5_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
   return (await (await get(url, "application/json", timeoutMs)).json()) as T;
