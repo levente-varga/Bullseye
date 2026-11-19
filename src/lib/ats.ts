@@ -593,6 +593,54 @@ export function phenomBase(url: URL, html: string): string | null {
   return m ? `${url.hostname.toLowerCase()}/${m[1]}/${m[2]}` : null;
 }
 
+// --- Rippling (public job board API) -----------------------------------------------------
+// Slug: the board name, "<board>" in ats.rippling.com/[<locale>/]<board>/jobs/<uuid>.
+// One request lists every job with its location; each job's detail has the description.
+
+const RIPPLING_API = "https://api.rippling.com/platform/api/ats/v1/board";
+
+interface RipplingJob {
+  uuid: string;
+  name: string;
+  url: string;
+  workLocation?: { label?: string };
+}
+
+async function fetchRippling(board: string, company: string): Promise<FetchedJob[]> {
+  const jobs = await getJson<RipplingJob[]>(`${RIPPLING_API}/${encodeURIComponent(board)}/jobs`);
+  return jobs.map((j) => {
+    const location = j.workLocation?.label?.trim() ?? "";
+    return {
+      external_id: j.uuid,
+      title: j.name.trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: j.url || `https://ats.rippling.com/${board}/jobs/${j.uuid}`,
+      description: "", // from the job's detail
+      compensation: null,
+      posted_at: null,
+    };
+  });
+}
+
+/** A Rippling job link, as [board, uuid]. */
+export function ripplingJob(url: string): [string, string] | null {
+  const m = url.match(/^https:\/\/ats\.rippling\.com\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?([a-z0-9-]+)\/jobs\/([0-9a-f-]{36})/i);
+  return m ? [m[1].toLowerCase(), m[2].toLowerCase()] : null;
+}
+
+/** A Rippling job's description (about the company, then the role) and locations. */
+export async function fetchRipplingDescription(board: string, uuid: string): Promise<{ text: string; location?: string }> {
+  const d = await getJson<{ description?: { company?: string; role?: string }; workLocations?: string[] }>(
+    `${RIPPLING_API}/${encodeURIComponent(board)}/jobs/${encodeURIComponent(uuid)}`,
+  );
+  const text = [d.description?.role, d.description?.company].filter(Boolean).map((h) => htmlToText(String(h))).join("\n\n");
+  if (!text) throw new Error("Rippling: no description for this job");
+  const location = [...new Set(d.workLocations ?? [])].join(" | ");
+  return { text: clip(text), location: location || undefined };
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1741,6 +1789,8 @@ export function fetchBoard(
       return fetchBambooHR(slug, company);
     case "phenom":
       return fetchPhenom(slug, company, terms);
+    case "rippling":
+      return fetchRippling(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1801,6 +1851,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   breezy: (s) => `https://${s}.breezy.hr/`,
   bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
   phenom: (s) => `https://${s}/search-results`,
+  rippling: (s) => `https://ats.rippling.com/${s}/jobs`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

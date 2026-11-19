@@ -16,6 +16,7 @@ export type Ats =
   | "breezy"
   | "bamboohr"
   | "phenom"
+  | "rippling"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -99,6 +100,7 @@ export const ATS_INFO: Record<
     // Searched by role: a job missing from one fetch isn't closed.
     partial: true,
   },
+  rippling: { fetch: "board", label: "Rippling", slugLabel: "Job board URL", slugExample: "ats.rippling.com/kinetic-games-careers/jobs" },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
   avature: {
     fetch: "paged",
