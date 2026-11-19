@@ -32,3 +32,6 @@ Checked on 2026-11-20.
   Digital's HiBob site.
 - **Nintendo Europe** (Cornerstone OnDemand, `nintendoeurope.csod.com`): its job search
   needs the anonymous token the careers page issues; skipped for now.
+- **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL
+  (even `robots.txt`) returns the same empty shell, with no job links or text; the jobs
+  come from an undocumented internal API.
