@@ -12,7 +12,6 @@ function jobRow(j: Job): string {
   return `<tr><td style="padding:10px 0;border-bottom:1px solid #eee">
     <a href="${esc(j.url)}" style="color:#111;font-weight:600;text-decoration:none">${esc(j.title)}</a><br>
     <span style="color:#555">${score}${esc(j.company)} · ${esc(j.location || "Location n/a")}${j.remote ? " · Remote" : ""}</span>
-    ${j.score_summary ? `<div style="color:#333;margin-top:4px">${esc(j.score_summary)}</div>` : ""}
   </td></tr>`;
 }
 
@@ -25,7 +24,11 @@ function wrap(body: string): string {
   const link = appUrl()
     ? `<p style="margin-top:24px"><a href="${esc(appUrl())}" style="color:#914708">Open Bullseye →</a></p>`
     : "";
-  return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;color:#111">${body}${link}</div>`;
+  // The logo is a hosted PNG: email clients don't show SVG or inline images reliably.
+  const logo = appUrl()
+    ? `<a href="${esc(appUrl())}" style="text-decoration:none;color:#111"><img src="${esc(appUrl())}/email-logo.png" width="24" height="24" alt="" style="vertical-align:middle;border:0"> <span style="vertical-align:middle;font-weight:600;font-size:15px">Bullseye</span></a>`
+    : "";
+  return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;color:#111">${logo}${body}${link}</div>`;
 }
 
 export function renderDigest(args: {
