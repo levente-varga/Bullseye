@@ -29,7 +29,10 @@ export type Ats =
  * aggregator: lists other companies' jobs (runs after direct sources, never overrides them).
  * suggests: its links are mined for direct sources to suggest.
  * partial: only shows recent ads, so ads missing from it aren't closed.
- * fixedSlug: the source has nothing to configure; this is stored as its slug.
+ * fixedSlug: the source has nothing to configure; this is stored as its slug (every
+ *   aggregator has one: it's followed from the catalog, not configured).
+ * searchable: an aggregator fetched with searches built from its followers' target roles
+ *   (search-terms.ts) instead of its whole board, which is too big to fetch.
  * defaultName: the name used when the form leaves it empty.
  * blurb: one line on what it covers, for the Sources page.
  */
@@ -43,6 +46,7 @@ export const ATS_INFO: Record<
     suggests?: boolean;
     partial?: boolean;
     fixedSlug?: string;
+    searchable?: boolean;
     defaultName?: string;
     blurb?: string;
   }
@@ -60,9 +64,11 @@ export const ATS_INFO: Record<
   jobylon: { label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
   jobtech: {
     label: "JobTech / Platsbanken (aggregator)",
-    slugLabel: "Search parameters (optional)",
-    slugExample: "occupation-field=apaJ_2ja_LuF",
+    slugLabel: "—",
+    slugExample: "platsbanken",
     aggregator: true,
+    fixedSlug: "platsbanken",
+    searchable: true,
     partial: true,
     defaultName: "Platsbanken (JobTech)",
     blurb: "Sweden's public job board, every employer",
@@ -79,12 +85,14 @@ export const ATS_INFO: Record<
   },
   himalayas: {
     label: "Himalayas (aggregator)",
-    slugLabel: "Search parameters (optional)",
-    slugExample: "q=developer&country=SE",
+    slugLabel: "—",
+    slugExample: "himalayas.app",
     aggregator: true,
+    fixedSlug: "himalayas.app",
+    searchable: true,
     partial: true,
     defaultName: "Himalayas",
-    blurb: "Remote jobs worldwide; filtered by a search",
+    blurb: "Remote jobs worldwide",
   },
   workingnomads: {
     label: "Working Nomads (aggregator)",
@@ -108,9 +116,10 @@ export const ATS_INFO: Record<
   },
   weworkremotely: {
     label: "We Work Remotely (aggregator)",
-    slugLabel: "Category (optional)",
-    slugExample: "remote-full-stack-programming-jobs",
+    slugLabel: "—",
+    slugExample: "weworkremotely.com",
     aggregator: true,
+    fixedSlug: "weworkremotely.com",
     partial: true,
     defaultName: "We Work Remotely",
     blurb: "Remote jobs, mostly US",
@@ -136,27 +145,31 @@ export const ATS_INFO: Record<
   },
   jobindex: {
     label: "Jobindex (aggregator)",
-    slugLabel: "Search parameters (optional)",
-    slugExample: "q=developer",
+    slugLabel: "—",
+    slugExample: "jobindex.dk",
     aggregator: true,
+    fixedSlug: "jobindex.dk",
+    searchable: true,
     partial: true,
     defaultName: "Jobindex",
     blurb: "Denmark's largest job board",
   },
   magnetme: {
     label: "Magnet.me (aggregator)",
-    slugLabel: "Filter parameters (optional)",
-    slugExample: "jobFunctions=IT",
+    slugLabel: "—",
+    slugExample: "magnet.me",
     aggregator: true,
+    fixedSlug: "magnet.me",
     partial: true,
     defaultName: "Magnet.me",
     blurb: "Netherlands and Belgium, students and graduates",
   },
   berlinstartupjobs: {
     label: "Berlin Startup Jobs (aggregator)",
-    slugLabel: "Category (optional)",
-    slugExample: "engineering",
+    slugLabel: "—",
+    slugExample: "berlinstartupjobs.com",
     aggregator: true,
+    fixedSlug: "berlinstartupjobs.com",
     partial: true,
     defaultName: "Berlin Startup Jobs",
     blurb: "Startups in Berlin",
@@ -172,9 +185,11 @@ export const ATS_INFO: Record<
   },
   jobsch: {
     label: "jobs.ch (aggregator)",
-    slugLabel: "Search parameters (optional)",
-    slugExample: "query=developer",
+    slugLabel: "—",
+    slugExample: "jobs.ch",
     aggregator: true,
+    fixedSlug: "jobs.ch",
+    searchable: true,
     partial: true,
     defaultName: "jobs.ch",
     blurb: "Switzerland's largest job board",
