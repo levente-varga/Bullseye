@@ -71,6 +71,11 @@ export function dedupeKey(url: string): string {
     const m = path.match(/\/jobs\/([0-9a-f-]{36})/i);
     if (m) return `hibob:${m[1].toLowerCase()}`;
   }
+  // BambooHR: <company>.bamboohr.com/careers/<id> (ids are per company)
+  if (host.endsWith(".bamboohr.com")) {
+    const m = path.match(/\/careers\/(\d+)/);
+    if (m) return `bamboohr:${host.split(".")[0]}:${m[1]}`;
+  }
   // Breezy: <company>.breezy.hr/p/<id>-<title>
   if (host.endsWith(".breezy.hr")) {
     const m = path.match(/\/p\/([0-9a-f]{8,})(?:-|\/|$)/i);
@@ -117,6 +122,7 @@ export type DetectedAts =
   | "avature"
   | "hibob"
   | "breezy"
+  | "bamboohr"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -156,6 +162,7 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
   if (host === "jobs.apple.com") return { ats: "apple", slug: "apple" };
   if (host.endsWith(".careers.hibob.com")) return { ats: "hibob", slug: host.split(".")[0] };
   if (host.endsWith(".breezy.hr") && host !== "app.breezy.hr") return { ats: "breezy", slug: host.split(".")[0] };
+  if (host.endsWith(".bamboohr.com") && !/^(www|api|app)\./.test(host)) return { ats: "bamboohr", slug: host.split(".")[0] };
   {
     const base = avatureBase(url);
     if (base) return { ats: "avature", slug: base };

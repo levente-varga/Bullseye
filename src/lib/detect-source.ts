@@ -34,6 +34,7 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
   },
   { ats: "hibob", re: /([a-z0-9-]+)\.careers\.hibob\.com/i, slug: (m) => m[1].toLowerCase() },
   { ats: "breezy", re: /([a-z0-9-]+)\.breezy\.hr/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "bamboohr", re: /([a-z0-9-]+)\.bamboohr\.com\/(?:careers|jobs)/i, slug: (m) => m[1].toLowerCase() },
   // Jobylon: the widget on a careers page (jbl_company_id = 2986), a posting page
   // (company_id = 2986;), or a company/embed link.
   {
