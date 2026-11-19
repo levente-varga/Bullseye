@@ -288,8 +288,9 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
               )}
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
               <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
-              <td className="max-md:w-full">
-                <div className="flex flex-wrap gap-1.5 md:justify-end">
+              {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
+              <td className="max-md:w-full md:w-px md:whitespace-nowrap">
+                <div className="flex flex-wrap gap-1.5 md:flex-nowrap md:justify-end">
                   <Toggle id={s.id} field="watchlist" on={s.watchlist} onLabel="Unwatch" offLabel="Watch" />
                   <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
                   <form action={deleteSource}>
