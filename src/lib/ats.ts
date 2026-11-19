@@ -673,6 +673,69 @@ async function fetchInRecruiting(slug: string, company: string): Promise<Fetched
   return [...out.values()];
 }
 
+// --- SAP SuccessFactors career sites (Volvo Group and other large employers) ---------------
+// Slug: the career site host, e.g. "jobs.volvogroup.com". Its search pages list 100 jobs
+// each (title, link, location); searched for the followers' target roles, a few pages per
+// role. (robots.txt keeps bots out of /services/, where its RSS lives.) The job pages'
+// structured data has the description.
+
+const SF_PAGE = 100;
+const SF_MAX_PAGES = 3;
+const SF_SPACING_MS = 1_000;
+
+/** "Ji'nan, CN, 250102" → "Ji'nan, China": country codes named, postal codes dropped. */
+function sfPlace(raw: string): string {
+  return raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p && !/^\d[\d\s-]*$/.test(p))
+    .map((p) => (/^[A-Z]{2}$/.test(p) ? countryName(p) : p))
+    .join(", ");
+}
+
+async function fetchSuccessFactors(host: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  let first = true;
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 0; page < SF_MAX_PAGES; page++) {
+      if (!first) await sleep(SF_SPACING_MS);
+      first = false;
+      const params = new URLSearchParams({ q: term ?? "", startrow: String(page * SF_PAGE) });
+      const html = await (await get(`https://${host}/search/?${params}`, "text/html")).text();
+      const rows = html.split(/<tr class="data-row"/).slice(1);
+      for (const row of rows) {
+        const a = row.match(/<a[^>]+href="(\/job\/[^"]+\/(\d+)\/)"[^>]*>([\s\S]*?)<\/a>/);
+        if (!a) continue;
+        const loc = row.match(/<span class="jobLocation">([\s\S]*?)<\/span>/)?.[1] ?? "";
+        const location = sfPlace(decodeEntities(loc.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " "));
+        out.push({
+          external_id: a[2],
+          title: decodeEntities(a[3].replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim(),
+          company,
+          location,
+          remote: looksRemote(location),
+          url: `https://${host}${decodeEntities(a[1])}`,
+          description: "", // from the job page's structured data
+          compensation: null,
+          posted_at: null,
+        });
+      }
+      const total = Number(html.match(/of <b>(\d+)<\/b>/)?.[1] ?? 0);
+      if (rows.length < SF_PAGE || (page + 1) * SF_PAGE >= total) break;
+    }
+    return out;
+  });
+}
+
+/** Whether a page comes from a SuccessFactors career site (Career Site Builder). */
+export const isSuccessFactorsPage = (html: string) => /rmkcdn\.successfactors|jobs2web|sfjobs/i.test(html);
+
+/** Number of jobs on a SuccessFactors career site, from one search page (Add board shows it). */
+export async function successFactorsTotal(host: string): Promise<number> {
+  const html = await (await get(`https://${host}/search/?q=&startrow=0`, "text/html")).text();
+  return Number(html.match(/of <b>(\d+)<\/b>/)?.[1] ?? 0);
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1825,6 +1888,8 @@ export function fetchBoard(
       return fetchRippling(slug, company);
     case "inrecruiting":
       return fetchInRecruiting(slug, company);
+    case "successfactors":
+      return fetchSuccessFactors(slug, company, terms);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -1886,6 +1951,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   bamboohr: (s) => `https://${s}.bamboohr.com/careers`,
   phenom: (s) => `https://${s}/search-results`,
   rippling: (s) => `https://ats.rippling.com/${s}/jobs`,
+  successfactors: (s) => `https://${s}/search/`,
   inrecruiting: (s) => {
     const [host, org, lang = "en"] = s.split("/");
     return `https://${host}/${org}/${lang}/career`;

@@ -18,6 +18,7 @@ export type Ats =
   | "phenom"
   | "rippling"
   | "inrecruiting"
+  | "successfactors"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -97,6 +98,15 @@ export const ATS_INFO: Record<
     label: "Phenom",
     slugLabel: "Careers site URL",
     slugExample: "join.disneycareers.com/global/en",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
+  successfactors: {
+    fetch: "search",
+    label: "SuccessFactors",
+    slugLabel: "Career site URL",
+    slugExample: "jobs.volvogroup.com",
     searchable: true,
     // Searched by role: a job missing from one fetch isn't closed.
     partial: true,
