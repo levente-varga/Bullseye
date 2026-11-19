@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, isAvaturePosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, isAvaturePosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -39,8 +39,12 @@ export async function describe(
   if (isAvaturePosting(job.url)) return fetchAvatureDescription(job.url);
   // Apple's posting pages render in the browser; their page data has the text.
   if (isAppleUrl(job.url)) return fetchAppleDescription(job.url);
-  // Jobylon lists name the city only: the posting's structured data adds the country.
-  if (isJobylonPosting(job.url)) return describePage(job.url);
+  // Jobylon lists and Personio careers pages name the city only: the posting's structured
+  // data adds the country.
+  if (isJobylonPosting(job.url) || isPersonioPosting(job.url)) {
+    const { text, location } = await describePage(job.url);
+    return { text, location };
+  }
   // Magnet.me's API has no company names; its list already has the full location
   // ("Utrecht, Netherlands"), which the page would shorten to a country code.
   if (/^https:\/\/magnet\.me\/en\/opportunity\//.test(job.url)) {
@@ -111,7 +115,9 @@ function postingLocation(posting: { jobLocation?: Json }): string | undefined {
     .map((pl) => {
       const a = (pl && typeof pl === "object" && !Array.isArray(pl) ? pl.address : null) as Record<string, Json> | null;
       if (!a || typeof a !== "object") return "";
-      const country = typeof a.addressCountry === "object" && a.addressCountry ? (a.addressCountry as Record<string, Json>).name : a.addressCountry;
+      const raw = typeof a.addressCountry === "object" && a.addressCountry ? (a.addressCountry as Record<string, Json>).name : a.addressCountry;
+      // A two-letter code ("DE", Personio) reads as the country's name, like the filters expect.
+      const country = typeof raw === "string" && /^[A-Za-z]{2}$/.test(raw.trim()) ? countryName(raw.trim()) : raw;
       if (typeof country === "string" && country.trim()) {
         return [a.addressLocality, country].filter((x) => typeof x === "string" && x.trim()).join(", ");
       }
