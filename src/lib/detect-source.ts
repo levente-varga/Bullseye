@@ -69,6 +69,15 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (slug && !IGNORED_SLUGS.test(slug)) candidates.push({ ats: d.ats, slug });
   }
 
+  // 1b. A Greenhouse board embedded on the company's own site (riotgames.com/…?gh_jid=123):
+  // the link names the job, not the board. Guess the board from the domain and confirm
+  // the job is on it.
+  const ghJob = url.searchParams.get("gh_jid");
+  if (!candidates.length && ghJob && /^\d+$/.test(ghJob)) {
+    const board = await greenhouseBoardForJob(url.hostname, ghJob);
+    if (board) candidates.push({ ats: "greenhouse", slug: board });
+  }
+
   // 2. A Teamtailor or Recruitee career site on this host.
   if (!candidates.length) {
     const found = await probeHost(url.hostname.toLowerCase());
@@ -116,6 +125,28 @@ export async function detectSource(input: string): Promise<Detected | { error: s
   return {
     error: `Found what looks like a ${ATS_INFO[candidates[0].ats].label} board ("${candidates[0].slug}"), but fetching it failed: ${failures[0]}.`,
   };
+}
+
+/**
+ * The Greenhouse board a job id belongs to, guessed from the site's domain
+ * ("www.riotgames.com" → "riotgames", "careers.acme-games.com" → "acmegames", "acme-games")
+ * and confirmed by asking Greenhouse for that job on the board.
+ */
+async function greenhouseBoardForJob(host: string, jobId: string): Promise<string | null> {
+  const labels = host.toLowerCase().split(".").slice(0, -1).filter((l) => !/^(www|careers?|jobs?|work|apply)$/.test(l));
+  const guesses = [...new Set(labels.flatMap((l) => [l.replace(/-/g, ""), l]))].slice(0, 4);
+  for (const slug of guesses) {
+    try {
+      const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs/${jobId}`, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) return slug;
+    } catch {
+      // try the next guess
+    }
+  }
+  return null;
 }
 
 async function fetchText(url: string): Promise<string | null> {
