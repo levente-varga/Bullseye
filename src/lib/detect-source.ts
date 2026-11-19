@@ -1,7 +1,9 @@
 import {
   USER_AGENT,
   appleTotal,
+  eightfoldTotal,
   fetchBoard,
+  isEightfoldSite,
   isSuccessFactorsPage,
   phenomBase,
   phenomTotal,
@@ -86,6 +88,12 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     if (board) candidates.push({ ats: "greenhouse", slug: board });
   }
 
+  // 1c. An Eightfold careers site (explore.jobs.netflix.net/careers/job/<id>, *.eightfold.ai):
+  // confirmed by its jobs API answering.
+  if (!candidates.length && (/^\/careers(\/job\/\d+)?\/?$/.test(url.pathname) || url.hostname.endsWith(".eightfold.ai"))) {
+    if (await isEightfoldSite(url.hostname)) candidates.push({ ats: "eightfold", slug: url.hostname.toLowerCase() });
+  }
+
   // 2. A Teamtailor or Recruitee career site on this host.
   if (!candidates.length) {
     const found = await probeHost(url.hostname.toLowerCase());
@@ -127,6 +135,8 @@ export async function detectSource(input: string): Promise<Detected | { error: s
       // Phenom is searched by role; its total comes from one search page.
       if (c.ats === "phenom") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await phenomTotal(c.slug) };
       if (c.ats === "successfactors") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await successFactorsTotal(c.slug) };
+      // Eightfold lists 10 a page: its count comes with the first.
+      if (c.ats === "eightfold") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await eightfoldTotal(c.slug) };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -179,7 +189,7 @@ function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
   if (ats === "inrecruiting") slug = slug.split("/")[1] ?? slug; // the company segment
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors"].includes(ats)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors", "eightfold"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
   // "disneycareers" → "disney"; a Rippling board "kinetic-games-careers" → "kinetic-games"
