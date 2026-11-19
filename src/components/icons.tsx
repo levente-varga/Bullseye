@@ -105,3 +105,34 @@ export const IconClose = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 4l8 8M12 4l-8 8" />
   </svg>
 );
+/** Watch: outlined, or `filled` while watching (in the current colour). */
+export const IconStar = ({ filled, ...p }: SVGProps<SVGSVGElement> & { filled?: boolean }) => (
+  <svg {...base(p)} strokeLinejoin="round">
+    <path
+      d="M8 1.9l1.85 3.76 4.15.6-3 2.93.71 4.13L8 11.37l-3.71 1.95.71-4.13-3-2.93 4.15-.6z"
+      fill={filled ? "currentColor" : "none"}
+    />
+  </svg>
+);
+export const IconPause = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5.5 3.5v9M10.5 3.5v9" />
+  </svg>
+);
+export const IconPlay = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 3.5l7.5 4.5L5 12.5z" />
+  </svg>
+);
+/** Follow. */
+export const IconPlus = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M8 3v10M3 8h10" />
+  </svg>
+);
+/** Unfollow. */
+export const IconMinus = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M3 8h10" />
+  </svg>
+);

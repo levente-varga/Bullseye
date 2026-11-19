@@ -19,3 +19,10 @@ export function ErrorDetails({ error }: { error: string }) {
     </details>
   );
 }
+
+/** The full error text (pretty, scrollable): for a popover or a panel that's already opened. */
+export function ErrorDetailsText({ error }: { error: string }) {
+  return (
+    <pre className="mono muted max-h-64 overflow-auto text-[11px] break-all whitespace-pre-wrap text-[var(--bad)]">{error}</pre>
+  );
+}

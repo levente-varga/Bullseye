@@ -195,6 +195,8 @@ input[type="radio"]:checked:hover {
   }
   .table td { @apply px-3 py-2.5 align-middle; border-bottom: 1px solid var(--border); }
   .table tr:last-child td { border-bottom: 0; }
+  /* Tighter cells, for tables that share the row with a side column (Sources). */
+  .table-compact th, .table-compact td { @apply px-2; }
   .table tbody tr:hover td { background: var(--surface-2); }
 
   /* Below md, a .table-stack lays each row out as a wrapping card instead of columns,
@@ -214,6 +216,26 @@ input[type="radio"]:checked:hover {
     .table-stack td { display: block; padding: 0; border: 0; }
     .table-stack tbody tr:hover td { background: transparent; }
     .table-stack td[data-label]::before {
+      content: attr(data-label); margin-right: 0.375rem;
+      font-family: var(--font-sans); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--faint);
+    }
+  }
+
+  /* The same card layout, by the table's own width rather than the window's (Sources,
+     whose tables share the row with a side column): below 32rem of room. The wrapper is
+     an @container; cells opt in with @max-lg:* utilities. */
+  @container (max-width: 31.99rem) {
+    .table-stack-lg thead { display: none; }
+    .table-stack-lg, .table-stack-lg tbody { display: block; }
+    .table-stack-lg tr {
+      display: flex; flex-wrap: wrap; align-items: center; column-gap: 1rem; row-gap: 0.5rem;
+      padding: 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    .table-stack-lg tr:last-child { border-bottom: 0; }
+    .table-stack-lg td { display: block; padding: 0; border: 0; }
+    .table-stack-lg tbody tr:hover td { background: transparent; }
+    .table-stack-lg td[data-label]::before {
       content: attr(data-label); margin-right: 0.375rem;
       font-family: var(--font-sans); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
       color: var(--faint);

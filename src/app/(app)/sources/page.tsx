@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ErrorDetails } from "@/components/ErrorDetails";
+import { ErrorDetailsText } from "@/components/ErrorDetails";
+import { IconChevronDown, IconMinus, IconPause, IconPlay, IconPlus, IconStar } from "@/components/icons";
 import { AddBoardForm } from "@/components/AddBoardForm";
 import { Notice } from "@/components/Notice";
 import { SourceName } from "@/components/SourceName";
@@ -80,18 +82,18 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         }
       />
 
+      {/* The add form sits beside the tables (sticky), so its result is in view without scrolling. */}
+      <div className="split">
       <div className="space-y-10">
         <section>
           <SectionHeader title="Company boards" count={boards.length} />
           <Panel>
             {boards.length === 0 ? (
-              <Empty>No company boards yet. Paste a careers page below, or pick from the suggestions.</Empty>
+              <Empty>No company boards yet. Paste a careers page into Add a board, or pick from the suggestions.</Empty>
             ) : (
               <SourceTable rows={boards} open={open} sort={sort} watchEvery={watchEvery} />
             )}
           </Panel>
-          {/* Auto-detect finds the job system and board from any careers page or posting link. */}
-          <AddBoardForm systems={COMPANY_SYSTEM_NAMES} />
         </section>
 
         <section id="aggregators" className="scroll-mt-6">
@@ -133,11 +135,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                         <span className="muted"> · {ATS_INFO[a].blurb}</span>
                         {ATS_INFO[a].searchable && <span className="faint"> · searched for your target roles</span>}
                       </div>
-                      <form action={addSource}>
+                      <form action={addSource} title="Follow">
                         <input type="hidden" name="ats" value={a} />
                         <input type="hidden" name="slug" value="" />
-                        <SubmitButton className="btn" done="Following">
-                          Follow
+                        <SubmitButton className="btn btn-icon" aria-label={`Follow ${ATS_INFO[a].defaultName}`}>
+                          <IconPlus />
                         </SubmitButton>
                       </form>
                     </li>
@@ -201,6 +203,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
         )}
 
       </div>
+        <aside className="lg:sticky lg:top-6">
+          {/* Auto-detect finds the job system and board from any careers page or posting link. */}
+          <AddBoardForm systems={COMPANY_SYSTEM_NAMES} />
+        </aside>
+      </div>
     </>
   );
 }
@@ -208,36 +215,40 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 /** One table of sources (company boards or aggregators), with health, counts and actions. */
 function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort: Sort; watchEvery: number; aggregators?: boolean }) {
   return (
-    <div className="md:overflow-x-auto">
-      <table className="table table-stack max-md:block md:min-w-[720px]">
+    // No horizontal scroll: every cell wraps (names, slugs) or is fixed and small, and the
+    // error opens as a popover, which a scrolling wrapper would clip.
+    <div className="@container">
+      <table className="table table-compact table-stack-lg @max-lg:block">
         <thead>
           <tr>
-            <th className="w-10">#</th>
-            <SortHeader sort={props.sort} by="name">Source</SortHeader>
-            {/* An aggregator's type is its name: no column for it. */}
-            {!props.aggregators && (
-              <SortHeader sort={props.sort} by="type" className="w-40">
+            <SortHeader sort={props.sort} by="name" className="min-w-[9rem]">
+              Source
+            </SortHeader>
+            {/* An aggregator's type is its name: its column only says how it fetches. */}
+            {props.aggregators ? (
+              <SortHeader sort={props.sort} by="requests">
+                Fetch
+              </SortHeader>
+            ) : (
+              <SortHeader sort={props.sort} by="type">
                 Type
               </SortHeader>
             )}
-            <SortHeader sort={props.sort} by="requests" className="w-32">
-              Fetch
-            </SortHeader>
-            <SortHeader sort={props.sort} by="open" className="w-20" right>
+            <SortHeader sort={props.sort} by="open" right>
               Open
             </SortHeader>
-            <SortHeader sort={props.sort} by="checked" className="w-28">
+            <SortHeader sort={props.sort} by="checked">
               Checked
             </SortHeader>
-            <th className="w-64" />
+            <th className="w-px" />
           </tr>
         </thead>
         <tbody>
-          {props.rows.map((s, i) => (
+          {props.rows.map((s) => (
             <tr key={s.id} className={`group ${s.enabled ? "" : "opacity-55"}`}>
-              <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
-              <td className="max-md:w-full">
-                <div className="flex flex-wrap items-center gap-2">
+              <td className="@max-lg:w-full">
+                {/* At least 9rem: names wrap anywhere, so without it the column would shrink to a letter. */}
+                <div className="flex min-w-[9rem] flex-wrap items-center gap-2">
                   <Dot
                     tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
                     title={
@@ -252,39 +263,45 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   />
                   <SourceName id={s.id} name={s.company_name} href={ATS_BOARD_URL[s.ats](s.slug)} />
                   {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
-                  {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
+                  {s.enabled && s.last_error && <FailingBadge error={s.last_error} />}
                 </div>
                 {/* A fixed slug (aggregators, Apple) says nothing: only a configured board shows its slug. */}
                 {!ATS_INFO[s.ats]?.fixedSlug && (
-                  <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
+                  <div className="mono faint mt-0.5 pl-3.5 text-[11px] [overflow-wrap:anywhere]">
                     {s.slug}
                     {s.country && ` · ${s.country.toUpperCase()} only`}
                   </div>
                 )}
-                {s.last_error && (
-                  <div className="mt-1 max-w-[520px] min-w-0 pl-3.5 text-[12px]">
-                    <ErrorDetails error={s.last_error} />
+              </td>
+              {/* Company boards: the job system, with how it fetches under it. Aggregators: only the fetch. */}
+              <td data-label={props.aggregators ? "Fetch" : "Type"}>
+                {!props.aggregators && (
+                  <div className="mb-1">
+                    <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
                   </div>
                 )}
-              </td>
-              {!props.aggregators && (
-                <td>
-                  <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{(ATS_INFO[s.ats]?.label ?? s.ats).replace(" (aggregator)", "")}</Pill>
-                </td>
-              )}
-              <td data-label="Fetch">
                 <FetchCell source={s} />
               </td>
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
               <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
               {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
-              <td className="max-md:w-full md:w-px md:whitespace-nowrap">
-                <div className="flex flex-wrap gap-1.5 md:flex-nowrap md:justify-end">
+              <td className="@max-lg:w-full @lg:w-px @lg:whitespace-nowrap">
+                <div className="flex flex-wrap gap-1.5 @lg:flex-nowrap @lg:justify-end">
                   <WatchToggle source={s} watchEvery={props.watchEvery} />
-                  <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
-                  <form action={deleteSource}>
+                  <Toggle
+                    id={s.id}
+                    field="enabled"
+                    on={!s.enabled}
+                    value={!s.enabled}
+                    label={s.enabled ? "Pause" : "Resume"}
+                    title={s.enabled ? "Pause: skip this source on fetches" : "Paused: click to resume"}
+                    icon={s.enabled ? <IconPause /> : <IconPlay />}
+                  />
+                  <form action={deleteSource} title="Unfollow">
                     <input type="hidden" name="id" value={s.id} />
-                    <SubmitButton className="btn">Unfollow</SubmitButton>
+                    <SubmitButton className="btn btn-icon" aria-label={`Unfollow ${s.company_name}`}>
+                      <IconMinus />
+                    </SubmitButton>
                   </form>
                 </div>
               </td>
@@ -356,14 +373,46 @@ function SortHeader(props: { sort: Sort; by: SortKey; className?: string; right?
   );
 }
 
-function Toggle(props: { id: string; field: string; on: boolean; onLabel: string; offLabel: string; title?: string }) {
+/**
+ * An icon button that sets one subscription field. Its icon shows the state (a filled
+ * star, a play icon); `on` is that state for screen readers, `value` what a click saves. The label is for screen readers, the title for hover.
+ */
+function Toggle(props: { id: string; field: string; on: boolean; value: boolean; label: string; title: string; icon: ReactNode }) {
   return (
     <form action={updateSource} title={props.title}>
       <input type="hidden" name="id" value={props.id} />
       <input type="hidden" name="field" value={props.field} />
-      <input type="hidden" name="value" value={String(!props.on)} />
-      <SubmitButton className="btn">{props.on ? props.onLabel : props.offLabel}</SubmitButton>
+      <input type="hidden" name="value" value={String(props.value)} />
+      <SubmitButton
+        className="btn btn-icon"
+        aria-label={props.label}
+        aria-pressed={props.on}
+      >
+        {props.icon}
+      </SubmitButton>
     </form>
+  );
+}
+
+/**
+ * The Failing badge; click it for the error. The error opens as a popover over the
+ * table, so a long message never widens the Source column.
+ */
+function FailingBadge({ error }: { error: string }) {
+  return (
+    <details className="group relative">
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden" title="Show the error">
+        <Pill tone="bad">
+          <span className="inline-flex items-center gap-0.5">
+            Failing
+            <IconChevronDown width={10} height={10} className="transition-transform group-open:rotate-180" />
+          </span>
+        </Pill>
+      </summary>
+      <div className="panel absolute top-full left-0 z-20 mt-1 w-[min(32rem,80vw)] p-2 shadow-lg">
+        <ErrorDetailsText error={error} />
+      </div>
+    </details>
   );
 }
 
@@ -389,18 +438,28 @@ function WatchToggle({ source, watchEvery }: { source: Source; watchEvery: numbe
   const mode = FETCH_MODES[ATS_INFO[source.ats]?.fetch ?? "board"];
   if (!mode.watchable && !source.watchlist) {
     return (
-      <button type="button" className="btn" disabled title={`${mode.label} sources take too many requests to check at the watchlist interval.`}>
-        Watch
-      </button>
+      <span title={`${mode.label} sources take too many requests to check at the watchlist interval.`}>
+        <button type="button" className="btn btn-icon" disabled aria-label="Watch (not available)">
+          <IconStar />
+        </button>
+      </span>
     );
   }
   const perDay = watchEvery > 0 && source.last_request_count != null ? Math.round((source.last_request_count * 1440) / watchEvery) : null;
   const title = source.watchlist
-    ? undefined
+    ? "Watching: checked at the watchlist interval, strong matches emailed. Click to stop."
     : watchEvery === 0
-      ? "The watchlist check is off (Criteria)."
-      : perDay != null
-        ? `About ${perDay} requests a day at the watchlist interval.`
-        : undefined;
-  return <Toggle id={source.id} field="watchlist" on={source.watchlist} onLabel="Unwatch" offLabel="Watch" title={title} />;
+      ? "Watch (the watchlist check is off in Criteria)"
+      : `Watch: check at the watchlist interval and email strong matches${perDay != null ? ` (about ${perDay} requests a day)` : ""}`;
+  return (
+    <Toggle
+      id={source.id}
+      field="watchlist"
+      on={source.watchlist}
+      value={!source.watchlist}
+      label={source.watchlist ? "Unwatch" : "Watch"}
+      title={title}
+      icon={<IconStar filled={source.watchlist} className={source.watchlist ? "text-[var(--accent-strong)]" : undefined} />}
+    />
+  );
 }
