@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ErrorDetails } from "@/components/ErrorDetails";
+import { ErrorDetailsText } from "@/components/ErrorDetails";
+import { IconChevronDown } from "@/components/icons";
 import { AddBoardForm } from "@/components/AddBoardForm";
 import { Notice } from "@/components/Notice";
 import { SourceName } from "@/components/SourceName";
@@ -208,21 +209,24 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 /** One table of sources (company boards or aggregators), with health, counts and actions. */
 function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort: Sort; watchEvery: number; aggregators?: boolean }) {
   return (
-    <div className="md:overflow-x-auto">
-      <table className="table table-stack max-md:block md:min-w-[720px]">
+    // No horizontal scroll: every cell wraps (names, slugs) or is fixed and small, and the
+    // error opens as a popover, which a scrolling wrapper would clip.
+    <div>
+      <table className="table table-stack-lg max-lg:block">
         <thead>
           <tr>
             <th className="w-10">#</th>
             <SortHeader sort={props.sort} by="name">Source</SortHeader>
-            {/* An aggregator's type is its name: no column for it. */}
-            {!props.aggregators && (
+            {/* An aggregator's type is its name: its column only says how it fetches. */}
+            {props.aggregators ? (
+              <SortHeader sort={props.sort} by="requests" className="w-32">
+                Fetch
+              </SortHeader>
+            ) : (
               <SortHeader sort={props.sort} by="type" className="w-40">
                 Type
               </SortHeader>
             )}
-            <SortHeader sort={props.sort} by="requests" className="w-32">
-              Fetch
-            </SortHeader>
             <SortHeader sort={props.sort} by="open" className="w-20" right>
               Open
             </SortHeader>
@@ -235,8 +239,8 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
         <tbody>
           {props.rows.map((s, i) => (
             <tr key={s.id} className={`group ${s.enabled ? "" : "opacity-55"}`}>
-              <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
-              <td className="max-md:w-full">
+              <td className="mono faint text-[12px] max-lg:hidden">{pad2(i + 1)}</td>
+              <td className="max-lg:w-full">
                 <div className="flex flex-wrap items-center gap-2">
                   <Dot
                     tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
@@ -252,34 +256,30 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                   />
                   <SourceName id={s.id} name={s.company_name} href={ATS_BOARD_URL[s.ats](s.slug)} />
                   {s.watchlist && <Pill tone="accent">Watchlist</Pill>}
-                  {s.enabled && s.last_error && <Pill tone="bad">Failing</Pill>}
+                  {s.enabled && s.last_error && <FailingBadge error={s.last_error} />}
                 </div>
                 {/* A fixed slug (aggregators, Apple) says nothing: only a configured board shows its slug. */}
                 {!ATS_INFO[s.ats]?.fixedSlug && (
-                  <div className="mono faint mt-0.5 pl-3.5 text-[11px]">
+                  <div className="mono faint mt-0.5 pl-3.5 text-[11px] [overflow-wrap:anywhere]">
                     {s.slug}
                     {s.country && ` · ${s.country.toUpperCase()} only`}
                   </div>
                 )}
-                {s.last_error && (
-                  <div className="mt-1 max-w-[520px] min-w-0 pl-3.5 text-[12px]">
-                    <ErrorDetails error={s.last_error} />
+              </td>
+              {/* Company boards: the job system, with how it fetches under it. Aggregators: only the fetch. */}
+              <td data-label={props.aggregators ? "Fetch" : "Type"}>
+                {!props.aggregators && (
+                  <div className="mb-1">
+                    <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
                   </div>
                 )}
-              </td>
-              {!props.aggregators && (
-                <td>
-                  <Pill tone={ATS_INFO[s.ats]?.aggregator ? "warn" : "muted"}>{(ATS_INFO[s.ats]?.label ?? s.ats).replace(" (aggregator)", "")}</Pill>
-                </td>
-              )}
-              <td data-label="Fetch">
                 <FetchCell source={s} />
               </td>
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
               <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
               {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
-              <td className="max-md:w-full md:w-px md:whitespace-nowrap">
-                <div className="flex flex-wrap gap-1.5 md:flex-nowrap md:justify-end">
+              <td className="max-lg:w-full lg:w-px lg:whitespace-nowrap">
+                <div className="flex flex-wrap gap-1.5 lg:flex-nowrap lg:justify-end">
                   <WatchToggle source={s} watchEvery={props.watchEvery} />
                   <Toggle id={s.id} field="enabled" on={s.enabled} onLabel="Pause" offLabel="Resume" />
                   <form action={deleteSource}>
@@ -364,6 +364,28 @@ function Toggle(props: { id: string; field: string; on: boolean; onLabel: string
       <input type="hidden" name="value" value={String(!props.on)} />
       <SubmitButton className="btn">{props.on ? props.onLabel : props.offLabel}</SubmitButton>
     </form>
+  );
+}
+
+/**
+ * The Failing badge; click it for the error. The error opens as a popover over the
+ * table, so a long message never widens the Source column.
+ */
+function FailingBadge({ error }: { error: string }) {
+  return (
+    <details className="group relative">
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden" title="Show the error">
+        <Pill tone="bad">
+          <span className="inline-flex items-center gap-0.5">
+            Failing
+            <IconChevronDown width={10} height={10} className="transition-transform group-open:rotate-180" />
+          </span>
+        </Pill>
+      </summary>
+      <div className="panel absolute top-full left-0 z-20 mt-1 w-[min(32rem,80vw)] p-2 shadow-lg">
+        <ErrorDetailsText error={error} />
+      </div>
+    </details>
   );
 }
 

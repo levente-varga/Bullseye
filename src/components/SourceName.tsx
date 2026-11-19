@@ -42,15 +42,16 @@ export function SourceName({ id, name, href }: { id: string; name: string; href:
   }
 
   return (
-    <span className="inline-flex items-center gap-1">
-      <a href={href} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+    <span className="inline-flex min-w-0 items-center gap-1">
+      {/* Long names wrap anywhere instead of widening the table. */}
+      <a href={href} target="_blank" rel="noreferrer" className="min-w-0 font-medium [overflow-wrap:anywhere] hover:underline">
         {name}
       </a>
       <button
         type="button"
         onClick={() => setEditing(true)}
         title="Rename"
-        className="faint p-0.5 hover:text-[var(--fg)] focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        className="faint shrink-0 p-0.5 hover:text-[var(--fg)] focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
       >
         <IconPencil width={13} height={13} />
         <span className="sr-only">Rename {name}</span>
