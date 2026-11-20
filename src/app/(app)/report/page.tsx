@@ -12,7 +12,10 @@ import { buildSeries, dayStart, type TopUp } from "@/lib/credits";
 import { formatRunCost, formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
 import { addCreditEntry, deleteCreditEntry } from "../actions";
-import type { JobStatus, Run } from "@/lib/types";
+import { SCORING_MODELS, type JobStatus, type Run } from "@/lib/types";
+
+/** A row of ai_usage: an AI task outside runs. */
+type AiTask = { id: string; kind: string; model: string; tokens_in: number; tokens_out: number; cost_usd: number | string; detail: string; created_at: string };
 
 const FUNNEL: { status: JobStatus; label: string; tone: Tone }[] = [
   { status: "new", label: "Waiting to be scored", tone: "muted" },
@@ -110,9 +113,18 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
         .gt("stats->cost_usd", 0)
         .limit(10000)
     : { data: [] };
-  const costedRuns = (spendRows ?? [])
-    .filter((r) => r.finished_at && typeof r.stats?.cost_usd === "number")
-    .map((r) => ({ at: r.finished_at as string, cost_usd: r.stats.cost_usd as number }));
+  // Other AI tasks (CV imports, drafts): your own, or everyone's for the admin (RLS).
+  const { data: taskRows } = await supabase.from("ai_usage").select("*").order("created_at", { ascending: false }).limit(50);
+  const aiTasks = (taskRows ?? []) as AiTask[];
+  // The credit chart subtracts runs and these tasks alike.
+  const costedRuns = [
+    ...(spendRows ?? [])
+      .filter((r) => r.finished_at && typeof r.stats?.cost_usd === "number")
+      .map((r) => ({ at: r.finished_at as string, cost_usd: r.stats.cost_usd as number })),
+    ...aiTasks
+      .filter((t) => firstTopUp && t.created_at >= new Date(dayStart(firstTopUp)).toISOString())
+      .map((t) => ({ at: t.created_at, cost_usd: Number(t.cost_usd) })),
+  ];
   const now = nowMs();
   const series = buildSeries(topUps, costedRuns, now);
   const todayIso = new Date(now).toISOString().slice(0, 10);
@@ -331,10 +343,69 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
             )}
           </Panel>
         </section>
+
+        <section id="ai-tasks" className="scroll-mt-6">
+          <SectionHeader title="Other AI tasks" count={aiTasks.length} actions={<span className="faint">AI spend outside runs: CV imports, drafts</span>} />
+          <Panel>
+            {aiTasks.length === 0 ? (
+              <Empty>None yet. CV imports and CV or cover letter drafts show up here with their cost.</Empty>
+            ) : (
+              <div className="md:overflow-x-auto">
+                <table className="table table-stack max-md:block md:min-w-[560px]">
+                  <thead>
+                    <tr>
+                      <th className="w-24">When</th>
+                      <th>Task</th>
+                      <th className="w-28">Model</th>
+                      <th className="w-32 text-right">Tokens</th>
+                      <th className="w-24 text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aiTasks.map((t) => (
+                      <tr key={t.id}>
+                        <td className="mono muted text-[12px]" title={new Date(t.created_at).toLocaleString("en-GB", { timeZone: "UTC" }) + " UTC"}>
+                          {agoText(t.created_at)}
+                        </td>
+                        <td className="text-[13px] max-md:w-full">
+                          {AI_TASKS[t.kind] ?? t.kind}
+                          {t.detail && <span className="mono faint text-[12px]"> · {t.detail}</span>}
+                        </td>
+                        <td className="muted text-[12px]" data-label="Model">
+                          {(SCORING_MODELS.find((m) => m.id === t.model)?.label ?? t.model).replace("Claude ", "")}
+                        </td>
+                        <td className="mono muted text-right text-[12px]" data-label="Tokens">
+                          {n(t.tokens_in)} in · {n(t.tokens_out)} out
+                        </td>
+                        <td className="mono text-right text-[12px]" data-label="Cost">
+                          {formatRunCost(Number(t.cost_usd))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {aiTasks.length > 0 && (
+              <div className="border-t border-[var(--border)] px-3 py-2.5 text-[12px]">
+                <span className="faint">
+                  Total <span className="mono text-[var(--fg)]">{formatUsd(aiTasks.reduce((a, t) => a + Number(t.cost_usd), 0))}</span> across these
+                </span>
+              </div>
+            )}
+          </Panel>
+        </section>
       </div>
     </>
   );
 }
+
+/** Labels for ai_usage kinds. */
+const AI_TASKS: Record<string, string> = {
+  career_import: "CV import into the career",
+  cv_draft: "CV draft",
+  cover_letter: "Cover letter draft",
+};
 
 /** Bookkeeping counters, shown under "details" (with their labels), in this order. */
 const RUN_DETAILS: [key: string, label: string][] = [
