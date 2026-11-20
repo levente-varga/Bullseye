@@ -197,11 +197,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
       </div>
         {/* Full height, so the panel can stay in view while the page scrolls. The invisible
             heading lines the panel up with the top of the Company boards table. */}
-        <aside className="lg:self-stretch">
-          <div aria-hidden className="invisible max-lg:hidden">
+        <aside className="max-xl:order-first xl:self-stretch">
+          <div aria-hidden className="invisible max-xl:hidden">
             <SectionHeader title="Company boards" />
           </div>
-          <div className="lg:sticky lg:top-6">
+          <div className="xl:sticky xl:top-6">
             {/* Auto-detect finds the job system and board from any careers page or posting link. */}
             <AddBoardForm systems={COMPANY_SYSTEM_NAMES} />
           </div>
@@ -217,7 +217,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
     // No horizontal scroll: every cell wraps (names, slugs) or is fixed and small, and the
     // error opens as a popover, which a scrolling wrapper would clip.
     <div className="@container">
-      <table className="table table-compact table-stack-lg @max-lg:block">
+      <table className="table table-compact table-stack-lg @max-[30rem]:block">
         <thead>
           <tr>
             <SortHeader sort={props.sort} by="name" className="min-w-[6.5rem]">
@@ -225,7 +225,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
             </SortHeader>
             {/* An aggregator's type is its name: no Type column for it. */}
             {!props.aggregators && (
-              <SortHeader sort={props.sort} by="type">
+              <SortHeader sort={props.sort} by="type" className="@max-[44rem]:hidden">
                 Type
               </SortHeader>
             )}
@@ -244,10 +244,11 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
         <tbody>
           {props.rows.map((s) => (
             <tr key={s.id} className={`group ${s.enabled ? "" : "opacity-55"}`}>
-              <td className="@max-lg:w-full">
-                {/* A minimum: names wrap anywhere, so without it the column would shrink to a letter. */}
-                <div className="flex min-w-[6.5rem] flex-wrap items-center gap-2">
-                  <Dot
+              <td className="@max-[30rem]:w-full">
+                {/* The dot stays beside the name; the name wraps between words (at least 7rem wide). */}
+                <div className="flex min-w-[7rem] items-start gap-2">
+                  <span className="flex h-[1lh] shrink-0 items-center">
+                    <Dot
                     tone={!s.enabled ? "muted" : s.last_error ? "bad" : s.last_checked_at ? "ok" : "warn"}
                     title={
                       !s.enabled
@@ -259,19 +260,27 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                             : "Not checked yet: fetched with the next daily run"
                     }
                   />
-                  <SourceName id={s.id} name={s.company_name} href={ATS_BOARD_URL[s.ats](s.slug)} />
-                  {s.enabled && s.last_error && <FailingBadge error={s.last_error} />}
-                </div>
-                {/* A fixed slug (aggregators, Apple) says nothing: only a configured board shows its slug. */}
-                {!ATS_INFO[s.ats]?.fixedSlug && (
-                  <div className="mono faint mt-0.5 pl-3.5 text-[11px] [overflow-wrap:anywhere]">
-                    {s.slug}
-                    {s.country && ` · ${s.country.toUpperCase()} only`}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 [overflow-wrap:break-word]">
+                      <SourceName id={s.id} name={s.company_name} href={ATS_BOARD_URL[s.ats](s.slug)} />
+                      {s.enabled && s.last_error && <FailingBadge error={s.last_error} />}
+                    </div>
+                    {/* One line, cut with "…" (full text on hover). A fixed slug (aggregators, Apple)
+                        says nothing, so only configured boards show theirs. When the Type column is
+                        hidden (narrow table), the type leads this line. */}
+                    {/* w-0 + min-w-full: fills the column without widening it (a one-line text
+                        would otherwise count its full length toward the table's width). */}
+                    <div className="mono faint mt-0.5 w-0 min-w-full truncate text-[11px]" title={ATS_INFO[s.ats]?.fixedSlug ? undefined : s.slug}>
+                      {!props.aggregators && <span className="@min-[44rem]:hidden">{ATS_INFO[s.ats]?.label ?? s.ats}{!ATS_INFO[s.ats]?.fixedSlug && " · "}</span>}
+                      {!ATS_INFO[s.ats]?.fixedSlug && s.slug}
+                      {s.country && ` · ${s.country.toUpperCase()} only`}
+                    </div>
                   </div>
-                )}
+                </div>
               </td>
               {!props.aggregators && (
-                <td data-label="Type">
+                <td data-label="Type" className="@max-[44rem]:hidden">
                   <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
                 </td>
               )}
@@ -279,10 +288,10 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
                 <FetchCell source={s} />
               </td>
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
-              <td className="mono muted text-[12px]" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
+              <td className="mono muted text-[12px] whitespace-nowrap" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
               {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
-              <td className="@max-lg:w-full @lg:w-px @lg:whitespace-nowrap">
-                <div className="flex flex-wrap gap-1 @lg:flex-nowrap @lg:justify-end">
+              <td className="@max-[30rem]:w-full @min-[30rem]:w-px @min-[30rem]:whitespace-nowrap">
+                <div className="flex flex-wrap gap-1 @min-[30rem]:flex-nowrap @min-[30rem]:justify-end">
                   <WatchToggle source={s} watchEvery={props.watchEvery} />
                   <Toggle
                     id={s.id}
@@ -417,9 +426,10 @@ function FetchCell({ source }: { source: Source }) {
   const mode = FETCH_MODES[ATS_INFO[source.ats]?.fetch ?? "board"];
   const n = source.last_request_count;
   return (
-    <div className="text-[12px]" title={mode.how}>
+    // One line in the card layout ("Paged · 275 requests"), two in the table.
+    <div className="inline-flex gap-x-1.5 text-[12px] whitespace-nowrap @min-[30rem]:block" title={mode.how}>
       <div>{mode.label}</div>
-      <div className="mono faint whitespace-nowrap" title={n == null ? "Measured on its next fetch" : undefined}>
+      <div className="mono faint" title={n == null ? "Measured on its next fetch" : undefined}>
         {n == null ? "–" : `${n} ${n === 1 ? "request" : "requests"}`}
       </div>
     </div>
