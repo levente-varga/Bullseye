@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { CareerSchema, extractCareer, websiteText } from "@/lib/career";
+import { CareerSchema, extractCareer } from "@/lib/career";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
@@ -445,35 +445,26 @@ export async function saveCvText(form: FormData) {
 export type CareerResult = { tone: "ok" | "bad"; message: string; at: number } | null;
 
 /**
- * Builds the structured career from the CV text and/or the website (Profile page,
- * useActionState). Replaces what was there; the person reviews it afterwards.
+ * Builds the structured career from the CV text (Profile page, useActionState).
+ * Replaces what was there; the person reviews it afterwards.
  */
-export async function extractCareerAction(_prev: CareerResult, form: FormData): Promise<CareerResult> {
+export async function extractCareerAction(): Promise<CareerResult> {
   const at = Date.now();
   if (!process.env.ANTHROPIC_API_KEY) return { tone: "bad", message: "The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.", at };
   const supabase = await db();
   const me = await currentUser(supabase);
-  const { data: p } = await supabase.from("profile").select("cv_text, website_url").single();
-  const sources: { label: string; text: string }[] = [];
-  if (form.get("use_cv") === "on" && p?.cv_text?.trim()) sources.push({ label: "CV", text: p.cv_text });
-  if (form.get("use_website") === "on" && p?.website_url) {
-    try {
-      sources.push({ label: `Website (${p.website_url})`, text: await websiteText(p.website_url) });
-    } catch (e) {
-      return { tone: "bad", message: `Couldn't read ${p.website_url}: ${e instanceof Error ? e.message : e}`, at };
-    }
-  }
-  if (!sources.length) return { tone: "bad", message: "Pick a source: add CV text or a website first.", at };
+  const { data: p } = await supabase.from("profile").select("cv_text").single();
+  if (!p?.cv_text?.trim()) return { tone: "bad", message: "Add your CV first (upload a PDF or paste the text below).", at };
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const { career, costUsd } = await extractCareer(new Anthropic(), sources);
+    const { career, costUsd } = await extractCareer(new Anthropic(), p.cv_text);
     check(
       (await supabase.from("profile").update({ career, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
     );
     revalidatePath("/profile");
     return {
       tone: "ok",
-      message: `Built from ${sources.map((s) => s.label.split(" ")[0].toLowerCase()).join(" and ")}: ${career.experiences.length} roles, ${career.education.length} degrees. Cost $${costUsd.toFixed(4)}. Check it below.`,
+      message: `Built from your CV: ${career.experiences.length} roles, ${career.education.length} degrees. Cost $${costUsd.toFixed(4)}. Check it below.`,
       at,
     };
   } catch (e) {
