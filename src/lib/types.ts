@@ -89,7 +89,15 @@ export const ATS_INFO: Record<
   personio: { fetch: "board", label: "Personio", slugLabel: "Career site URL", slugExample: "personio.jobs.personio.de" },
   recruitee: { fetch: "board", label: "Recruitee", slugLabel: "Career site URL", slugExample: "bunq.recruitee.com" },
   workable: { fetch: "board", label: "Workable", slugLabel: "Account or URL", slugExample: "apply.workable.com/huggingface" },
-  workday: { fetch: "paged", label: "Workday", slugLabel: "Careers site URL", slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers" },
+  workday: {
+    fetch: "search",
+    label: "Workday",
+    slugLabel: "Careers site URL",
+    slugExample: "philips.wd3.myworkdayjobs.com/jobs-and-careers",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
   pinpoint: { fetch: "board", label: "Pinpoint", slugLabel: "Career site URL", slugExample: "workwithus.pinpointhq.com" },
   jobylon: { fetch: "board", label: "Jobylon", slugLabel: "Company id or a posting URL", slugExample: "emp.jobylon.com/companies/2986" },
   hibob: { fetch: "board", label: "HiBob", slugLabel: "Careers site URL", slugExample: "sumodigitalltd.careers.hibob.com" },

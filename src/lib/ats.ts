@@ -61,13 +61,15 @@ const looksRemote = (s: string) => /\bremote\b/i.test(s);
  * GET with one retry when the server hiccups (5xx, timeout, dropped connection: Lever's
  * API returns the odd 502 for big boards) or rate-limits (429). Other 4xx aren't retried.
  */
-async function get(url: string, accept: string, timeoutMs = 20_000): Promise<Response> {
+async function get(url: string, accept: string, timeoutMs = 20_000, post?: { json: unknown }): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     let res: Response;
     countRequest();
     try {
       res = await fetch(url, {
-        headers: { Accept: accept, "User-Agent": USER_AGENT },
+        // A JSON POST (Workday's list API) gets the same retries and counting as a GET.
+        ...(post ? { method: "POST", body: JSON.stringify(post.json) } : {}),
+        headers: { Accept: accept, "User-Agent": USER_AGENT, ...(post ? { "Content-Type": "application/json" } : {}) },
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
@@ -101,6 +103,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
   return (await (await get(url, "application/json", timeoutMs)).json()) as T;
+}
+
+async function postJson<T>(url: string, json: unknown, timeoutMs?: number): Promise<T> {
+  return (await (await get(url, "application/json", timeoutMs, { json })).json()) as T;
 }
 
 // --- Greenhouse -------------------------------------------------------------
@@ -942,7 +948,9 @@ async function fetchWorkable(account: string, company: string): Promise<FetchedJ
 // "3 Locations". The detail API fills all three in, only for new postings that pass the title filter.
 
 const WORKDAY_PAGE = 20; // the API's maximum
-const WORKDAY_MAX = 2000;
+/** Pages per search term (100 jobs). */
+const WORKDAY_MAX_PAGES = 5;
+const WORKDAY_SPACING_MS = 1_000;
 
 /** Splits a Workday slug into its API base and the public site base. */
 export function workdayBase(slug: string): { api: string; site: string } {
@@ -976,30 +984,34 @@ function workdayPostedOn(text: string | undefined, now = Date.now()): string | n
   return days ? new Date(now - Number(days[1]) * 86_400_000).toISOString() : null;
 }
 
-async function fetchWorkday(slug: string, company: string): Promise<FetchedJob[]> {
+/**
+ * Searched for the followers' target roles (Workday's search narrows by role), one page
+ * at a time, spaced out: reading big boards whole, five pages at once, drew 429s (the
+ * Xbox, Activision Blizzard and King boards share one tenant).
+ */
+async function fetchWorkday(slug: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
   const { api, site } = workdayBase(slug);
-  const page = async (offset: number) => {
-    countRequest();
-    const res = await fetch(`${api}/jobs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": USER_AGENT },
-      body: JSON.stringify({ limit: WORKDAY_PAGE, offset, searchText: "", appliedFacets: {} }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${api}/jobs`);
-    return (await res.json()) as { total?: number; jobPostings?: WorkdayPosting[] };
-  };
-  // Only the first page reports the total; the rest are fetched a few at a time.
-  const first = await page(0);
-  const postings: WorkdayPosting[] = [...(first.jobPostings ?? [])];
-  const offsets: number[] = [];
-  for (let o = WORKDAY_PAGE; o < Math.min(first.total ?? 0, WORKDAY_MAX); o += WORKDAY_PAGE) offsets.push(o);
-  for (let i = 0; i < offsets.length; i += 5) {
-    const pages = await Promise.all(offsets.slice(i, i + 5).map(page));
-    for (const p of pages) postings.push(...(p.jobPostings ?? []));
-  }
+  let first = true;
+  const postings = new Map<string, WorkdayPosting>();
+  await perTerm(terms, async (term) => {
+    for (let page = 0; page < WORKDAY_MAX_PAGES; page++) {
+      if (!first) await sleep(WORKDAY_SPACING_MS);
+      first = false;
+      const d = await postJson<{ total?: number; jobPostings?: WorkdayPosting[] }>(`${api}/jobs`, {
+        limit: WORKDAY_PAGE,
+        offset: page * WORKDAY_PAGE,
+        searchText: term ?? "",
+        appliedFacets: {},
+      });
+      const list = d.jobPostings ?? [];
+      for (const p of list) if (!postings.has(p.externalPath)) postings.set(p.externalPath, p);
+      // Only the first page reports the total.
+      if (list.length < WORKDAY_PAGE || (page === 0 && (d.total ?? 0) <= WORKDAY_PAGE)) break;
+    }
+    return [];
+  });
 
-  return postings.map((p) => {
+  return [...postings.values()].map((p) => {
     // "3 Locations" stays as is here; the detail fetch for new postings fills in the places.
     const location = p.locationsText ?? "";
     return {
@@ -1021,8 +1033,9 @@ export async function fetchWorkdayPosting(slug: string, externalPath: string): P
   const info = (await getJson<WorkdayDetail>(`${workdayBase(slug).api}${externalPath}`)).jobPostingInfo;
   const places = [info?.location, ...(info?.additionalLocations ?? [])].filter(Boolean) as string[];
   const country = info?.country?.descriptor;
-  // The list often says just "Best" or "3 Locations": add the country so location filters can match.
-  const location = places.map((p) => (country && !p.includes(country) ? `${p}, ${country}` : p)).join(" | ");
+  // The list often says just "Best" or "3 Locations": add the country so location filters can
+  // match. It's the primary location's country, so only that one gets it ("Vancouver" isn't in the US).
+  const location = places.map((p, i) => (i === 0 && country && !p.includes(country) ? `${p}, ${country}` : p)).join(" | ");
   return { text: clip(htmlToText(info?.jobDescription ?? "")), location };
 }
 
@@ -1545,7 +1558,8 @@ async function searchJobindex(term: string | null): Promise<FetchedJob[]> {
   const out = new Map<string, FetchedJob>();
   for (let page = 1; page <= JOBINDEX_MAX_PAGES; page++) {
     params.set("page", String(page));
-    const xml = await (await get(`https://www.jobindex.dk/jobsoegning.rss?${params}`, "application/rss+xml")).text();
+    // 40s: its searches are sometimes slow (20s timed out twice in a run).
+    const xml = await (await get(`https://www.jobindex.dk/jobsoegning.rss?${params}`, "application/rss+xml", 40_000)).text();
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) ?? [];
     for (const item of items) {
       const link = decodeEntities(xmlTag(item, "link"));
@@ -1989,7 +2003,7 @@ export function fetchBoard(
     case "workable":
       return fetchWorkable(slug, company);
     case "workday":
-      return fetchWorkday(slug, company);
+      return fetchWorkday(slug, company, terms);
     case "pinpoint":
       return fetchPinpoint(slug, company);
     case "jobylon":
