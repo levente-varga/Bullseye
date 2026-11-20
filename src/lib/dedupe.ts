@@ -76,6 +76,11 @@ export function dedupeKey(url: string): string {
     const m = path.match(/^\/[a-z-]+\/[a-z]{2}(?:-[a-z]{2})?\/job\/([a-z0-9]+)(?:\/|$)/i);
     if (m) return `phenom:${host}:${m[1].toLowerCase()}`;
   }
+  // Radancy: <host>/<lang>/job/<city>/<title>/<org id>/<job id> (language and slugs vary)
+  {
+    const m = path.match(/^\/[a-z]{2}(?:-[a-z]{2})?\/job\/[^/]+\/[^/]+\/\d+\/(\d+)\/?$/i);
+    if (m) return `radancy:${host}:${m[1]}`;
+  }
   // SuccessFactors career sites: <host>/job/<title>/<id>/ (ids are per site)
   {
     const m = path.match(/^\/job\/[^/]+\/(\d{6,})\/?$/);

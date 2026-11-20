@@ -864,6 +864,55 @@ export async function isEightfoldSite(host: string): Promise<boolean> {
   }
 }
 
+// --- Radancy / TalentBrew (careers sites of IKEA and other large employers) ------------------
+// Slug: "<host>/<lang>", e.g. "jobs.ikea.com/en". The site's sitemap lists every job (one
+// request; robots.txt keeps bots out of /search-jobs/, so its search isn't used). Links read
+// /<lang>/job/<city>/<title-slug>/<org id>/<job id>: a rough title and the city, enough for
+// the title filter; the posting's structured data has the real title, location and text.
+
+/** A Radancy job link: /<lang>/job/<city>/<title>/<org id>/<job id>. */
+const RADANCY_JOB = /^https?:\/\/[^/]+\/([a-z]{2}(?:-[a-z]{2})?)\/job\/([^/]+)\/([^/]+)\/\d+\/(\d+)\/?$/i;
+export const isRadancyPosting = (url: string) => RADANCY_JOB.test(url);
+
+/** "san-sebastian-de-los-reyes" → "San Sebastian De Los Reyes". */
+const unslug = (s: string) =>
+  decodeURIComponent(s)
+    .replace(/-+/g, " ")
+    .trim()
+    .replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+
+async function fetchRadancy(slug: string, company: string): Promise<FetchedJob[]> {
+  const [host, lang = "en"] = slug.split("/");
+  const xml = await (await get(`https://${host}/sitemap.xml`, "application/xml", 40_000)).text();
+  const out = new Map<string, FetchedJob>();
+  for (const m of xml.matchAll(/<loc>([^<]+)<\/loc>/g)) {
+    const url = decodeEntities(m[1]).trim();
+    const j = url.match(RADANCY_JOB);
+    if (!j || j[1].toLowerCase() !== lang.toLowerCase() || out.has(j[4])) continue;
+    const city = unslug(j[2]);
+    out.set(j[4], {
+      external_id: j[4],
+      title: unslug(j[3]), // replaced by the posting's own title when it's described
+      company,
+      location: city, // the country comes with the posting page
+      remote: false,
+      url,
+      description: "",
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  if (!out.size && !/<urlset/i.test(xml)) throw new Error("Radancy: no sitemap with jobs found");
+  return [...out.values()];
+}
+
+/** A Radancy careers site's base ("<host>/<lang>") from a page of it, or null. */
+export function radancyBase(url: URL, html: string): string | null {
+  if (!/tbcdn\.talentbrew\.com|radancy|talentbrew/i.test(html)) return null;
+  const lang = url.pathname.match(/^\/([a-z]{2}(?:-[a-z]{2})?)\//i)?.[1] ?? "en";
+  return `${url.hostname.toLowerCase()}/${lang.toLowerCase()}`;
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -1781,7 +1830,12 @@ export const isJobylonPosting = (url: string) => /^https?:\/\/emp\.jobylon\.com\
  * to wait: Workday lists say "Best" or "3 Locations", Jobylon lists name the city only.
  */
 export const locationNeedsDetail = (url: string) =>
-  workdayFromUrl(url) !== null || isJobylonPosting(url) || isAvaturePosting(url) || isPersonioPosting(url) || isBambooPosting(url);
+  workdayFromUrl(url) !== null ||
+  isJobylonPosting(url) ||
+  isAvaturePosting(url) ||
+  isPersonioPosting(url) ||
+  isBambooPosting(url) ||
+  isRadancyPosting(url);
 
 /** A Personio job link. Read from a careers page, its list location is a city only. */
 export const isPersonioPosting = (url: string) => /\.jobs\.personio\.(?:de|com)\/job\/\d+/i.test(url);
@@ -2024,6 +2078,8 @@ export function fetchBoard(
       return fetchRippling(slug, company);
     case "inrecruiting":
       return fetchInRecruiting(slug, company);
+    case "radancy":
+      return fetchRadancy(slug, company);
     case "successfactors":
       return fetchSuccessFactors(slug, company, terms);
     case "eightfold":
@@ -2090,6 +2146,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   phenom: (s) => `https://${s}/search-results`,
   rippling: (s) => `https://ats.rippling.com/${s}/jobs`,
   successfactors: (s) => `https://${s}/search/`,
+  radancy: (s) => `https://${s}`,
   inrecruiting: (s) => {
     const [host, org, lang = "en"] = s.split("/");
     return `https://${host}/${org}/${lang}/career`;

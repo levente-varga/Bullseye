@@ -19,6 +19,7 @@ export type Ats =
   | "rippling"
   | "inrecruiting"
   | "successfactors"
+  | "radancy"
   | "eightfold"
   | "jobtech"
   | "swedengamejobs"
@@ -111,6 +112,7 @@ export const ATS_INFO: Record<
     // Searched by role: a job missing from one fetch isn't closed.
     partial: true,
   },
+  radancy: { fetch: "board", label: "Radancy", slugLabel: "Careers site URL", slugExample: "jobs.ikea.com/en" },
   successfactors: {
     fetch: "search",
     label: "SuccessFactors",

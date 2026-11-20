@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -24,7 +24,7 @@ const CLOSED_RE =
 export async function describe(
   source: Pick<Source, "ats" | "slug">,
   job: { external_id: string; url: string },
-): Promise<{ text: string; location?: string; company?: string; remote?: boolean }> {
+): Promise<{ text: string; location?: string; company?: string; remote?: boolean; title?: string }> {
   if (source.ats === "smartrecruiters") {
     return { text: await fetchSmartRecruitersDescription(source.slug, job.external_id) };
   }
@@ -42,6 +42,12 @@ export async function describe(
   if (source.ats === "eightfold") return fetchEightfoldDescription(source.slug, job.external_id);
   // BambooHR: the job's detail JSON has the description and the country.
   if (isBambooPosting(job.url)) return fetchBambooDescription(job.url);
+  // Radancy: the link only gives a rough title and the city; the posting's structured data
+  // has the real title, the full location and the text.
+  if (isRadancyPosting(job.url)) {
+    const { text, location, title } = await describePage(job.url);
+    return { text, location, title };
+  }
   // Avature: description, locations and work model are fields on the posting page.
   if (isAvaturePosting(job.url)) return fetchAvatureDescription(job.url);
   // Apple's posting pages render in the browser; their page data has the text.
@@ -67,7 +73,7 @@ export async function describeFromPage(url: string): Promise<string> {
 }
 
 /** The posting's text, and its location ("City, Country") when its structured data has one. */
-async function describePage(url: string): Promise<{ text: string; location?: string; company?: string }> {
+async function describePage(url: string): Promise<{ text: string; location?: string; company?: string; title?: string }> {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     redirect: "follow",
@@ -86,7 +92,8 @@ async function describePage(url: string): Promise<{ text: string; location?: str
         if (text.length >= THIN_THRESHOLD) {
           const org = found.hiringOrganization;
           const company = org && typeof org === "object" && !Array.isArray(org) && typeof org.name === "string" ? org.name.trim() : undefined;
-          return { text: text.slice(0, MAX), location: postingLocation(found), company: company || undefined };
+          const title = typeof found.title === "string" ? htmlToText(found.title).trim() : "";
+          return { text: text.slice(0, MAX), location: postingLocation(found), company: company || undefined, title: title || undefined };
         }
       }
     } catch {
@@ -153,7 +160,7 @@ function innerDiv(html: string, open: RegExp): string | null {
 
 type Json = null | string | number | boolean | Json[] | { [k: string]: Json };
 
-function findJobPosting(node: Json): { description?: Json; jobLocation?: Json; hiringOrganization?: Json } | null {
+function findJobPosting(node: Json): { description?: Json; jobLocation?: Json; hiringOrganization?: Json; title?: Json } | null {
   if (Array.isArray(node)) {
     for (const n of node) {
       const f = findJobPosting(n);
