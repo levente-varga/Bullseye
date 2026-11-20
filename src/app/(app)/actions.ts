@@ -568,6 +568,8 @@ export async function deleteAnswer(form: FormData) {
 /** Records a credit top-up: an amount added on a day. It counts from that day's start, so the day's runs are included. */
 export async function addCreditEntry(form: FormData) {
   const supabase = await db();
+  // The admin's Anthropic balance: RLS (credit_admin) refuses others too.
+  if (!(await currentUser(supabase)).isAdmin) return;
   const amount = Number(str(form, "amount").replace(/[$,\s]/g, ""));
   if (!Number.isFinite(amount) || amount <= 0) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -580,6 +582,7 @@ export async function addCreditEntry(form: FormData) {
 
 export async function deleteCreditEntry(form: FormData) {
   const supabase = await db();
+  if (!(await currentUser(supabase)).isAdmin) return;
   check((await supabase.from("credit_entries").delete().eq("id", str(form, "id"))).error);
   revalidatePath("/report");
 }
@@ -610,6 +613,8 @@ export async function inviteMember(form: FormData) {
 
 export async function cancelInvite(form: FormData) {
   const supabase = await db();
+  // RLS (invites_admin) refuses others too; checked here as well, like every admin action.
+  if (!(await currentUser(supabase)).isAdmin) return;
   check((await supabase.from("invites").delete().eq("email", str(form, "email"))).error);
   revalidatePath("/admin");
 }
