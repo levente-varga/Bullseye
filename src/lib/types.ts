@@ -20,6 +20,7 @@ export type Ats =
   | "inrecruiting"
   | "successfactors"
   | "radancy"
+  | "haileyhr"
   | "eightfold"
   | "jobtech"
   | "swedengamejobs"
@@ -112,6 +113,7 @@ export const ATS_INFO: Record<
     // Searched by role: a job missing from one fetch isn't closed.
     partial: true,
   },
+  haileyhr: { fetch: "board", label: "HaileyHR", slugLabel: "Career site URL", slugExample: "thunderfulgames.careers.haileyhr.app" },
   radancy: { fetch: "board", label: "Radancy", slugLabel: "Careers site URL", slugExample: "jobs.ikea.com/en" },
   successfactors: {
     fetch: "search",
@@ -443,7 +445,8 @@ export interface SourceSuggestion {
 
 export interface Job {
   id: string;
-  source_id: string;
+  /** null for a job added by hand (Pipeline → Add a job). */
+  source_id: string | null;
   external_id: string;
   title: string;
   company: string;

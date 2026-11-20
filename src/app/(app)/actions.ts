@@ -7,7 +7,7 @@ import { withDefaults } from "@/lib/career-schema";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import type { TokenUsage } from "@/lib/pricing";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
-import { detectAts } from "@/lib/dedupe";
+import { dedupeKey, detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
 import { createClient, currentUser } from "@/lib/supabase/server";
@@ -41,6 +41,40 @@ function check(error: { message: string } | null) {
 }
 
 // --- Inbox / pipeline -------------------------------------------------------
+
+export type AddJobResult = { tone: "ok" | "bad"; message: string; at: number } | null;
+
+/**
+ * Adds a job by hand (Pipeline → Add a job, useActionState): for postings no source can
+ * read. Nothing is fetched; it goes straight into the Pipeline. A posting Bullseye
+ * already knows (same link) is reused rather than duplicated.
+ */
+export async function addManualJob(_prev: AddJobResult, form: FormData): Promise<AddJobResult> {
+  const at = Date.now();
+  const raw = str(form, "url");
+  let link: string;
+  try {
+    link = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).toString();
+  } catch {
+    return { tone: "bad", message: "That link doesn't look like a URL.", at };
+  }
+  const title = str(form, "title");
+  const company = str(form, "company");
+  if (!title || !company) return { tone: "bad", message: "Add a title and a company.", at };
+  const supabase = await db();
+  const { error } = await supabase.rpc("add_manual_job", {
+    p_url: link,
+    p_title: title,
+    p_company: company,
+    p_location: str(form, "location"),
+    p_remote: form.get("remote") === "on",
+    p_description: str(form, "description"),
+    p_dedupe: dedupeKey(link),
+  });
+  if (error) return { tone: "bad", message: `Couldn't add it: ${error.message}`, at };
+  revalidatePath("/", "layout");
+  return { tone: "ok", message: `Added ${title} at ${company} to your Pipeline.`, at };
+}
 
 export async function approveJob(form: FormData) {
   const supabase = await db();
@@ -496,6 +530,11 @@ export async function careerFromPdf(_prev: CareerResult, form: FormData): Promis
 
   const supabase = await db();
   const me = await currentUser(supabase);
+  // Members spend from the balance the admin gave them; the admin draws on the account.
+  if (!me.isAdmin) {
+    const { data: bal } = await supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle();
+    if (Number(bal?.balance_usd ?? 0) <= 0) return bad("Your AI balance is used up. Ask the admin for more credit.");
+  }
   const { data: st } = await supabase.from("settings").select("writing_model").single();
   // The admin's writing model (Settings); Haiku until one is set.
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
@@ -646,6 +685,26 @@ export async function updateMemberCaps(form: FormData) {
     ).error,
   );
   revalidatePath("/admin");
+}
+
+/** Gives a member AI credit (Members page), or takes some back with a negative amount. */
+export async function addCreditGrant(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return; // RLS (credit_grants_admin) refuses others too
+  const amount = Number(str(form, "amount").replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(amount) || amount === 0) return;
+  check(
+    (
+      await supabase.from("credit_grants").insert({
+        user_id: str(form, "user_id"),
+        amount_usd: Math.round(amount * 10_000) / 10_000,
+        note: str(form, "note"),
+      })
+    ).error,
+  );
+  revalidatePath("/admin");
+  revalidatePath("/report");
 }
 
 /** Deletes the member's account and everything personal; needs the confirm box ticked. */

@@ -473,7 +473,11 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
   if (!waiting.length) return {};
   const byJob = new Map<string, MatchWithJob[]>();
   for (const m of waiting) byJob.set(m.job_id, [...(byJob.get(m.job_id) ?? []), m]);
-  const jobs = [...byJob.values()].map((ms) => ms[0].jobs).slice(0, MAX_SCORE_PER_RUN * 2);
+  // Jobs added by hand have no source to read a description from: the person's own text stands.
+  const jobs = [...byJob.values()]
+    .map((ms) => ms[0].jobs)
+    .filter((j) => j.source_id)
+    .slice(0, MAX_SCORE_PER_RUN * 2);
   const sources = new Map(
     (await must<Source[]>(db.from("sources").select("*").in("id", [...new Set(jobs.map((j) => j.source_id))]))).map((s) => [s.id, s]),
   );
@@ -483,7 +487,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
     let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string } = { text: "" };
     try {
-      found = await describe(sources.get(job.source_id)!, job);
+      found = await describe(sources.get(job.source_id!)!, job); // jobs without a source were filtered out above
       described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
@@ -552,11 +556,21 @@ async function spentLast24h(userId?: string): Promise<number> {
  * `runSpend` is what this run has spent so far (not in the runs log yet).
  */
 async function budgetFor(p: Person, settings: Settings, runSpend: { total: number }): Promise<number> {
-  const [mine, all] = await Promise.all([spentLast24h(p.id), spentLast24h()]);
+  const [mine, all, balance] = await Promise.all([spentLast24h(p.id), spentLast24h(), balanceLeft(p)]);
   return Math.max(
     0,
-    Math.min(p.runCap, p.dayCap - mine, Number(settings.max_total_daily_cost_usd) - all - runSpend.total),
+    Math.min(p.runCap, p.dayCap - mine, Number(settings.max_total_daily_cost_usd) - all - runSpend.total, balance),
   );
+}
+
+/**
+ * What's left of a member's AI balance (granted by the admin minus what they spent). The
+ * admin draws on the Anthropic account directly, so has no balance limit here.
+ */
+async function balanceLeft(p: Person): Promise<number> {
+  if (p.isAdmin) return Infinity;
+  const { data } = await db.from("member_balances").select("balance_usd").eq("user_id", p.id).maybeSingle();
+  return Number(data?.balance_usd ?? 0);
 }
 
 async function loadContext(p: Person) {
@@ -607,7 +621,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
 
   const budget = await budgetFor(p, settings, runSpend);
   if (budget <= 0) {
-    console.log(`[${p.email}] spend cap reached; ${pending.length} listings wait.`);
+    console.log(`[${p.email}] spend cap reached or balance used up; ${pending.length} listings wait.`);
     return { over_budget: pending.length };
   }
 
@@ -658,7 +672,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
   );
   const overBudget = pending.length - scored - errors;
   console.log(`[${p.email}] scoring cost $${spend.cost.toFixed(4)} (${spend.tokensIn} tokens in, ${spend.tokensOut} out)`);
-  if (overBudget > 0) console.log(`[${p.email}] spend cap reached; ${overBudget} listings wait for the next run.`);
+  if (overBudget > 0) console.log(`[${p.email}] spend cap reached or balance used up; ${overBudget} listings wait for the next run.`);
   return {
     scored,
     score_errors: errors,
@@ -889,7 +903,7 @@ async function scoringDue(settings: Settings): Promise<boolean> {
       continue;
     }
     if ((await budgetFor(p, settings, runSpend)) > 0) due = true;
-    else console.log(`[${p.email}] ${count} listings waiting, but a spend cap is reached.`);
+    else console.log(`[${p.email}] ${count} listings waiting, but a spend cap is reached or the balance is used up.`);
   }
   if (!due) return false;
   const [last] = await must<{ started_at: string; stats: Record<string, number>; error: string | null }[]>(

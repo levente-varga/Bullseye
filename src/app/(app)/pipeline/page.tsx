@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { AddJobForm } from "@/components/AddJobForm";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
@@ -72,6 +73,7 @@ export default async function PipelinePage() {
       />
 
       <div className="space-y-6">
+        <AddJobForm />
         {PIPELINE_STATUSES.map((status) => {
           const rows = jobs.filter((j) => j.status === status);
           return (
