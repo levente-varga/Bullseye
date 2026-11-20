@@ -76,6 +76,11 @@ export function dedupeKey(url: string): string {
     const m = path.match(/^\/[a-z-]+\/[a-z]{2}(?:-[a-z]{2})?\/job\/([a-z0-9]+)(?:\/|$)/i);
     if (m) return `phenom:${host}:${m[1].toLowerCase()}`;
   }
+  // HaileyHR: <company>.careers.haileyhr.app/<locale>/job/<company id>/<job id>/<ad id>
+  if (host.endsWith(".careers.haileyhr.app")) {
+    const m = path.match(/\/job\/[0-9a-f-]{36}\/([0-9a-f-]{36})/i);
+    if (m) return `haileyhr:${m[1].toLowerCase()}`;
+  }
   // Radancy: <host>/<lang>/job/<city>/<title>/<org id>/<job id> (language and slugs vary)
   {
     const m = path.match(/^\/[a-z]{2}(?:-[a-z]{2})?\/job\/[^/]+\/[^/]+\/\d+\/(\d+)\/?$/i);
@@ -150,6 +155,7 @@ export type DetectedAts =
   | "bamboohr"
   | "rippling"
   | "inrecruiting"
+  | "haileyhr"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -194,6 +200,7 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
     const lang = segments.slice(1).find((s) => /^[a-z]{2}$/i.test(s)) ?? "en";
     return { ats: "inrecruiting", slug: `${host}/${first.toLowerCase()}/${lang.toLowerCase()}` };
   }
+  if (host.endsWith(".careers.haileyhr.app")) return { ats: "haileyhr", slug: host.split(".")[0] };
   if (host === "ats.rippling.com") {
     const board = segments.find((s, i) => !(i === 0 && /^[a-z]{2}(-[A-Z]{2})?$/i.test(s)));
     if (board) return { ats: "rippling", slug: board.toLowerCase() };

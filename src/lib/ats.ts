@@ -913,6 +913,78 @@ export function radancyBase(url: URL, html: string): string | null {
   return `${url.hostname.toLowerCase()}/${lang.toLowerCase()}`;
 }
 
+// --- HaileyHR (Swedish HR system's career pages) ---------------------------------------------
+// Slug: the company's subdomain, "<company>" in <company>.careers.haileyhr.app. The career
+// page lists every job: two labels (location, department), the title and a teaser. The job
+// page carries the ad as Markdown in its embedded page data. Locations are cities only.
+
+/** A HaileyHR job link: /<locale>/job/<company id>/<job id>/<ad id>. */
+const HAILEY_JOB = /^https:\/\/[a-z0-9-]+\.careers\.haileyhr\.app\/[a-z]{2}-[A-Z]{2}\/job\/[0-9a-f-]{36}\/([0-9a-f-]{36})\//i;
+export const isHaileyPosting = (url: string) => HAILEY_JOB.test(url);
+
+async function fetchHaileyHr(company: string, name: string): Promise<FetchedJob[]> {
+  const base = `https://${company}.careers.haileyhr.app/`;
+  const html = await (await get(base, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const card of html.matchAll(/<a[^>]+href="(\/[a-z]{2}-[A-Z]{2}\/job\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g)) {
+    const url = new URL(card[1], base).href;
+    const id = url.match(HAILEY_JOB)?.[1];
+    const title = card[2].match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1];
+    if (!id || !title || out.has(id)) continue;
+    // The labels before the title: location, then department.
+    const labels = [...(card[2].split(/<h3/)[0] ?? "").matchAll(/<div[^>]*>([^<]+)<\/div>/g)].map((m) => decodeEntities(m[1]).trim());
+    const location = labels.length >= 2 ? labels[0] : "";
+    out.set(id, {
+      external_id: id,
+      title: decodeEntities(title.replace(/<[^>]+>/g, "")).trim(),
+      company: name,
+      location,
+      remote: looksRemote(location),
+      url,
+      description: "", // the ad comes from the job page
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  // A page with no jobs says "Open positions (0)": a real, empty board.
+  if (!out.size && !/Open positions \(\d+\)/.test(html)) throw new Error("HaileyHR: no job list on the career page (layout changed?)");
+  return [...out.values()];
+}
+
+/**
+ * A HaileyHR job ad's text: the page embeds it as a Markdown text chunk ("<id>:T<hex length>,…")
+ * in its React Server Components data. Takes the longest such chunk.
+ */
+export async function fetchHaileyDescription(url: string): Promise<{ text: string }> {
+  const html = await (await get(url, "text/html")).text();
+  const flight = [...html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)]
+    .map((m) => {
+      try {
+        return JSON.parse(m[1]) as string;
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+  const bytes = Buffer.from(flight, "utf8");
+  let best = "";
+  for (const m of flight.matchAll(/(?:^|\n)[0-9a-f]+:T([0-9a-f]+),/g)) {
+    // The length is in bytes, after the comma.
+    const start = Buffer.byteLength(flight.slice(0, (m.index ?? 0) + m[0].length), "utf8");
+    const text = bytes.subarray(start, start + parseInt(m[1], 16)).toString("utf8");
+    if (text.length > best.length) best = text;
+  }
+  if (!best) throw new Error("HaileyHR: no job ad text on the page");
+  // Markdown to plain text: headings, emphasis and link syntax go, the words stay.
+  const text = best
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*|__|\*(?=\S)|(?<=\S)\*/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text: clip(text) };
+}
+
 // --- Recruitee (JSON API) -----------------------------------------------------
 // Slug: the career site host, "<company>.recruitee.com" or a custom domain.
 
@@ -2080,6 +2152,8 @@ export function fetchBoard(
       return fetchInRecruiting(slug, company);
     case "radancy":
       return fetchRadancy(slug, company);
+    case "haileyhr":
+      return fetchHaileyHr(slug, company);
     case "successfactors":
       return fetchSuccessFactors(slug, company, terms);
     case "eightfold":
@@ -2147,6 +2221,7 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   rippling: (s) => `https://ats.rippling.com/${s}/jobs`,
   successfactors: (s) => `https://${s}/search/`,
   radancy: (s) => `https://${s}`,
+  haileyhr: (s) => `https://${s}.careers.haileyhr.app/`,
   inrecruiting: (s) => {
     const [host, org, lang = "en"] = s.split("/");
     return `https://${host}/${org}/${lang}/career`;

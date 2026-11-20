@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, isHaileyPosting, fetchHaileyDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -42,6 +42,8 @@ export async function describe(
   if (source.ats === "eightfold") return fetchEightfoldDescription(source.slug, job.external_id);
   // BambooHR: the job's detail JSON has the description and the country.
   if (isBambooPosting(job.url)) return fetchBambooDescription(job.url);
+  // HaileyHR: the ad is Markdown in the job page's embedded data.
+  if (isHaileyPosting(job.url)) return fetchHaileyDescription(job.url);
   // Radancy: the link only gives a rough title and the city; the posting's structured data
   // has the real title, the full location and the text.
   if (isRadancyPosting(job.url)) {
