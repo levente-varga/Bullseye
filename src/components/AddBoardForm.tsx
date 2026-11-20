@@ -11,7 +11,7 @@ import { Panel } from "@/components/ui";
  * Add a company board by link (auto-detect). The result shows under the form, from the
  * action's returned state: no redirect, so the page doesn't navigate or jump.
  */
-export function AddBoardForm({ systems }: { systems: string }) {
+export function AddBoardForm({ systems }: { systems: string[] }) {
   const [result, action] = useActionState<AddBoardResult, FormData>(addBoard, null);
   return (
     <div>
@@ -33,7 +33,14 @@ export function AddBoardForm({ systems }: { systems: string }) {
               <span className="link">Supported sites</span>{" "}
               <IconChevronDown width={10} height={10} className="inline transition-transform group-open:rotate-180" />
             </summary>
-            <p className="mt-1.5">{systems}.</p>
+            {/* A bulleted list, in columns where there's room: a sentence of 20+ names was unreadable. */}
+            <ul className="mt-1.5 list-disc columns-2 gap-x-6 pl-4 sm:columns-3 xl:columns-2">
+              {systems.map((s) => (
+                <li key={s} className="break-inside-avoid">
+                  {s}
+                </li>
+              ))}
+            </ul>
           </details>
         </form>
       </Panel>

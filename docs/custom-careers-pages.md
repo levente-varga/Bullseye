@@ -47,6 +47,8 @@ its headings; the rest are a list of links to job pages.
 - **gamejobs.co**: its firewall answers every Bullseye request with 403 (robots.txt itself
   allows general bots). Postings there are usually on the studio's own board, e.g. Sumo
   Digital's HiBob site.
+- **Tesla** (`tesla.com/careers`): its CDN answers every bot request with "Access Denied"
+  (403), robots.txt included; reading it would mean posing as a browser.
 - **Nintendo Europe** (Cornerstone OnDemand, `nintendoeurope.csod.com`): its job search
   needs the anonymous token the careers page issues; skipped for now.
 - **Super Spline Studios** (`supersplinestudios.com/jobs/`): answers Bullseye with 403
@@ -59,6 +61,9 @@ its headings; the rest are a list of links to job pages.
 - **Game Dev Estonia** (`gamedevestonia.ee/jobs`, an industry job board): readable (RSS
   and a WordPress `jobpost` API), but only 7 jobs, the newest seen from 2024, and every
   job names "Gamedev Estonia" rather than the studio, so not worth an aggregator.
+- **MED-EL** (`jobs.medel.com`): a single-page app on AWS Amplify; jobs come from a private
+  GraphQL (AppSync) API with a key in its bundle, and every URL (sitemap included) returns
+  the same shell. Not readable without that undocumented API.
 - **Playtouch** (`playtouch.net/career`): the jobs are added by JavaScript (the linked
   `#qa-release-ops-…` job isn't in the page's HTML); no job system behind it.
 - **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL

@@ -772,8 +772,29 @@ interface EightfoldPosition {
 
 /** "Los Gatos,California,United States of America" → "Los Gatos, California, United States of America" */
 const eightfoldPlace = (s: string) => s.split(",").map((p) => p.trim()).filter(Boolean).join(", ");
-/** The domain the newer API wants: the site's own ("jobs.ericsson.com" → "ericsson.com"). */
-const eightfoldDomain = (host: string) => host.split(".").slice(-2).join(".");
+/**
+ * The domain the newer API wants. Each site names it in its careers page ("domain=…": e.g.
+ * telekom-growthhub.com for growthhub.telekom.com, morganstanley.com for
+ * morganstanley.eightfold.ai); without one, the host's last two labels. Read once per host.
+ */
+const eightfoldDomains = new Map<string, Promise<string>>();
+function eightfoldDomain(host: string): Promise<string> {
+  let found = eightfoldDomains.get(host);
+  if (!found) {
+    found = (async () => {
+      try {
+        const html = await (await get(`https://${host}/careers`, "text/html", 15_000)).text();
+        const named = html.match(/[?&]domain=([a-z0-9.-]+\.[a-z]{2,})/i)?.[1];
+        if (named) return named.toLowerCase();
+      } catch {
+        // fall back to the guess below
+      }
+      return host.split(".").slice(-2).join(".");
+    })();
+    eightfoldDomains.set(host, found);
+  }
+  return found;
+}
 
 type EightfoldApi = "pcsx" | "v2";
 
@@ -781,7 +802,7 @@ type EightfoldApi = "pcsx" | "v2";
 async function eightfoldApi(host: string): Promise<EightfoldApi> {
   try {
     const d = await getJson<{ data?: { positions?: unknown[] } }>(
-      `https://${host}/api/pcsx/search?domain=${eightfoldDomain(host)}&query=&start=0`,
+      `https://${host}/api/pcsx/search?domain=${await eightfoldDomain(host)}&query=&start=0`,
       15_000,
     );
     if (Array.isArray(d.data?.positions)) return "pcsx";
@@ -795,7 +816,7 @@ async function eightfoldPage(host: string, api: EightfoldApi, term: string | nul
   const query = encodeURIComponent(term ?? "");
   if (api === "pcsx") {
     const d = await getJson<{ data?: { positions?: EightfoldPosition[]; count?: number } }>(
-      `https://${host}/api/pcsx/search?domain=${eightfoldDomain(host)}&query=${query}&start=${start}`,
+      `https://${host}/api/pcsx/search?domain=${await eightfoldDomain(host)}&query=${query}&start=${start}`,
     );
     return { positions: d.data?.positions ?? [], count: d.data?.count ?? 0 };
   }
@@ -839,7 +860,7 @@ export async function fetchEightfoldDescription(host: string, id: string): Promi
   let html: string | undefined;
   try {
     const d = await getJson<{ data?: EightfoldPosition }>(
-      `https://${host}/api/pcsx/position_details?position_id=${encodeURIComponent(id)}&domain=${eightfoldDomain(host)}`,
+      `https://${host}/api/pcsx/position_details?position_id=${encodeURIComponent(id)}&domain=${await eightfoldDomain(host)}`,
     );
     html = d.data?.jobDescription;
   } catch {

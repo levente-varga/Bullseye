@@ -13,11 +13,11 @@ import { agoText, pad2 } from "@/lib/time";
 import { ATS_INFO, FETCH_MODES, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
-/** "Greenhouse, Lever, … and Jobylon": the company job systems auto-detect recognises. */
-const COMPANY_SYSTEM_NAMES = (() => {
-  const names = (Object.keys(ATS_INFO) as Ats[]).filter((a) => !ATS_INFO[a].aggregator).map((a) => ATS_INFO[a].label);
-  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-})();
+/** The company job systems auto-detect recognises, A to Z (listed under the add form). */
+const COMPANY_SYSTEM_NAMES = (Object.keys(ATS_INFO) as Ats[])
+  .filter((a) => !ATS_INFO[a].aggregator)
+  .map((a) => ATS_INFO[a].label)
+  .sort((a, b) => a.localeCompare(b));
 
 export default async function SourcesPage({ searchParams }: PageProps<"/sources">) {
   const sp = await searchParams;

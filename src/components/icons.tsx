@@ -141,9 +141,10 @@ export const IconCheck = (p: SVGProps<SVGSVGElement>) => (
     <path d="M3 8.5l3.25 3.25L13 5" />
   </svg>
 );
+/** Settings: a cog (eight teeth on a ring, a hole in the middle). */
 export const IconSettings = (p: SVGProps<SVGSVGElement>) => (
-  <svg {...base(p)}>
-    <circle cx="8" cy="8" r="2.25" />
-    <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
+  <svg {...base(p)} strokeLinejoin="round">
+    <path d="M12.81,6.62 L14.48,6.74 L14.48,9.26 L12.81,9.38 L12.37,10.42 L13.47,11.69 L11.69,13.47 L10.42,12.37 L9.38,12.81 L9.26,14.48 L6.74,14.48 L6.62,12.81 L5.58,12.37 L4.31,13.47 L2.53,11.69 L3.63,10.42 L3.19,9.38 L1.52,9.26 L1.52,6.74 L3.19,6.62 L3.63,5.58 L2.53,4.31 L4.31,2.53 L5.58,3.63 L6.62,3.19 L6.74,1.52 L9.26,1.52 L9.38,3.19 L10.42,3.63 L11.69,2.53 L13.47,4.31 L12.37,5.58Z" />
+    <circle cx="8" cy="8" r="2" />
   </svg>
 );
