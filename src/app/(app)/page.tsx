@@ -34,12 +34,15 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         : view === "all"
           ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").order("score", { ascending: false })
           : supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
-  const [{ data, error }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }] = await Promise.all([
+  const [{ data, error }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }, { data: prof }] = await Promise.all([
     rowsQuery.limit(limit + 1), // one extra row tells us whether there's more
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "new"),
+    supabase.from("profile").select("career").single(),
   ]);
+  // The scorer reads the career: without one, nothing gets scored.
+  const noCareer = !prof?.career;
   if (error) throw new Error(error.message);
   const hasMore = (data?.length ?? 0) > limit;
   const jobs = (data as unknown as Job[]).slice(0, limit);
@@ -68,6 +71,15 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
           />
         }
       />
+
+      {noCareer && (
+        <p className="panel mb-4 px-3 py-2.5 text-[13px]" style={{ background: "var(--warn-tint)" }}>
+          Nothing gets scored until your career is filled in: that&apos;s what the scorer reads.{" "}
+          <Link href="/profile#career" className="link">
+            Add it on Profile →
+          </Link>
+        </p>
+      )}
 
       <section className="panel">
         <div className="eyebrow hidden grid-cols-[28px_72px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
