@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { CareerSchema, extractCareer } from "@/lib/career";
 import { withDefaults } from "@/lib/career-schema";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
+import type { TokenUsage } from "@/lib/pricing";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
@@ -451,6 +452,25 @@ export async function saveProfile(form: FormData) {
 /** "github.com/me" → "https://github.com/me"; empty stays empty. */
 const url = (v: string) => (v && !/^https?:\/\//i.test(v) ? `https://${v}` : v);
 
+/**
+ * Records an AI task outside runs (Report → Other AI tasks; counted in the credit chart and
+ * the 24-hour spend caps). A failure to record never fails the task itself.
+ */
+async function recordAiUsage(
+  supabase: Awaited<ReturnType<typeof db>>,
+  u: { kind: string; model: string; usage: TokenUsage; costUsd: number; detail?: string },
+) {
+  const { error } = await supabase.from("ai_usage").insert({
+    kind: u.kind,
+    model: u.model,
+    tokens_in: u.usage.input + u.usage.cacheWrite + u.usage.cacheRead,
+    tokens_out: u.usage.output,
+    cost_usd: Math.round(u.costUsd * 1e6) / 1e6,
+    detail: u.detail ?? "",
+  });
+  if (error) console.error("ai_usage insert failed:", error.message);
+}
+
 export type CareerResult = { tone: "ok" | "bad"; message: string; at: number } | null;
 
 /**
@@ -481,11 +501,13 @@ export async function careerFromPdf(_prev: CareerResult, form: FormData): Promis
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const { career, costUsd } = await extractCareer(new Anthropic(), model, text);
+    const { career, costUsd, usage } = await extractCareer(new Anthropic(), model, text);
+    // Logged first, so the spend is on record even if saving the career fails.
+    await recordAiUsage(supabase, { kind: "career_import", model, usage, costUsd, detail: file.name });
     check(
       (await supabase.from("profile").update({ career, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
     );
-    revalidatePath("/", "layout"); // the Inbox says when scoring waits for a career
+    revalidatePath("/", "layout"); // the Inbox says when scoring waits for a career; the Report lists the cost
     return {
       tone: "ok",
       message: `Filled from ${file.name}: ${career.experiences.length} roles, ${career.education.length} degrees, ${career.projects.length} projects. Cost $${costUsd.toFixed(4)}. Check it below.`,

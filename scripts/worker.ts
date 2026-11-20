@@ -528,16 +528,22 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 }
 
 /** One person's AI spend over the last 24 hours, from their run shares. */
+/** AI spend in the last 24 hours (one person's, or everyone's): runs plus other AI tasks (CV imports, drafts). */
 async function spentLast24h(userId?: string): Promise<number> {
   const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
-  if (!userId) {
-    const rows = await must<{ stats: Record<string, number> | null }[]>(db.from("runs").select("stats").gte("started_at", since));
-    return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
-  }
-  const rows = await must<{ stats: Record<string, number> | null }[]>(
-    db.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", userId).gte("runs.started_at", since),
-  );
-  return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
+  const sum = (rows: { stats?: Record<string, number> | null; cost_usd?: number | string }[]) =>
+    rows.reduce((a, r) => a + (Number(r.stats?.cost_usd ?? r.cost_usd) || 0), 0);
+  let tasks = db.from("ai_usage").select("cost_usd").gte("created_at", since);
+  if (userId) tasks = tasks.eq("user_id", userId);
+  const [runs, other] = await Promise.all([
+    userId
+      ? must<{ stats: Record<string, number> | null }[]>(
+          db.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", userId).gte("runs.started_at", since),
+        )
+      : must<{ stats: Record<string, number> | null }[]>(db.from("runs").select("stats").gte("started_at", since)),
+    must<{ cost_usd: number | string }[]>(tasks),
+  ]);
+  return sum(runs) + sum(other);
 }
 
 /**

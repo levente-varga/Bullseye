@@ -24,8 +24,16 @@ export default async function SettingsPage() {
   const lastRun = (kind: string) =>
     supabase.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1);
   const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
-  const [{ data: st }, { data: mem }, { data: lastWatch }, { data: lastFull }, { data: myDay }, { data: allDay }, { data: scoredRuns }] =
-    await Promise.all([
+  const [
+    { data: st },
+    { data: mem },
+    { data: lastWatch },
+    { data: lastFull },
+    { data: myDay },
+    { data: allDay },
+    { data: scoredRuns },
+    { data: tasksDay },
+  ] = await Promise.all([
       supabase.from("settings").select("*").single(),
       supabase.from("members").select("*").eq("user_id", me.id).single(),
       lastRun("watchlist"),
@@ -34,12 +42,16 @@ export default async function SettingsPage() {
       supabase.from("runs").select("stats").gte("started_at", dayAgo),
       // Your recent run shares that scored something: their cost per listing sizes a run.
       supabase.from("run_users").select("stats").eq("user_id", me.id).gt("stats->scored", 0).order("run_id").limit(20),
+      // Other AI tasks (CV imports, drafts) in the last 24 hours: they count against the caps too.
+      supabase.from("ai_usage").select("user_id, cost_usd").gte("created_at", dayAgo),
     ]);
   const settings = st as Settings;
   const member = mem as Member;
   const sum = (rows: { stats: Record<string, unknown> }[] | null) => (rows ?? []).reduce((a, r) => a + (Number(r.stats?.cost_usd) || 0), 0);
-  const spent24h = sum(myDay);
-  const spentAll24h = sum(allDay);
+  const tasks = (tasksDay ?? []) as { user_id: string; cost_usd: number | string }[];
+  const tasksCost = (rows: typeof tasks) => rows.reduce((a, t) => a + Number(t.cost_usd), 0);
+  const spent24h = sum(myDay) + tasksCost(tasks.filter((t) => t.user_id === me.id));
+  const spentAll24h = sum(allDay) + tasksCost(tasks);
   const scored = (scoredRuns ?? []).reduce(
     (a, r) => ({ cost: a.cost + (Number(r.stats.cost_usd) || 0), jobs: a.jobs + (Number(r.stats.scored) || 0) }),
     { cost: 0, jobs: 0 },
