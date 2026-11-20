@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -6,7 +7,7 @@ import { createClient, currentUser } from "@/lib/supabase/server";
 import { formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
 import type { Member, Settings } from "@/lib/types";
-import { cancelInvite, inviteMember, removeMember, saveMemberDefaults, updateMemberCaps } from "../actions";
+import { addCreditGrant, cancelInvite, inviteMember, removeMember, saveMemberDefaults, updateMemberCaps } from "../actions";
 
 /** Admin only: invite friends, set their AI spend caps, remove them. */
 export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
@@ -16,14 +17,19 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   if (!me.isAdmin) notFound();
 
   const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
-  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }, { data: st }] = await Promise.all([
+  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }, { data: st }, { data: bal }] = await Promise.all([
     supabase.from("members").select("*").order("created_at"),
     supabase.from("invites").select("*").order("invited_at", { ascending: false }),
     // Everyone's spend in the last 24 hours (admin sees all run shares).
     supabase.from("run_users").select("user_id, stats, runs!inner(started_at)").gte("runs.started_at", dayAgo),
     supabase.from("subscriptions").select("user_id"),
     supabase.from("settings").select("*").single(),
+    // Each member's AI balance: granted here, minus their runs and other AI tasks.
+    supabase.from("member_balances").select("user_id, granted_usd, spent_usd, balance_usd"),
   ]);
+  const balanceOf = new Map(
+    ((bal ?? []) as { user_id: string; granted_usd: number; spent_usd: number; balance_usd: number }[]).map((b) => [b.user_id, b]),
+  );
   const settings = st as Settings;
   const members = (m ?? []) as Member[];
   const memberEmails = new Set(members.map((x) => x.email.toLowerCase()));
@@ -119,7 +125,42 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                         joined {agoText(x.created_at)} · {followed.get(x.user_id) ?? 0} sources · spent{" "}
                         <span className="mono">{formatUsd(spent.get(x.user_id) ?? 0)}</span> in 24h
                       </span>
+                      <Link href={x.user_id === me.id ? "/report" : `/report?member=${x.user_id}`} className="link ml-auto text-[12px]">
+                        Report →
+                      </Link>
                     </div>
+                    {/* AI balance: members spend from credit granted here; the admin draws on the account. */}
+                    {x.is_admin ? (
+                      <p className="faint text-[12px]">Draws on the Anthropic account directly (Report → Credits).</p>
+                    ) : (
+                      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+                        <div className="text-[13px]">
+                          <span className="hint">Balance</span>
+                          <span className={`mono text-[15px] ${Number(balanceOf.get(x.user_id)?.balance_usd ?? 0) <= 0 ? "text-[var(--bad)]" : ""}`}>
+                            {formatUsd(Number(balanceOf.get(x.user_id)?.balance_usd ?? 0))}
+                          </span>
+                          <span className="faint text-[12px]">
+                            {" "}
+                            of <span className="mono">{formatUsd(Number(balanceOf.get(x.user_id)?.granted_usd ?? 0))}</span> granted ·{" "}
+                            <span className="mono">{formatUsd(Number(balanceOf.get(x.user_id)?.spent_usd ?? 0))}</span> spent
+                          </span>
+                        </div>
+                        <form action={addCreditGrant} className="flex flex-wrap items-end gap-2">
+                          <input type="hidden" name="user_id" value={x.user_id} />
+                          <label className="field">
+                            <span className="hint">Add credit ($, negative to take back)</span>
+                            <input name="amount" type="number" step={0.01} required className="input mono w-28" placeholder="5.00" />
+                          </label>
+                          <label className="field">
+                            <span className="hint">Note</span>
+                            <input name="note" className="input w-44" placeholder="optional" />
+                          </label>
+                          <SubmitButton className="btn btn-field" done="Added">
+                            Add
+                          </SubmitButton>
+                        </form>
+                      </div>
+                    )}
                     <div className="flex flex-wrap items-end gap-3">
                       <form action={updateMemberCaps} className="flex flex-wrap items-end gap-3">
                         <input type="hidden" name="user_id" value={x.user_id} />

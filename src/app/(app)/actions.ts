@@ -530,6 +530,11 @@ export async function careerFromPdf(_prev: CareerResult, form: FormData): Promis
 
   const supabase = await db();
   const me = await currentUser(supabase);
+  // Members spend from the balance the admin gave them; the admin draws on the account.
+  if (!me.isAdmin) {
+    const { data: bal } = await supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle();
+    if (Number(bal?.balance_usd ?? 0) <= 0) return bad("Your AI balance is used up. Ask the admin for more credit.");
+  }
   const { data: st } = await supabase.from("settings").select("writing_model").single();
   // The admin's writing model (Settings); Haiku until one is set.
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
@@ -680,6 +685,26 @@ export async function updateMemberCaps(form: FormData) {
     ).error,
   );
   revalidatePath("/admin");
+}
+
+/** Gives a member AI credit (Members page), or takes some back with a negative amount. */
+export async function addCreditGrant(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) return; // RLS (credit_grants_admin) refuses others too
+  const amount = Number(str(form, "amount").replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(amount) || amount === 0) return;
+  check(
+    (
+      await supabase.from("credit_grants").insert({
+        user_id: str(form, "user_id"),
+        amount_usd: Math.round(amount * 10_000) / 10_000,
+        note: str(form, "note"),
+      })
+    ).error,
+  );
+  revalidatePath("/admin");
+  revalidatePath("/report");
 }
 
 /** Deletes the member's account and everything personal; needs the confirm box ticked. */

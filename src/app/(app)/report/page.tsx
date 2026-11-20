@@ -48,19 +48,30 @@ type RunFilter = keyof typeof RUN_FILTERS;
 const RUNS_PAGE = 20;
 
 export default async function ReportPage({ searchParams }: PageProps<"/report">) {
-  const { runs: runsParam, rn } = await searchParams;
+  const { runs: runsParam, rn, member: memberParam } = await searchParams;
   const runFilter: RunFilter = typeof runsParam === "string" && runsParam in RUN_FILTERS ? (runsParam as RunFilter) : "all";
   const runLimit = Math.min(500, Math.max(RUNS_PAGE, Number(rn) || RUNS_PAGE));
+  const supabase = await createClient();
+  const me = await currentUser(supabase);
+  // Whose report: your own, or (admin only) a member's, opened from Members or the summary.
+  // A member's report shows their money (balance, spend, runs, AI tasks); their jobs and
+  // decisions stay private. The admin's own report is the account's (all spend, top-ups).
+  const viewing = me.isAdmin && typeof memberParam === "string" && memberParam !== me.id ? memberParam : null;
+  const subjectId = viewing ?? me.id;
+  const accountView = me.isAdmin && !viewing;
+  const { data: viewedMember } = viewing ? await supabase.from("members").select("email").eq("user_id", viewing).maybeSingle() : { data: null };
   const runsHref = (q: { runs?: RunFilter; rn?: number }) => {
     const p = new URLSearchParams();
+    if (viewing) p.set("member", viewing);
     if (q.runs && q.runs !== "all") p.set("runs", q.runs);
     if (q.rn) p.set("rn", String(q.rn));
     return `/report${p.size ? `?${p}` : ""}#runs`;
   };
-  const supabase = await createClient();
-  const me = await currentUser(supabase);
-  // Each run with the signed-in person's share of it (RLS: your own run_users rows).
-  let runsQuery = supabase.from("runs").select("*, run_users(user_id, stats)", { count: "exact" });
+  // Each run with the signed-in person's share of it (RLS: your own run_users rows); for a
+  // member's report, only the runs that did something for them.
+  let runsQuery = viewing
+    ? supabase.from("runs").select("*, run_users!inner(user_id, stats)", { count: "exact" }).eq("run_users.user_id", viewing)
+    : supabase.from("runs").select("*, run_users(user_id, stats)", { count: "exact" });
   if (runFilter === "daily") runsQuery = runsQuery.in("kind", ["full", "digest"]);
   if (runFilter === "watchlist") runsQuery = runsQuery.eq("kind", "watchlist");
   if (runFilter === "failed") runsQuery = runsQuery.not("error", "is", null);
@@ -82,8 +93,8 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
   // The admin sees each run as a whole (all spend is theirs); everyone else sees their own share.
   // `mine` is the viewer's share either way: what reached them, was filtered, was scored.
   const runs = (runRows as (Run & { run_users: { user_id: string; stats: Run["stats"] }[] })[]).map((r) => {
-    const mine = r.run_users.find((u) => u.user_id === me.id)?.stats;
-    return { ...(me.isAdmin ? r : { ...r, stats: mine ?? {} }), mine };
+    const mine = r.run_users.find((u) => u.user_id === subjectId)?.stats;
+    return { ...(accountView ? r : { ...r, stats: mine ?? {} }), mine };
   }) as (Run & { mine?: Run["stats"] })[];
   const moreRuns = (runTotal ?? 0) > runs.length;
 
@@ -99,50 +110,81 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
   const bucketCounts = BUCKETS.map((b) => scoreList.filter((s) => s >= b.min && s <= b.max).length);
   const bucketMax = Math.max(1, ...bucketCounts);
 
-  // Credits: top-ups minus recorded run costs from the day of the first top-up on.
-  // (The column is still called balance_usd; it holds the top-up amount.)
-  const { data: entryRows } = await supabase.from("credit_entries").select("id, entered_at, balance_usd").order("entered_at", { ascending: false });
-  const topUps: TopUp[] = (entryRows ?? []).map((e) => ({ id: e.id, entered_at: e.entered_at, amount_usd: Number(e.balance_usd) }));
+  // Credits. The account (admin's own report): Anthropic top-ups minus everyone's spend.
+  // A person's balance (a member's own report, or a member's opened by the admin): the
+  // credit granted to them minus their own spend (their run shares and AI tasks).
+  // (credit_entries.balance_usd holds the top-up amount; the name is historical.)
+  const topUps: TopUp[] = accountView
+    ? ((await supabase.from("credit_entries").select("id, entered_at, balance_usd").order("entered_at", { ascending: false })).data ?? []).map((e) => ({
+        id: e.id,
+        entered_at: e.entered_at,
+        amount_usd: Number(e.balance_usd),
+      }))
+    : ((await supabase.from("credit_grants").select("id, created_at, amount_usd, note").eq("user_id", subjectId).order("created_at", { ascending: false })).data ?? []).map(
+        (g) => ({ id: g.id, entered_at: g.created_at, amount_usd: Number(g.amount_usd), note: g.note as string }),
+      );
   const firstTopUp = topUps.at(-1)?.entered_at;
-  const { data: spendRows } = firstTopUp
-    ? // Only runs that cost something: most watchlist checks cost $0, so this stays small as runs pile up.
-      await supabase
-        .from("runs")
-        .select("finished_at, stats")
-        .gte("finished_at", new Date(dayStart(firstTopUp)).toISOString())
-        .gt("stats->cost_usd", 0)
-        .limit(10000)
-    : { data: [] };
-  // Other AI tasks (CV imports, drafts): your own, or everyone's for the admin (RLS).
-  const { data: taskRows } = await supabase.from("ai_usage").select("*").order("created_at", { ascending: false }).limit(50);
+  const since = firstTopUp ? new Date(dayStart(firstTopUp)).toISOString() : null;
+  // Only runs that cost something: most watchlist checks cost $0, so this stays small as runs pile up.
+  const { data: spendRows } = !since
+    ? { data: [] }
+    : accountView
+      ? await supabase.from("runs").select("finished_at, stats").gte("finished_at", since).gt("stats->cost_usd", 0).limit(10000)
+      : await supabase
+          .from("run_users")
+          .select("stats, runs!inner(finished_at)")
+          .eq("user_id", subjectId)
+          .gte("runs.finished_at", since)
+          .gt("stats->cost_usd", 0)
+          .limit(10000);
+  // Other AI tasks (CV imports, drafts): everyone's on the account report, else the person's own.
+  const taskQuery = supabase.from("ai_usage").select("*").order("created_at", { ascending: false }).limit(50);
+  const { data: taskRows } = accountView ? await taskQuery : await taskQuery.eq("user_id", subjectId);
   const aiTasks = (taskRows ?? []) as AiTask[];
   // The credit chart subtracts runs and these tasks alike.
+  type SpendRow = { finished_at?: string; stats: Record<string, number>; runs?: { finished_at: string } | { finished_at: string }[] };
+  const finishedAt = (r: SpendRow) => r.finished_at ?? (Array.isArray(r.runs) ? r.runs[0]?.finished_at : r.runs?.finished_at);
   const costedRuns = [
-    ...(spendRows ?? [])
-      .filter((r) => r.finished_at && typeof r.stats?.cost_usd === "number")
-      .map((r) => ({ at: r.finished_at as string, cost_usd: r.stats.cost_usd as number })),
-    ...aiTasks
-      .filter((t) => firstTopUp && t.created_at >= new Date(dayStart(firstTopUp)).toISOString())
-      .map((t) => ({ at: t.created_at, cost_usd: Number(t.cost_usd) })),
+    ...((spendRows ?? []) as SpendRow[])
+      .filter((r) => finishedAt(r) && typeof r.stats?.cost_usd === "number")
+      .map((r) => ({ at: finishedAt(r) as string, cost_usd: r.stats.cost_usd })),
+    ...aiTasks.filter((t) => since && t.created_at >= since).map((t) => ({ at: t.created_at, cost_usd: Number(t.cost_usd) })),
   ];
   const now = nowMs();
   const series = buildSeries(topUps, costedRuns, now);
   const todayIso = new Date(now).toISOString().slice(0, 10);
+  // The account report lists every member's balance, with a link to their report.
+  const { data: balanceRows } = accountView
+    ? await supabase.from("member_balances").select("user_id, email, is_admin, granted_usd, spent_usd, balance_usd").order("email")
+    : { data: null };
+  const balances = (balanceRows ?? []) as { user_id: string; email: string; is_admin: boolean; granted_usd: number; spent_usd: number; balance_usd: number }[];
 
   return (
     <>
       <PageHeader
-        title="Report"
+        title={viewing ? `Report: ${viewedMember?.email ?? "member"}` : "Report"}
         meta={
-          <>
-            <span className="mono text-[var(--fg)]">{tracked}</span> listings tracked ·{" "}
-            <span className="mono text-[var(--fg)]">{scoreList.length}</span> scored ·{" "}
-            <span className="mono text-[var(--fg)]">{runTotal ?? 0}</span> {runFilter === "all" ? "runs" : `${RUN_FILTERS[runFilter].toLowerCase()} runs`}
-          </>
+          viewing ? (
+            <>
+              Their AI balance, spending and runs; their jobs and decisions stay private.{" "}
+              <Link href="/report" className="link">
+                ← Your report
+              </Link>
+            </>
+          ) : (
+            <>
+              <span className="mono text-[var(--fg)]">{tracked}</span> listings tracked ·{" "}
+              <span className="mono text-[var(--fg)]">{scoreList.length}</span> scored ·{" "}
+              <span className="mono text-[var(--fg)]">{runTotal ?? 0}</span> {runFilter === "all" ? "runs" : `${RUN_FILTERS[runFilter].toLowerCase()} runs`}
+            </>
+          )
         }
       />
 
       <div className="space-y-10">
+        {/* A member's report opened by the admin: money only (their jobs stay private). */}
+        {!viewing && (
+          <>
         <section className="panel grid grid-cols-2 divide-[var(--border)] max-sm:[&>*:nth-child(n+3)]:border-t sm:grid-cols-4 sm:divide-x [&>*]:border-[var(--border)] max-sm:[&>*:nth-child(even)]:border-l">
           <Stat label="Waiting" value={c.scored} unit="in inbox" />
           <Stat label="Applications" value={applied} unit="sent" />
@@ -181,13 +223,17 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
             </ul>
           </Panel>
         </div>
+          </>
+        )}
 
-        {/* Credit tracking is the admin's Anthropic balance. */}
-        {me.isAdmin && (
+        {/* The account's credit (admin's own report) or a person's AI balance. */}
         <section>
           <SectionHeader title="Credits" />
           <div className="split">
-            <Panel title="Remaining API credit" aside={series?.perDay ? `trend: last ${Math.round(series.windowDays)}d` : undefined}>
+            <Panel
+              title={accountView ? "Remaining API credit" : viewing ? "Their AI balance" : "Your AI balance"}
+              aside={series?.perDay ? `trend: last ${Math.round(series.windowDays)}d` : undefined}
+            >
               {series ? (
                 <>
                   <div className="px-2 pt-3 pb-1">
@@ -208,10 +254,17 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                   </div>
                 </>
               ) : (
-                <Empty>Add your first top-up to start tracking.</Empty>
+                <Empty>
+                  {accountView
+                    ? "Add your first top-up to start tracking."
+                    : viewing
+                      ? "No credit granted yet: add some on the Members page."
+                      : "No AI credit yet: the admin grants it. Until then, nothing gets scored."}
+                </Empty>
               )}
             </Panel>
 
+            {accountView ? (
             <Panel title="Top-ups">
               <form action={addCreditEntry} className="flex gap-1.5 border-b border-[var(--border)] p-3">
                 <input name="date" type="date" defaultValue={todayIso} max={todayIso} className="input mono min-w-0 flex-1" />
@@ -239,8 +292,80 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                 </ul>
               )}
             </Panel>
+            ) : (
+            // A person's credit comes from the admin (Members page); listed here read-only.
+            <Panel title="Credit granted" aside={viewing ? <Link href="/admin" className="link font-sans text-[12px] normal-case tracking-normal">Add on Members →</Link> : undefined}>
+              {topUps.length === 0 ? (
+                <Empty>None yet.</Empty>
+              ) : (
+                <ul className="divide">
+                  {topUps.map((e) => (
+                    <li key={e.id} className="flex items-center gap-3 px-3 py-2 text-[12px]">
+                      <span className="mono muted">
+                        {new Date(e.entered_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
+                      </span>
+                      <span className="faint min-w-0 flex-1 truncate">{(e as TopUp & { note?: string }).note}</span>
+                      <span className="mono text-right text-[13px]">
+                        {e.amount_usd < 0 ? "−" : "+"}${Math.abs(e.amount_usd).toFixed(2)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+            )}
           </div>
         </section>
+
+        {/* The account report: every member's balance, with their report. */}
+        {accountView && balances.length > 0 && (
+          <section>
+            <SectionHeader title="Members" count={balances.length} actions={<span className="faint">AI balances on your key</span>} />
+            <Panel>
+              <div className="md:overflow-x-auto">
+                <table className="table table-stack max-md:block md:min-w-[560px]">
+                  <thead>
+                    <tr>
+                      <th>Member</th>
+                      <th className="w-28 text-right">Granted</th>
+                      <th className="w-28 text-right">Spent</th>
+                      <th className="w-28 text-right">Balance</th>
+                      <th className="w-24" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {balances.map((b) => (
+                      <tr key={b.user_id}>
+                        <td className="text-[13px] max-md:w-full">
+                          {b.email}
+                          {b.is_admin && <span className="faint text-[12px]"> · you (the account)</span>}
+                        </td>
+                        <td className="mono text-right text-[12px]" data-label="Granted">
+                          {b.is_admin ? "–" : formatUsd(Number(b.granted_usd))}
+                        </td>
+                        <td className="mono text-right text-[12px]" data-label="Spent">
+                          {formatUsd(Number(b.spent_usd))}
+                        </td>
+                        <td
+                          className={`mono text-right text-[12px] ${!b.is_admin && Number(b.balance_usd) <= 0 ? "text-[var(--bad)]" : ""}`}
+                          data-label="Balance"
+                        >
+                          {b.is_admin ? "–" : formatUsd(Number(b.balance_usd))}
+                        </td>
+                        <td className="text-right text-[12px]">
+                          {!b.is_admin && (
+                            <Link href={`/report?member=${b.user_id}`} className="link">
+                              Report →
+                            </Link>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          </section>
         )}
 
         <section id="runs" className="scroll-mt-6">
