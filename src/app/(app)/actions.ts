@@ -7,7 +7,7 @@ import { withDefaults } from "@/lib/career-schema";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import type { TokenUsage } from "@/lib/pricing";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
-import { detectAts } from "@/lib/dedupe";
+import { dedupeKey, detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
 import { hardFilter } from "@/lib/filters";
 import { createClient, currentUser } from "@/lib/supabase/server";
@@ -41,6 +41,40 @@ function check(error: { message: string } | null) {
 }
 
 // --- Inbox / pipeline -------------------------------------------------------
+
+export type AddJobResult = { tone: "ok" | "bad"; message: string; at: number } | null;
+
+/**
+ * Adds a job by hand (Pipeline → Add a job, useActionState): for postings no source can
+ * read. Nothing is fetched; it goes straight into the Pipeline. A posting Bullseye
+ * already knows (same link) is reused rather than duplicated.
+ */
+export async function addManualJob(_prev: AddJobResult, form: FormData): Promise<AddJobResult> {
+  const at = Date.now();
+  const raw = str(form, "url");
+  let link: string;
+  try {
+    link = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).toString();
+  } catch {
+    return { tone: "bad", message: "That link doesn't look like a URL.", at };
+  }
+  const title = str(form, "title");
+  const company = str(form, "company");
+  if (!title || !company) return { tone: "bad", message: "Add a title and a company.", at };
+  const supabase = await db();
+  const { error } = await supabase.rpc("add_manual_job", {
+    p_url: link,
+    p_title: title,
+    p_company: company,
+    p_location: str(form, "location"),
+    p_remote: form.get("remote") === "on",
+    p_description: str(form, "description"),
+    p_dedupe: dedupeKey(link),
+  });
+  if (error) return { tone: "bad", message: `Couldn't add it: ${error.message}`, at };
+  revalidatePath("/", "layout");
+  return { tone: "ok", message: `Added ${title} at ${company} to your Pipeline.`, at };
+}
 
 export async function approveJob(form: FormData) {
   const supabase = await db();
