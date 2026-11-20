@@ -47,6 +47,8 @@ its headings; the rest are a list of links to job pages.
 - **gamejobs.co**: its firewall answers every Bullseye request with 403 (robots.txt itself
   allows general bots). Postings there are usually on the studio's own board, e.g. Sumo
   Digital's HiBob site.
+- **Tesla** (`tesla.com/careers`): its CDN answers every bot request with "Access Denied"
+  (403), robots.txt included; reading it would mean posing as a browser.
 - **Nintendo Europe** (Cornerstone OnDemand, `nintendoeurope.csod.com`): its job search
   needs the anonymous token the careers page issues; skipped for now.
 - **Super Spline Studios** (`supersplinestudios.com/jobs/`): answers Bullseye with 403
