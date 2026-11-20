@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { CareerSection } from "@/components/CareerSection";
 import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
@@ -66,6 +67,16 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
 
           <SubmitButton className="btn-primary" done="Saved">Save details & links</SubmitButton>
         </form>
+
+        <section id="career" className="scroll-mt-6">
+          <SectionHeader title="Career" actions={<span className="faint">roles, education and skills: what CV and cover letter drafts use</span>} />
+          <CareerSection
+            career={profile.career ?? null}
+            updatedAt={profile.career_updated_at ?? null}
+            hasCv={Boolean(profile.cv_text.trim())}
+            website={profile.website_url}
+          />
+        </section>
 
         <section id="cv" className="scroll-mt-6">
           <SectionHeader title="CV" actions={<span className="faint">{cvWords ? `${cvWords} words for the scorer` : "not added yet"}</span>} />

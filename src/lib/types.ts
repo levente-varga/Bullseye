@@ -355,6 +355,9 @@ export interface Profile {
   cv_file_path: string | null;
   cv_file_name: string | null;
   cv_uploaded_at: string | null;
+  /** The structured career (see lib/career.ts); null until extracted. */
+  career: import("./career-schema").Career | null;
+  career_updated_at: string | null;
 }
 
 /** One person's search criteria (the shared schedule and model are in Settings). */
