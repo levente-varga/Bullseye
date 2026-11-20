@@ -3,6 +3,7 @@
 import { useActionState, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { careerFromJson, careerFromPdf, saveCareer, type CareerResult } from "@/app/(app)/actions";
 import { EMPTY_CAREER, formatCareerDate, type Career, type Education, type Experience, type Project } from "@/lib/career-schema";
+import { Menu } from "@/components/Menu";
 import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Panel, Pill } from "@/components/ui";
@@ -80,17 +81,14 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
           Fill in by hand
         </button>
       )}
-      <button type="button" className="btn" onClick={() => setPdfOpen((v) => !v)} aria-expanded={pdfOpen}>
-        Import PDF…
-      </button>
-      <button type="button" className="btn" onClick={() => jsonFile.current?.click()}>
-        Import JSON…
-      </button>
-      {career && (
-        <button type="button" className="btn" onClick={exportJson}>
-          Export JSON
-        </button>
-      )}
+      <Menu
+        label="Import"
+        items={[
+          { label: "From a CV PDF…", onSelect: () => setPdfOpen(true) },
+          { label: "From a JSON export…", onSelect: () => jsonFile.current?.click() },
+        ]}
+      />
+      {career && <Menu label="Export" items={[{ label: "As JSON", onSelect: exportJson }]} />}
       {career && props.updatedAt && (
         // A fixed locale and timezone: the server and the browser must render the same text.
         <span className="hint">
@@ -106,7 +104,14 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
   );
 
   const pdfPanel = pdfOpen && (
-    <Panel title="Import from a CV PDF">
+    <Panel
+      title="Import from a CV PDF"
+      aside={
+        <button type="button" onClick={() => setPdfOpen(false)} className="link cursor-pointer font-sans text-[12px] normal-case tracking-normal">
+          Cancel
+        </button>
+      }
+    >
       <form action={pdfAction} onSubmit={confirmReplace} className="flex flex-wrap items-center gap-3 p-3">
         <input
           name="cv"
