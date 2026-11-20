@@ -362,6 +362,7 @@ async function syncSource(
       j.description = found.text;
       if (found.location) j.location = found.location;
       if (found.remote) j.remote = true; // Avature: the work model is on the posting page
+      if (found.title) j.title = found.title; // Radancy: the link only has a rough title
       if (found.company && !j.company) j.company = found.company; // Magnet.me lists have none
       stats.described++;
     } catch (e) {
@@ -480,7 +481,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 
   let described = 0;
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
-    let found: { text: string; location?: string; company?: string; remote?: boolean } = { text: "" };
+    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string } = { text: "" };
     try {
       found = await describe(sources.get(job.source_id)!, job);
       described++;
@@ -493,7 +494,13 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
       }
       console.warn(`  no description for ${job.title} @ ${job.company}: ${e instanceof Error ? e.message : e}`);
     }
-    const updated = { ...job, description: found.text, location: found.location ?? job.location, remote: job.remote || Boolean(found.remote) };
+    const updated = {
+      ...job,
+      description: found.text,
+      location: found.location ?? job.location,
+      remote: job.remote || Boolean(found.remote),
+      title: found.title || job.title, // Radancy: the posting's own title replaces the rough one
+    };
     const thin = updated.description.length < THIN_THRESHOLD;
     await must(
       db
@@ -502,6 +509,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
           description: updated.description,
           location: updated.location,
           remote: updated.remote,
+          title: updated.title,
           thin,
           ...(found.company && !job.company ? { company: found.company } : {}),
         })
@@ -520,16 +528,22 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 }
 
 /** One person's AI spend over the last 24 hours, from their run shares. */
+/** AI spend in the last 24 hours (one person's, or everyone's): runs plus other AI tasks (CV imports, drafts). */
 async function spentLast24h(userId?: string): Promise<number> {
   const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
-  if (!userId) {
-    const rows = await must<{ stats: Record<string, number> | null }[]>(db.from("runs").select("stats").gte("started_at", since));
-    return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
-  }
-  const rows = await must<{ stats: Record<string, number> | null }[]>(
-    db.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", userId).gte("runs.started_at", since),
-  );
-  return rows.reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
+  const sum = (rows: { stats?: Record<string, number> | null; cost_usd?: number | string }[]) =>
+    rows.reduce((a, r) => a + (Number(r.stats?.cost_usd ?? r.cost_usd) || 0), 0);
+  let tasks = db.from("ai_usage").select("cost_usd").gte("created_at", since);
+  if (userId) tasks = tasks.eq("user_id", userId);
+  const [runs, other] = await Promise.all([
+    userId
+      ? must<{ stats: Record<string, number> | null }[]>(
+          db.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", userId).gte("runs.started_at", since),
+        )
+      : must<{ stats: Record<string, number> | null }[]>(db.from("runs").select("stats").gte("started_at", since)),
+    must<{ cost_usd: number | string }[]>(tasks),
+  ]);
+  return sum(runs) + sum(other);
 }
 
 /**
