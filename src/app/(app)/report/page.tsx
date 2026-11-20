@@ -6,7 +6,8 @@ import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
 import { CreditChart } from "@/components/CreditChart";
 import { NewJobsChart, type DayCount } from "@/components/NewJobsChart";
-import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
+import { IconChevronDown } from "@/components/icons";
+import { Bar, Dot, Empty, PageHeader, Panel, Pill, SectionHeader, Stat, type Tone } from "@/components/ui";
 import { buildSeries, dayStart, type TopUp } from "@/lib/credits";
 import { formatRunCost, formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
@@ -76,9 +77,11 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
   const newPerDay = fillDays((perDay ?? []) as DayCount[], timezone);
   if (error) throw new Error(error.message);
   // The admin sees each run as a whole (all spend is theirs); everyone else sees their own share.
-  const runs = (runRows as (Run & { run_users: { user_id: string; stats: Run["stats"] }[] })[]).map((r) =>
-    me.isAdmin ? r : { ...r, stats: r.run_users.find((u) => u.user_id === me.id)?.stats ?? {} },
-  ) as Run[];
+  // `mine` is the viewer's share either way: what reached them, was filtered, was scored.
+  const runs = (runRows as (Run & { run_users: { user_id: string; stats: Run["stats"] }[] })[]).map((r) => {
+    const mine = r.run_users.find((u) => u.user_id === me.id)?.stats;
+    return { ...(me.isAdmin ? r : { ...r, stats: mine ?? {} }), mine };
+  }) as (Run & { mine?: Run["stats"] })[];
   const moreRuns = (runTotal ?? 0) > runs.length;
 
   const c = Object.fromEntries(counts) as Record<JobStatus, number>;
@@ -86,7 +89,6 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
   const responded = c.interview + c.offer;
   const tracked = Object.values(c).reduce((a, b) => a + b, 0);
   // API spend is recorded per run from the first run that tracks it; older runs show "–".
-  const COST_KEYS = new Set(["cost_usd", "tokens_in", "tokens_out", "cost_estimated"]);
   const costed = runs.filter((r) => r.stats.cost_usd > 0);
   const totalCost = costed.reduce((a, r) => a + r.stats.cost_usd, 0);
   const funnelMax = Math.max(1, ...FUNNEL.map((f) => c[f.status]));
@@ -298,12 +300,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                             ) : !r.finished_at ? (
                               <span className="muted">running…</span>
                             ) : (
-                              <span className="mono muted">
-                                {Object.entries(r.stats)
-                                  .filter(([k, v]) => v && !COST_KEYS.has(k))
-                                  .map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`)
-                                  .join(" · ") || "nothing to do"}
-                              </span>
+                              <RunResult run={r} mine={r.mine} />
                             )}
                           </td>
                         </tr>
@@ -336,6 +333,76 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
         </section>
       </div>
     </>
+  );
+}
+
+/** Bookkeeping counters, shown under "details" (with their labels), in this order. */
+const RUN_DETAILS: [key: string, label: string][] = [
+  ["sources", "sources checked"],
+  ["fetched", "listings fetched"],
+  ["duplicates", "duplicates skipped"],
+  ["adopted", "taken over from aggregators"],
+  ["described", "descriptions fetched"],
+  ["described_later", "descriptions fetched"],
+  ["stale", "stale postings skipped"],
+  ["closed", "closed"],
+  ["filtered_later", "filtered once described"],
+  ["follow_ups", "follow-ups"],
+  ["status_changes", "status changes"],
+  ["tokens_in", "tokens in"],
+  ["tokens_out", "tokens out"],
+];
+
+const n = (v: number) => v.toLocaleString("en");
+const plural = (v: number, one: string, many = `${one}s`) => `${n(v)} ${v === 1 ? one : many}`;
+
+/**
+ * A run's result as one line, the same funnel as the rest of the app:
+ * "2,258 new → 189 passed filters → 60 scored". The funnel is the viewer's own share
+ * (`mine`: what reached them, was filtered out, was scored for them); runs from before
+ * shares were recorded fall back to the run's own counters. Problems (failed sources,
+ * scoring errors) show as badges; the bookkeeping counters open under a chevron.
+ */
+function RunResult({ run, mine }: { run: Run; mine?: Run["stats"] }) {
+  const s = run.stats;
+  const f = mine ?? s;
+  const steps: string[] = [];
+  if (run.kind === "digest") {
+    const parts = [s.new_matches && plural(s.new_matches, "new match", "new matches"), s.follow_ups && plural(s.follow_ups, "follow-up")].filter(Boolean);
+    steps.push(s.emailed ? `Emailed${parts.length ? `: ${parts.join(", ")}` : ""}` : "Nothing to email");
+  } else {
+    const arrived = mine ? f.matched : s.inserted;
+    if (arrived) {
+      steps.push(`${n(arrived)} new`);
+      // "Passed" isn't recorded: it's new minus filtered out (unknown on old runs without either).
+      if (mine || typeof s.filtered === "number") steps.push(`${n(Math.max(0, arrived - (f.filtered ?? 0)))} passed filters`);
+    }
+    if (f.scored) steps.push(`${n(f.scored)} scored`);
+    if (f.alerted ?? s.alerted) steps.push(plural(f.alerted ?? s.alerted, "alert") + " sent");
+  }
+  const line = steps.length ? steps.join(" → ") : run.kind === "watchlist" ? "No new listings" : "Nothing to do";
+  const details = RUN_DETAILS.filter(([k]) => s[k]).map(([k, label]) => `${n(s[k])} ${label}`);
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      {details.length ? (
+        <details className="group">
+          <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            <span>{line}</span>{" "}
+            <IconChevronDown width={10} height={10} className="faint inline transition-transform group-open:rotate-180" />
+          </summary>
+          <p className="mono faint mt-1 text-[11px]">{details.join(" · ")}</p>
+        </details>
+      ) : (
+        <span>{line}</span>
+      )}
+      {s.errors > 0 && (
+        <Link href="/sources" className="pill pill-bad" title="The failing sources are marked on the Sources page">
+          {plural(s.errors, "source")} failed
+        </Link>
+      )}
+      {s.score_errors > 0 && <Pill tone="warn">{plural(s.score_errors, "scoring error")}</Pill>}
+    </div>
   );
 }
 
