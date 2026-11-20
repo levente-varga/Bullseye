@@ -59,6 +59,9 @@ its headings; the rest are a list of links to job pages.
 - **Game Dev Estonia** (`gamedevestonia.ee/jobs`, an industry job board): readable (RSS
   and a WordPress `jobpost` API), but only 7 jobs, the newest seen from 2024, and every
   job names "Gamedev Estonia" rather than the studio, so not worth an aggregator.
+- **MED-EL** (`jobs.medel.com`): a single-page app on AWS Amplify; jobs come from a private
+  GraphQL (AppSync) API with a key in its bundle, and every URL (sitemap included) returns
+  the same shell. Not readable without that undocumented API.
 - **Playtouch** (`playtouch.net/career`): the jobs are added by JavaScript (the linked
   `#qa-release-ops-…` job isn't in the page's HTML); no job system behind it.
 - **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL
