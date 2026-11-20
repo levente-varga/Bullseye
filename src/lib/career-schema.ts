@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 /**
- * A structured career: what the Profile page shows and edits, and what CV and cover
- * letter drafts are built from. Extracted from the CV text (and optionally a website)
- * by the model, then reviewed by the person. Dates are "YYYY-MM" (or "YYYY"), or
- * "present" for an ongoing role.
+ * A structured career: the one description of a person that the scorer reads and CV and
+ * cover letter drafts are built from. Filled in on the Profile page, by hand or from a
+ * CV PDF by the model, then reviewed. Dates are "YYYY-MM" (or "YYYY"), or "present" for
+ * an ongoing role.
  */
 const DateText = z.string().describe('"YYYY-MM" when the month is known, else "YYYY"; "present" for an ongoing role; "" if unknown.');
 
@@ -38,12 +38,82 @@ export const CareerSchema = z.object({
     .describe("Every skill named anywhere in the sources, grouped, each once."),
   languages: z.array(z.object({ language: z.string(), level: z.string().describe('As stated, e.g. "native", "C1", "fluent"; "" if not stated.') })),
   awards: z.array(z.object({ title: z.string(), issuer: z.string(), date: DateText, details: z.string() })),
+  projects: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string().describe("What it is and the candidate's part in it, as stated."),
+        skills: z.array(z.string()),
+        url: z.string().describe('A link if given; "" otherwise.'),
+      }),
+    )
+    .describe("Personal, university or side projects (not roles at an employer)."),
+  certifications: z.array(z.object({ name: z.string(), issuer: z.string(), date: DateText })),
+  other: z
+    .string()
+    .describe("Anything else in the CV that has no field above (publications, volunteering, interests…), as short lines. \"\" if nothing."),
 });
 export type Career = z.infer<typeof CareerSchema>;
 export type Experience = z.infer<typeof ExperienceSchema>;
 export type Education = z.infer<typeof EducationSchema>;
+export type Project = Career["projects"][number];
 
-export const EMPTY_CAREER: Career = { summary: "", experiences: [], education: [], skills: [], languages: [], awards: [] };
+export const EMPTY_CAREER: Career = {
+  summary: "",
+  experiences: [],
+  education: [],
+  skills: [],
+  languages: [],
+  awards: [],
+  projects: [],
+  certifications: [],
+  other: "",
+};
+
+/** A saved career with any fields added since it was saved filled in (projects, certifications, other). */
+export function withDefaults(c: Partial<Career> | null | undefined): Career | null {
+  return c ? { ...EMPTY_CAREER, ...c } : null;
+}
+
+/**
+ * The career as compact text for the scorer: roles with dates, skills and highlights,
+ * education, projects, then skills, languages and the rest. Empty parts are left out.
+ */
+export function careerText(c: Career): string {
+  const dates = (a: string, b: string) => [formatCareerDate(a), formatCareerDate(b)].filter(Boolean).join(" – ");
+  const line = (...parts: string[]) => parts.filter(Boolean).join(" · ");
+  const out: string[] = [];
+  if (c.summary) out.push(c.summary);
+  if (c.experiences.length) {
+    out.push(
+      "Experience:\n" +
+        c.experiences
+          .map((e) =>
+            [
+              `- ${line(`${e.title} at ${e.company}`, dates(e.start, e.end), e.location, e.kind)}`,
+              e.summary && `  ${e.summary}`,
+              ...e.highlights.map((h) => `  • ${h}`),
+              e.skills.length ? `  Skills: ${e.skills.join(", ")}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          )
+          .join("\n"),
+    );
+  }
+  if (c.education.length) {
+    out.push("Education:\n" + c.education.map((e) => `- ${line(`${e.degree}, ${e.school}`, dates(e.start, e.end), e.location, e.details)}`).join("\n"));
+  }
+  if (c.projects.length) {
+    out.push("Projects:\n" + c.projects.map((p) => `- ${line(p.name, p.description, p.skills.join(", "))}`).join("\n"));
+  }
+  if (c.skills.length) out.push("Skills:\n" + c.skills.map((g) => `- ${g.group}: ${g.items.join(", ")}`).join("\n"));
+  if (c.languages.length) out.push("Languages: " + c.languages.map((l) => (l.level ? `${l.language} (${l.level})` : l.language)).join(", "));
+  if (c.certifications.length) out.push("Certifications:\n" + c.certifications.map((x) => `- ${line(x.name, x.issuer, formatCareerDate(x.date))}`).join("\n"));
+  if (c.awards.length) out.push("Awards:\n" + c.awards.map((a) => `- ${line(a.title, a.issuer, formatCareerDate(a.date), a.details)}`).join("\n"));
+  if (c.other) out.push("Other:\n" + c.other);
+  return out.join("\n\n");
+}
 
 /** "2023-06" → "Jun 2023", "present" → "Present", "2022" stays. */
 export function formatCareerDate(d: string): string {

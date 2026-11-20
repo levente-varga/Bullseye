@@ -350,12 +350,7 @@ export interface Profile {
   /** Any other links (one per entry). */
   links: string[];
   headline: string;
-  /** The text the scorer reads; filled from the uploaded PDF, editable. */
-  cv_text: string;
-  cv_file_path: string | null;
-  cv_file_name: string | null;
-  cv_uploaded_at: string | null;
-  /** The structured career (see lib/career.ts); null until extracted. */
+  /** The structured career (lib/career-schema.ts): what the scorer reads; null until filled in. */
   career: import("./career-schema").Career | null;
   career_updated_at: string | null;
 }

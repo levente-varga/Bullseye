@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
+import { careerText, withDefaults } from "./career-schema";
 import type { TokenUsage } from "./pricing";
 import { SCORING_MODELS, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
 
@@ -31,6 +32,8 @@ export function buildSystemPrompt(
   feedback: FeedbackExample[],
 ): string {
   const list = (xs: string[]) => (xs.length ? xs.join(", ") : "(any)");
+  // The career (Profile) is the candidate's description; the worker doesn't score without one.
+  const career = withDefaults(profile.career);
   const examples = feedback.length
     ? feedback
         .map(
@@ -45,7 +48,7 @@ export function buildSystemPrompt(
   return `You score job listings for one candidate. Give a 0-100 fit score.
 
 Scale: 85+ = apply right away; 60-84 = worth a look; 40-59 = weak fit; below 40 = clear mismatch.
-Weigh role and seniority match, skills overlap with the CV, location/remote fit, and the candidate's stated preferences. Treat the candidate's past decisions as the strongest signal of their taste: if they repeatedly skipped jobs for a reason, penalize listings with that trait.
+Weigh role and seniority match (years and level from the career's dates and titles), skills overlap with the career, location/remote fit, and the candidate's stated preferences. Treat the candidate's past decisions as the strongest signal of their taste: if they repeatedly skipped jobs for a reason, penalize listings with that trait.
 A remote role restricted to a country or region the candidate is not in is a location mismatch, not a remote fit.
 Be concrete in pros and cons (name the skill, the location, the seniority gap). Do not invent facts that are not in the listing.
 List only the pros and cons that actually bear on the decision. Their number should follow the listing: a clear match may have one con or none, a thin listing may have one pro. Do not aim for a fixed or balanced count, and do not restate one point in different words to fill the list.
@@ -61,8 +64,8 @@ Preferences: ${criteria.preferences || "(none stated)"}
 <candidate>
 Headline: ${profile.headline || "(not set)"}
 Based in: ${profile.location || "(not set)"}
-CV:
-${profile.cv_text || "(no CV provided)"}
+Career:
+${career ? careerText(career) : "(no career provided)"}
 </candidate>
 
 <past_decisions>

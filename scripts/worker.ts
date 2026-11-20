@@ -585,6 +585,11 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
       : [];
   const pending = [...rescores, ...waiting];
   if (!pending.length) return {};
+  // The career (Profile) is what the scorer knows about the person: none, no scoring.
+  if (!(await hasCareer(p.id))) {
+    console.log(`[${p.email}] no career on their profile yet; ${pending.length} listings wait.`);
+    return { no_career: pending.length };
+  }
 
   const budget = await budgetFor(p, settings, runSpend);
   if (budget <= 0) {
@@ -648,6 +653,12 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
     tokens_in: spend.tokensIn,
     tokens_out: spend.tokensOut,
   };
+}
+
+/** Whether the person has a career on their profile (the scorer needs one). */
+async function hasCareer(userId: string): Promise<boolean> {
+  const { data } = await db.from("profile").select("career").eq("user_id", userId).single();
+  return Boolean(data?.career);
 }
 
 /** Scores everyone's waiting matches, person by person. */
@@ -859,6 +870,10 @@ async function scoringDue(settings: Settings): Promise<boolean> {
       .eq("user_id", p.id)
       .or("status.eq.new,and(status.eq.scored,scored_at.is.null)");
     if (!count) continue;
+    if (!(await hasCareer(p.id))) {
+      console.log(`[${p.email}] ${count} listings waiting, but there's no career to score against yet.`);
+      continue;
+    }
     if ((await budgetFor(p, settings, runSpend)) > 0) due = true;
     else console.log(`[${p.email}] ${count} listings waiting, but a spend cap is reached.`);
   }
