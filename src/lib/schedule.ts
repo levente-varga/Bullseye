@@ -89,3 +89,13 @@ export function timezones(): string[] {
   const intl = Intl as unknown as { supportedValuesOf?: (k: string) => string[] };
   return intl.supportedValuesOf?.("timeZone") ?? ["UTC", "Europe/London", "Europe/Budapest", "Europe/Stockholm", "America/New_York"];
 }
+
+/** "today 07:00", "tomorrow 07:00", a date, or "off", in the schedule's timezone. */
+export function formatNextRun(t: number | null, tz: string, now: number): string {
+  if (t === null) return "off";
+  if (t <= now + 60_000) return "at the next check (within ~15 min)";
+  const day = (x: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(x);
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(t);
+  const label = day(t) === day(now) ? "today" : day(t) === day(now + 86_400_000) ? "tomorrow" : day(t);
+  return `${label} ${time}`;
+}

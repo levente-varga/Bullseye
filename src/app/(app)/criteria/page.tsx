@@ -1,65 +1,38 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Row } from "@/components/FormRow";
 import { SubmitButton } from "@/components/SubmitButton";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
-import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { formatUsd } from "@/lib/pricing";
-import { dailySlots, nextRuns, timezones } from "@/lib/schedule";
+import { dailySlots, formatNextRun } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
-import { SCORING_MODELS, WATCH_INTERVALS, type Criteria, type Member, type Settings } from "@/lib/types";
-import { addExcludeKeyword, reevaluate, saveCriteria, saveSettings } from "../actions";
-
-/** "Today 07:00", "Tomorrow 07:00", "Off", in the schedule's timezone. */
-function fmtRun(t: number | null, tz: string): string {
-  if (t === null) return "off";
-  const now = nowMs();
-  if (t <= now + 60_000) return "at the next check (within ~15 min)";
-  const day = (x: number) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(x);
-  const time = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(t);
-  const label = day(t) === day(now) ? "today" : day(t) === day(now + 86_400_000) ? "tomorrow" : day(t);
-  return `${label} ${time}`;
-}
+import { type Criteria, type Member, type Settings } from "@/lib/types";
+import { addExcludeKeyword, reevaluate, saveCriteria } from "../actions";
 
 export default async function CriteriaPage({ searchParams }: PageProps<"/criteria">) {
   const done = await searchParams; // set after a re-evaluation
   const supabase = await createClient();
   const me = await currentUser(supabase);
-  const lastRun = (kind: string) =>
-    supabase.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1);
-  const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
   const [
     { data: c, error },
     { data: skips },
-    { data: lastWatch },
-    { data: lastFull },
     { count: openCount },
     { count: scoredCount },
     { data: scoredRuns },
-    { data: dayRuns },
     { data: st },
     { data: mem },
-    { data: allDayRuns },
   ] = await Promise.all([
     supabase.from("criteria").select("*").single(),
     supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
-    lastRun("watchlist"),
-    lastRun("full"),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).in("status", ["new", "scored", "filtered"]),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
     // Your recent run shares that scored something: their cost per listing prices a re-score.
     supabase.from("run_users").select("stats").eq("user_id", me.id).gt("stats->scored", 0).order("run_id").limit(20),
-    // Your spend in the last 24 hours, against your daily cap.
-    supabase.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", me.id).gte("runs.started_at", dayAgo),
     supabase.from("settings").select("*").single(),
     supabase.from("members").select("*").eq("user_id", me.id).single(),
-    // Everyone's spend (admin only; RLS returns nothing to others), against the global cap.
-    me.isAdmin ? supabase.from("runs").select("stats").gte("started_at", dayAgo) : Promise.resolve({ data: [] }),
   ]);
   const settings = st as Settings;
   const member = mem as Member;
-  const spent24h = (dayRuns ?? []).reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
-  const spentAll24h = ((allDayRuns ?? []) as { stats: Record<string, number> }[]).reduce((sum, r) => sum + (Number(r.stats?.cost_usd) || 0), 0);
   const spent = (scoredRuns ?? []).reduce(
     (a, r) => ({ cost: a.cost + (Number(r.stats.cost_usd) || 0), jobs: a.jobs + (Number(r.stats.scored) || 0) }),
     { cost: 0, jobs: 0 },
@@ -68,11 +41,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
   const rescoreCost = (scoredCount ?? 0) * perJob;
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
-  const ms = (rows: { started_at: string }[] | null) => (rows?.[0] ? Date.parse(rows[0].started_at) : null);
-  // Run history is private to the admin, so others get the next slot from the schedule alone.
-  const next = me.isAdmin
-    ? nextRuns(settings, { watchlist: ms(lastWatch), full: ms(lastFull) }, nowMs())
-    : { daily: settings.daily_enabled ? dailySlots(settings, nowMs()).next : null, watchlist: null };
+  const nextDaily = settings.daily_enabled ? dailySlots(settings, nowMs()).next : null;
 
   const counts = new Map<string, number>();
   for (const s of skips ?? []) for (const r of s.reasons as string[]) counts.set(r, (counts.get(r) ?? 0) + 1);
@@ -148,15 +117,32 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
           <SubmitButton className="btn-primary" done="Saved">Save criteria</SubmitButton>
         </form>
 
-        <SettingsForm
-          settings={settings}
-          member={member}
-          isAdmin={me.isAdmin}
-          next={next}
-          spent24h={spent24h}
-          spentAll24h={spentAll24h}
-          perJob={perJob}
-        />
+        {/* The schedule and AI budget are shared settings (the admin's Settings page): here
+            just when the next search runs and what this person may spend. */}
+        <p className="hint">
+          Daily search{" "}
+          {nextDaily === null ? (
+            "off"
+          ) : (
+            <>
+              next <span className="mono text-[var(--fg)]">{formatNextRun(nextDaily, settings.timezone, nowMs())}</span> (
+              {settings.timezone.replace(/_/g, " ")})
+            </>
+          )}{" "}
+          · your AI budget <span className="mono text-[var(--fg)]">${Number(member.max_run_cost_usd)}</span> per run,{" "}
+          <span className="mono text-[var(--fg)]">${Number(member.max_daily_cost_usd)}</span> per 24h
+          {me.isAdmin ? (
+            <>
+              {" "}
+              ·{" "}
+              <Link href="/settings" className="link">
+                Settings →
+              </Link>
+            </>
+          ) : (
+            " · set by the admin"
+          )}
+        </p>
         </div>
 
         <aside className="space-y-3">
@@ -215,152 +201,6 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
         </aside>
       </div>
     </>
-  );
-}
-
-/**
- * The shared schedule, the scoring model and AI spend caps. The admin edits them;
- * everyone else sees them read-only (their own caps are set by the admin).
- */
-function SettingsForm(props: {
-  settings: Settings;
-  member: Member;
-  isAdmin: boolean;
-  next: { daily: number | null; watchlist: number | null };
-  spent24h: number;
-  spentAll24h: number;
-  perJob: number;
-}) {
-  const { settings, member, isAdmin, next } = props;
-  return (
-    // Keyed by what was saved: a <select>'s defaultValue only applies when it mounts, so
-    // without the remount the form would keep showing the old choice after saving.
-    <form
-      key={`${settings.updated_at}|${member.max_run_cost_usd}|${member.max_daily_cost_usd}`}
-      action={saveSettings}
-      className="space-y-6"
-    >
-      <fieldset disabled={!isAdmin} className="space-y-6">
-        <Panel title="Schedule" aside={`times in ${settings.timezone.replace(/_/g, " ")}${isAdmin ? "" : " · set by the admin"}`}>
-          <div className="divide">
-            <Row label="Daily search" hint="Fetch, score, then send digests.">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-2 text-[13px]">
-                  <input type="checkbox" name="daily_enabled" defaultChecked={settings.daily_enabled} />
-                  <span className="muted">every day at</span>
-                </label>
-                <input name="daily_time" type="time" defaultValue={settings.daily_time} className="input mono w-28" />
-              </div>
-              <p className="hint mt-1.5">Next: {fmtRun(next.daily, settings.timezone)}</p>
-            </Row>
-            <Row label="Watchlist check" hint="Watched sources; strong matches are emailed.">
-              <select name="watch_interval_minutes" defaultValue={settings.watch_interval_minutes} className="input w-auto">
-                {WATCH_INTERVALS.map((w) => (
-                  <option key={w.minutes} value={w.minutes}>
-                    {w.label}
-                  </option>
-                ))}
-              </select>
-              {isAdmin && <p className="hint mt-1.5">Next: {fmtRun(next.watchlist, settings.timezone)}</p>}
-            </Row>
-            {isAdmin && (
-              <Row label="Timezone">
-                <TimezoneSelect name="timezone" value={settings.timezone} options={timezones()} />
-              </Row>
-            )}
-          </div>
-          <p className="faint border-t border-[var(--border)] px-3 py-2 text-[12px]">
-            Runs can start up to ~20 minutes late.
-          </p>
-        </Panel>
-
-        <Panel title="AI scoring" aside={isAdmin ? undefined : "set by the admin"}>
-          <div className="divide">
-            <Row label="Model" hint="For everyone, from the next run.">
-              {/* Three across when the value has room for them, stacked otherwise. */}
-              <div className="grid gap-px border border-[var(--border)] bg-[var(--border)] @md:grid-cols-3">
-                {SCORING_MODELS.map((m) => (
-                  <label
-                    key={m.id}
-                    className="flex cursor-pointer gap-2 bg-[var(--surface)] p-2.5 text-[13px] has-[:checked]:bg-[var(--row-active)]"
-                  >
-                    <input type="radio" name="scoring_model" value={m.id} defaultChecked={settings.scoring_model === m.id} className="mt-0.5" />
-                    <span>
-                      <span className="block font-medium">{m.label.replace("Claude ", "")}</span>
-                      <span className="faint block text-[12px]">{m.note}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </Row>
-            <Row
-              label={isAdmin ? "Your spend caps" : "Spend caps"}
-              hint="Over-cap listings wait for budget. 0 pauses scoring."
-            >
-              <div className="flex flex-wrap items-end gap-4">
-                <Money name="max_run_cost_usd" label="Per run" value={member.max_run_cost_usd} />
-                <Money name="max_daily_cost_usd" label="Per 24 hours" value={member.max_daily_cost_usd} />
-              </div>
-              <p className="faint mt-2 text-[12px]">
-                <span className="mono text-[var(--fg)]">{formatUsd(props.spent24h)}</span> spent in 24h · a run covers ~<span className="mono">
-                  {props.perJob > 0 ? Math.floor(Number(member.max_run_cost_usd) / props.perJob).toLocaleString("en-US") : "–"}
-                </span>{" "}
-                listings
-              </p>
-            </Row>
-            {isAdmin && (
-              <Row label="Everyone, per 24 hours" hint="Stops all scoring once reached.">
-                <Money name="max_total_daily_cost_usd" label="All members" value={settings.max_total_daily_cost_usd} />
-                <p className="faint mt-2 text-[12px]">
-                  <span className="mono text-[var(--fg)]">{formatUsd(props.spentAll24h)}</span> spent in 24h
-                </p>
-              </Row>
-            )}
-          </div>
-        </Panel>
-      </fieldset>
-      {isAdmin && (
-        <div className="flex flex-wrap items-center gap-4">
-          <SubmitButton className="btn-primary" done="Saved">
-            Save schedule and AI settings
-          </SubmitButton>
-          <Link href="/admin" className="link text-[13px]">
-            Members and their caps →
-          </Link>
-        </div>
-      )}
-    </form>
-  );
-}
-
-function Money(props: { name: string; label: string; value: number }) {
-  return (
-    <label className="field">
-      <span className="hint">{props.label}</span>
-      <span className="flex items-center gap-1.5">
-        <span className="faint mono">$</span>
-        <input name={props.name} type="number" min={0} step={0.01} defaultValue={props.value} className="input mono w-24" />
-      </span>
-    </label>
-  );
-}
-
-/**
- * A label (and hint) beside its value when the row has room (28rem, by its own width:
- * the main column narrows when the side panel shows), above it otherwise. The value
- * is a container too, so what's inside can lay itself out by its width.
- */
-function Row(props: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="@container">
-      <div className="grid gap-2 px-3 py-3 @md:grid-cols-[180px_1fr] @md:gap-4">
-        <div>
-          <div className="text-[13px]">{props.label}</div>
-          {props.hint && <div className="hint mt-0.5">{props.hint}</div>}
-        </div>
-        <div className="@container min-w-0">{props.children}</div>
-      </div>
-    </div>
   );
 }
 

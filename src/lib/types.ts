@@ -384,6 +384,8 @@ export interface Settings {
   /** IANA timezone, e.g. "Europe/Budapest". */
   timezone: string;
   scoring_model: ScoringModel;
+  /** Builds careers from CVs (and will write CV and cover letter drafts). */
+  writing_model: ScoringModel;
   /** AI spend across everyone per rolling 24 hours (USD): a backstop over the per-person caps. */
   max_total_daily_cost_usd: number;
   /** The caps (USD) a new member starts with. */
