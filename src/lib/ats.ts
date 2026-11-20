@@ -775,25 +775,25 @@ const eightfoldPlace = (s: string) => s.split(",").map((p) => p.trim()).filter(B
 /**
  * The domain the newer API wants. Each site names it in its careers page ("domain=…": e.g.
  * telekom-growthhub.com for growthhub.telekom.com, morganstanley.com for
- * morganstanley.eightfold.ai); without one, the host's last two labels. Read once per host.
+ * morganstanley.eightfold.ai). When the page can't be read (some sites answer servers
+ * differently), a guess: "<company>.com" on an eightfold.ai host, else the host's last two
+ * labels. Only a domain read from the page is remembered, so a failed read is retried.
  */
-const eightfoldDomains = new Map<string, Promise<string>>();
-function eightfoldDomain(host: string): Promise<string> {
-  let found = eightfoldDomains.get(host);
-  if (!found) {
-    found = (async () => {
-      try {
-        const html = await (await get(`https://${host}/careers`, "text/html", 15_000)).text();
-        const named = html.match(/[?&]domain=([a-z0-9.-]+\.[a-z]{2,})/i)?.[1];
-        if (named) return named.toLowerCase();
-      } catch {
-        // fall back to the guess below
-      }
-      return host.split(".").slice(-2).join(".");
-    })();
-    eightfoldDomains.set(host, found);
+const eightfoldDomains = new Map<string, string>();
+async function eightfoldDomain(host: string): Promise<string> {
+  const known = eightfoldDomains.get(host);
+  if (known) return known;
+  try {
+    const html = await (await get(`https://${host}/careers`, "text/html", 15_000)).text();
+    const named = html.match(/[?&]domain=([a-z0-9.-]+\.[a-z]{2,})/i)?.[1]?.toLowerCase();
+    if (named) {
+      eightfoldDomains.set(host, named);
+      return named;
+    }
+  } catch {
+    // fall back to the guess below
   }
-  return found;
+  return host.endsWith(".eightfold.ai") ? `${host.split(".")[0]}.com` : host.split(".").slice(-2).join(".");
 }
 
 type EightfoldApi = "pcsx" | "v2";
