@@ -445,7 +445,8 @@ export interface SourceSuggestion {
 
 export interface Job {
   id: string;
-  source_id: string;
+  /** null for a job added by hand (Pipeline → Add a job). */
+  source_id: string | null;
   external_id: string;
   title: string;
   company: string;

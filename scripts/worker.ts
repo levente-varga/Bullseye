@@ -473,7 +473,11 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
   if (!waiting.length) return {};
   const byJob = new Map<string, MatchWithJob[]>();
   for (const m of waiting) byJob.set(m.job_id, [...(byJob.get(m.job_id) ?? []), m]);
-  const jobs = [...byJob.values()].map((ms) => ms[0].jobs).slice(0, MAX_SCORE_PER_RUN * 2);
+  // Jobs added by hand have no source to read a description from: the person's own text stands.
+  const jobs = [...byJob.values()]
+    .map((ms) => ms[0].jobs)
+    .filter((j) => j.source_id)
+    .slice(0, MAX_SCORE_PER_RUN * 2);
   const sources = new Map(
     (await must<Source[]>(db.from("sources").select("*").in("id", [...new Set(jobs.map((j) => j.source_id))]))).map((s) => [s.id, s]),
   );
@@ -483,7 +487,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
     let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string } = { text: "" };
     try {
-      found = await describe(sources.get(job.source_id)!, job);
+      found = await describe(sources.get(job.source_id!)!, job); // jobs without a source were filtered out above
       described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
