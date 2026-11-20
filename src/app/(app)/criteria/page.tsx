@@ -41,6 +41,8 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
   const rescoreCost = (scoredCount ?? 0) * perJob;
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
+  // A $0 cap (per run or per 24h) stops all scoring for this person.
+  const scoringPaused = Number(member.max_run_cost_usd) <= 0 || Number(member.max_daily_cost_usd) <= 0;
   const nextDaily = settings.daily_enabled ? dailySlots(settings, nowMs()).next : null;
 
   const counts = new Map<string, number>();
@@ -179,19 +181,33 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                 <label className="flex items-start gap-2">
                   <input type="checkbox" name="rescore" className="mt-0.5" />
                   <span className="muted">
-                    Re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones too (~<span className="mono text-[var(--fg)]">{formatUsd(rescoreCost)}</span>)
+                    Re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones too (~<span className="mono text-[var(--fg)]">{formatUsd(rescoreCost)}</span>).
+                    They keep their score in the Inbox until the new one arrives, and go first.
                   </span>
                 </label>
+                {scoringPaused && (
+                  <p className="text-[12px] text-[var(--warn)]">
+                    Scoring is paused: your AI budget is $0{me.isAdmin ? " (Settings)" : " (set by the admin)"}. Nothing gets scored until it&apos;s raised.
+                  </p>
+                )}
                 <SubmitButton className="btn" done="Done">
                   Re-evaluate
                 </SubmitButton>
                 {done.filtered !== undefined && (
                   <p className="border-t border-[var(--border)] pt-2.5 text-[12px] leading-relaxed">
                     <span className="mono">{done.filtered}</span> moved to Filtered ·{" "}
-                    <span className="mono">{done.waiting}</span> waiting to be scored ·{" "}
+                    <span className="mono">{done.waiting}</span> newly waiting to be scored ·{" "}
+                    {Number(done.rescore) > 0 && (
+                      <>
+                        <span className="mono">{done.rescore}</span> to re-score ·{" "}
+                      </>
+                    )}
                     <span className="mono">{done.kept}</span> unchanged.
-                    {Number(done.waiting) > 0 && (
-                      <span className="faint"> Scored in the background.</span>
+                    {Number(done.waiting) + Number(done.rescore ?? 0) > 0 && (
+                      <span className="faint">
+                        {" "}
+                        {scoringPaused ? "They're scored once your AI budget is raised." : "Scored in the background, re-scores first."}
+                      </span>
                     )}
                   </p>
                 )}

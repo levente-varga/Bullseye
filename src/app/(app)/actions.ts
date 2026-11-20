@@ -188,7 +188,8 @@ const RESET_SCORE = { score: null, score_summary: null, score_pros: null, score_
  * Applies the saved criteria to jobs you haven't acted on (waiting, scored, filtered):
  * - fails the filters now → Filtered (with the new reason)
  * - was filtered, passes now → waiting to be scored (described first if it never was)
- * - with `rescore`: scored jobs that still pass → waiting to be scored again
+ * - with `rescore`: scored jobs that still pass → scored again at the next run, first; they
+ *   keep their old score (and their place in the Inbox) until then
  * Free by itself; scoring happens at the next runs. Decisions and the Pipeline are untouched.
  */
 export async function reevaluate(form: FormData) {
@@ -200,6 +201,7 @@ export async function reevaluate(form: FormData) {
 
   const toFiltered = new Map<string, string[]>(); // reason → ids
   const toWaiting: string[] = [];
+  const toRescore: string[] = [];
   let kept = 0;
   let moved = 0; // newly filtered
   const PAGE = 500;
@@ -223,8 +225,10 @@ export async function reevaluate(form: FormData) {
         if (j.status !== "filtered" || j.filter_reason !== reason) toFiltered.set(reason, [...(toFiltered.get(reason) ?? []), j.id]);
         if (j.status === "filtered") kept++;
         else moved++;
-      } else if (j.status === "filtered" || (rescore && j.status === "scored")) {
+      } else if (j.status === "filtered") {
         toWaiting.push(j.id);
+      } else if (rescore && j.status === "scored") {
+        toRescore.push(j.id);
       } else {
         kept++;
       }
@@ -242,9 +246,19 @@ export async function reevaluate(form: FormData) {
   for (const part of chunks(toWaiting)) {
     check((await supabase.from("matches").update({ status: "new", filter_reason: null, ...RESET_SCORE }).in("job_id", part)).error);
   }
+  // Re-scores keep their status and score (they stay in the Inbox); a cleared scored_at
+  // tells the worker to score them again, first, and the new score replaces the old.
+  for (const part of chunks(toRescore)) {
+    check((await supabase.from("matches").update({ scored_at: null }).in("job_id", part)).error);
+  }
 
   revalidatePath("/", "layout");
-  const summary = new URLSearchParams({ filtered: String(moved), waiting: String(toWaiting.length), kept: String(kept) });
+  const summary = new URLSearchParams({
+    filtered: String(moved),
+    waiting: String(toWaiting.length),
+    rescore: String(toRescore.length),
+    kept: String(kept),
+  });
   redirect(`/criteria?${summary}#reevaluate`);
 }
 
