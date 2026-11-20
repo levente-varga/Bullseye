@@ -156,6 +156,17 @@ export type DetectedAts =
   | "rippling"
   | "inrecruiting"
   | "haileyhr"
+  | "oracle"
+  | "taleo"
+  | "gem"
+  | "manatal"
+  | "traffit"
+  | "join"
+  | "jobvite"
+  | "softgarden"
+  | "trakstar"
+  | "homerun"
+  | "jazzhr"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -206,6 +217,25 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
     if (board) return { ats: "rippling", slug: board.toLowerCase() };
   }
   if (host.endsWith(".bamboohr.com") && !/^(www|api|app)\./.test(host)) return { ats: "bamboohr", slug: host.split(".")[0] };
+  // Oracle Recruiting Cloud: <pod>.fa.<region>.oraclecloud.com/hcmUI/CandidateExperience/<lang>/sites/<site>/…
+  if (host.endsWith(".oraclecloud.com")) {
+    const site = u.pathname.match(/\/CandidateExperience\/[a-z]{2}(?:-[a-z]{2})?\/sites\/([a-z0-9_]+)/i)?.[1];
+    if (site) return { ats: "oracle", slug: `${host}/${site}` };
+  }
+  // Taleo: <company>.taleo.net or a custom domain, /careersection/<section>/<page>.ftl
+  {
+    const section = u.pathname.match(/^\/careersection\/([^/]+)\/[a-z]+\.ftl$/i)?.[1];
+    if (section && section !== "rest") return { ats: "taleo", slug: `${host}/${section}` };
+  }
+  if (host === "jobs.gem.com" && first) return { ats: "gem", slug: first };
+  if (host === "careers-page.com" && first) return { ats: "manatal", slug: first.toLowerCase() };
+  if (host.endsWith(".traffit.com") && !/^(www|app|api)\./.test(host)) return { ats: "traffit", slug: host };
+  if (host === "join.com" && first === "companies" && segments[1]) return { ats: "join", slug: segments[1].toLowerCase() };
+  if (host === "jobs.jobvite.com" && first) return { ats: "jobvite", slug: first.toLowerCase() };
+  if (host.endsWith(".softgarden.io") && !/^(www|app|api)\./.test(host)) return { ats: "softgarden", slug: host };
+  if (host.endsWith(".hire.trakstar.com")) return { ats: "trakstar", slug: host.split(".")[0] };
+  if (host.endsWith(".homerun.co") && !/^(www|jobs|feed|app|api)\./.test(host)) return { ats: "homerun", slug: host };
+  if (host.endsWith(".applytojob.com") && !/^(www|app)\./.test(host)) return { ats: "jazzhr", slug: host.split(".")[0] };
   {
     const base = avatureBase(url);
     if (base) return { ats: "avature", slug: base };
