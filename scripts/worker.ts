@@ -563,11 +563,27 @@ async function loadContext(p: Person) {
   return { profile, feedback };
 }
 
-/** Scores one person's waiting matches, within their budget. Over-budget ones stay waiting. */
+/**
+ * Scores one person's waiting matches, within their budget. Over-budget ones stay waiting.
+ * First the re-scores asked for on Criteria (status "scored", scored_at cleared: they keep
+ * their old score in the Inbox until this replaces it), then waiting matches, those that
+ * started waiting most recently first (just arrived, or just passed a re-evaluation).
+ */
 async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | null, runSpend: { total: number }): Promise<Record<string, number>> {
-  let q = db.from("matches").select("id, user_id, job_id, jobs!inner(*)").eq("user_id", p.id).eq("status", "new");
-  if (sourceIds) q = q.in("jobs.source_id", sourceIds);
-  const pending = await must<MatchWithJob[]>(q.order("created_at", { ascending: false }).limit(MAX_SCORE_PER_RUN));
+  const select = () => {
+    const q = db.from("matches").select("id, user_id, job_id, jobs!inner(*)").eq("user_id", p.id);
+    return sourceIds ? q.in("jobs.source_id", sourceIds) : q;
+  };
+  const rescores = await must<MatchWithJob[]>(
+    select().eq("status", "scored").is("scored_at", null).order("status_changed_at", { ascending: false }).limit(MAX_SCORE_PER_RUN),
+  );
+  const waiting =
+    rescores.length < MAX_SCORE_PER_RUN
+      ? await must<MatchWithJob[]>(
+          select().eq("status", "new").order("status_changed_at", { ascending: false }).limit(MAX_SCORE_PER_RUN - rescores.length),
+        )
+      : [];
+  const pending = [...rescores, ...waiting];
   if (!pending.length) return {};
 
   const budget = await budgetFor(p, settings, runSpend);
@@ -836,7 +852,12 @@ async function scoringDue(settings: Settings): Promise<boolean> {
   const runSpend = { total: 0 };
   let due = false;
   for (const p of people) {
-    const { count } = await db.from("matches").select("id", { count: "exact", head: true }).eq("user_id", p.id).eq("status", "new");
+    // Waiting, or scored but asked to be re-scored (scored_at cleared).
+    const { count } = await db
+      .from("matches")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", p.id)
+      .or("status.eq.new,and(status.eq.scored,scored_at.is.null)");
     if (!count) continue;
     if ((await budgetFor(p, settings, runSpend)) > 0) due = true;
     else console.log(`[${p.email}] ${count} listings waiting, but a spend cap is reached.`);
