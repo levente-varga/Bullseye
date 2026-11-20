@@ -1,46 +1,59 @@
 "use client";
 
-import { useActionState, useState, type ReactNode } from "react";
-import { extractCareerAction, saveCareer, type CareerResult } from "@/app/(app)/actions";
-import { EMPTY_CAREER, formatCareerDate, type Career, type Education, type Experience } from "@/lib/career-schema";
+import { useActionState, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { careerFromJson, careerFromPdf, saveCareer, type CareerResult } from "@/app/(app)/actions";
+import { EMPTY_CAREER, formatCareerDate, type Career, type Education, type Experience, type Project } from "@/lib/career-schema";
 import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, Panel, Pill } from "@/components/ui";
 
 const NEW_EXPERIENCE: Experience = { title: "", company: "", location: "", start: "", end: "", kind: "", summary: "", highlights: [], skills: [] };
 const NEW_EDUCATION: Education = { degree: "", school: "", location: "", start: "", end: "", details: "" };
+const NEW_PROJECT: Project = { name: "", description: "", skills: [], url: "" };
+
+const REPLACE_WARNING = "This replaces your whole career, including anything you edited by hand. Export it first if you want a backup. Continue?";
 
 /**
- * The structured career on the Profile page: built from the CV text by the model, or
- * filled in by hand; shown as lists and edited here (Edit → change, add, remove,
- * reorder → Save).
+ * The career on the Profile page: the one description of the person that the scorer
+ * reads and drafts are built from. Filled from a CV PDF (read by the writing model; the
+ * PDF isn't kept), restored from an exported JSON file, or entered by hand; shown as
+ * lists and edited here. Export downloads it as JSON, e.g. as a backup before a PDF import.
  */
-export function CareerSection(props: { career: Career | null; updatedAt: string | null; hasCv: boolean; modelLabel: string }) {
-  const [editing, setEditing] = useState(false);
-  const [rebuild, setRebuild] = useState(false);
-  const [draft, setDraft] = useState<Career>(props.career ?? EMPTY_CAREER);
-  const [result, extract] = useActionState<CareerResult>(extractCareerAction, null);
+export function CareerSection(props: { career: Career | null; updatedAt: string | null; modelLabel: string }) {
   const career = props.career;
+  const [editing, setEditing] = useState(false);
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [draft, setDraft] = useState<Career>(career ?? EMPTY_CAREER);
+  const [pdfResult, pdfAction] = useActionState<CareerResult, FormData>(careerFromPdf, null);
+  const [jsonResult, jsonAction] = useActionState<CareerResult, FormData>(careerFromJson, null);
+  const jsonForm = useRef<HTMLFormElement>(null);
+  const jsonField = useRef<HTMLInputElement>(null);
+  const jsonFile = useRef<HTMLInputElement>(null);
+  const result = [pdfResult, jsonResult].filter(Boolean).sort((a, b) => b!.at - a!.at)[0] ?? null;
 
-  const extractForm = (
-    <form action={extract} className="space-y-3 p-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton className="btn-primary" disabled={!props.hasCv}>
-          {career ? "Rebuild from CV" : "Build from CV"}
-        </SubmitButton>
-        <span className="hint">
-          {props.hasCv
-            ? `${props.modelLabel} reads your CV and lists only what it says${props.modelLabel.includes("Haiku") ? "; under a cent" : ""}.${career ? " Replaces the career below." : ""}`
-            : "Add your CV below first (PDF or text)."}
-        </span>
-      </div>
-      {result && (
-        <Notice key={result.at} tone={result.tone} className="" autoHideMs={result.tone === "ok" ? 15000 : 0}>
-          {result.message}
-        </Notice>
-      )}
-    </form>
-  );
+  const confirmReplace = (e: FormEvent) => {
+    if (career && !window.confirm(REPLACE_WARNING)) e.preventDefault();
+  };
+
+  /** Reads the chosen JSON file and submits its text to the import action. */
+  async function importJson(file: File | undefined) {
+    if (!file || !jsonForm.current || !jsonField.current) return;
+    if (career && !window.confirm(REPLACE_WARNING)) return;
+    jsonField.current.value = await file.text();
+    jsonForm.current.requestSubmit();
+  }
+
+  function exportJson() {
+    if (!career) return;
+    const blob = new Blob([JSON.stringify({ bullseye_career: 1, exported_at: new Date().toISOString(), career }, null, 2)], {
+      type: "application/json",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `career-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   if (editing) {
     return (
@@ -56,35 +69,90 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
     );
   }
 
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-2">
+      {career ? (
+        <button type="button" className="btn" onClick={() => (setDraft(career), setEditing(true))}>
+          Edit
+        </button>
+      ) : (
+        <button type="button" className="btn-primary" onClick={() => (setDraft(EMPTY_CAREER), setEditing(true))}>
+          Fill in by hand
+        </button>
+      )}
+      <button type="button" className="btn" onClick={() => setPdfOpen((v) => !v)} aria-expanded={pdfOpen}>
+        Import PDF…
+      </button>
+      <button type="button" className="btn" onClick={() => jsonFile.current?.click()}>
+        Import JSON…
+      </button>
+      {career && (
+        <button type="button" className="btn" onClick={exportJson}>
+          Export JSON
+        </button>
+      )}
+      {career && props.updatedAt && (
+        // A fixed locale and timezone: the server and the browser must render the same text.
+        <span className="hint">
+          updated {new Date(props.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
+        </span>
+      )}
+      {/* JSON import: the file is read here and its text posted to the action. */}
+      <input ref={jsonFile} type="file" accept="application/json,.json" className="hidden" onChange={(e) => (importJson(e.target.files?.[0]), (e.target.value = ""))} />
+      <form ref={jsonForm} action={jsonAction} className="hidden">
+        <input ref={jsonField} type="hidden" name="json" />
+      </form>
+    </div>
+  );
+
+  const pdfPanel = pdfOpen && (
+    <Panel title="Import from a CV PDF">
+      <form action={pdfAction} onSubmit={confirmReplace} className="flex flex-wrap items-center gap-3 p-3">
+        <input
+          name="cv"
+          type="file"
+          accept="application/pdf,.pdf"
+          required
+          className="max-w-full min-w-0 text-[13px] file:mr-3 file:cursor-pointer file:border file:border-[var(--border-strong)] file:bg-[var(--surface)] file:px-2.5 file:py-1 file:text-[13px] file:text-[var(--fg)]"
+        />
+        <SubmitButton className="btn-primary">Read PDF</SubmitButton>
+        <p className="hint w-full">
+          {props.modelLabel} reads it and lists only what it says{props.modelLabel.includes("Haiku") ? ", for under a cent" : ""}. The PDF
+          isn&apos;t kept.{career ? " Replaces the career below." : ""}
+        </p>
+      </form>
+    </Panel>
+  );
+
+  const notice = result && (
+    <Notice key={result.at} tone={result.tone} className="" autoHideMs={result.tone === "ok" ? 15000 : 0}>
+      {result.message}
+    </Notice>
+  );
+
   if (!career) {
     return (
-      <Panel title="Build your career">
-        <p className="muted px-3 pt-3 text-[13px]">
-          Your roles, education and skills as lists: easier to check here, and what CV and cover letter drafts will be built
-          from. Build them from your CV, or fill them in yourself.
-        </p>
-        {extractForm}
-        <div className="border-t border-[var(--border)] px-3 py-2.5">
-          <button type="button" className="btn" onClick={() => (setDraft(EMPTY_CAREER), setEditing(true))}>
-            Fill in by hand
-          </button>
-        </div>
-      </Panel>
+      <div className="space-y-4">
+        <Panel title="Your career">
+          <p className="muted p-3 text-[13px] leading-relaxed">
+            Your roles, education, projects and skills: what the scorer reads, and what CV and cover letter drafts will be built
+            from. Import them from your CV, restore an export, or fill them in yourself. Until there&apos;s a career, nothing is scored.
+          </p>
+        </Panel>
+        {toolbar}
+        {pdfPanel}
+        {notice}
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn" onClick={() => (setDraft(career), setEditing(true))}>
-          Edit
-        </button>
-        <button type="button" className="btn" onClick={() => setRebuild((v) => !v)} aria-expanded={rebuild}>
-          Rebuild…
-        </button>
-        {props.updatedAt && <span className="hint">updated {new Date(props.updatedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</span>}
+      <div className="space-y-4">
+        {toolbar}
+        {pdfPanel}
+        {notice}
       </div>
-      {(rebuild || result) && <Panel title="Rebuild from CV">{extractForm}</Panel>}
 
       {career.summary && (
         <Panel title="Summary">
@@ -94,18 +162,12 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
 
       <Panel title="Experience" aside={career.experiences.length}>
         {career.experiences.length === 0 ? (
-          <Empty>No roles found.</Empty>
+          <Empty>No roles yet.</Empty>
         ) : (
           <ol className="divide">
             {career.experiences.map((e, i) => (
               <li key={i} className="space-y-1.5 p-3 text-[13px]">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span>
-                    <span className="font-medium">{e.title}</span>
-                    <span className="muted"> · {e.company}</span>
-                  </span>
-                  <Dates start={e.start} end={e.end} />
-                </div>
+                <Heading title={e.title} sub={e.company} start={e.start} end={e.end} />
                 <Meta items={[e.location, e.kind]} />
                 {e.summary && <p className="leading-relaxed">{e.summary}</p>}
                 {e.highlights.length > 0 && (
@@ -124,18 +186,12 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
 
       <Panel title="Education" aside={career.education.length}>
         {career.education.length === 0 ? (
-          <Empty>No education found.</Empty>
+          <Empty>No education yet.</Empty>
         ) : (
           <ol className="divide">
             {career.education.map((e, i) => (
               <li key={i} className="space-y-1 p-3 text-[13px]">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span>
-                    <span className="font-medium">{e.degree}</span>
-                    <span className="muted"> · {e.school}</span>
-                  </span>
-                  <Dates start={e.start} end={e.end} />
-                </div>
+                <Heading title={e.degree} sub={e.school} start={e.start} end={e.end} />
                 <Meta items={[e.location]} />
                 {e.details && <p className="leading-relaxed">{e.details}</p>}
               </li>
@@ -144,10 +200,31 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
         )}
       </Panel>
 
+      {career.projects.length > 0 && (
+        <Panel title="Projects" aside={career.projects.length}>
+          <ol className="divide">
+            {career.projects.map((p, i) => (
+              <li key={i} className="space-y-1.5 p-3 text-[13px]">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="font-medium">{p.name}</span>
+                  {p.url && (
+                    <a href={p.url} target="_blank" rel="noreferrer" className="link mono text-[12px]">
+                      {p.url.replace(/^https?:\/\//, "")}
+                    </a>
+                  )}
+                </div>
+                {p.description && <p className="leading-relaxed">{p.description}</p>}
+                {p.skills.length > 0 && <Chips items={p.skills} />}
+              </li>
+            ))}
+          </ol>
+        </Panel>
+      )}
+
       <div className="grid gap-6 md:grid-cols-2">
         <Panel title="Skills">
           {career.skills.length === 0 ? (
-            <Empty>No skills found.</Empty>
+            <Empty>No skills yet.</Empty>
           ) : (
             <div className="space-y-3 p-3 text-[13px]">
               {career.skills.map((g, i) => (
@@ -174,6 +251,21 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
               </ul>
             )}
           </Panel>
+          {career.certifications.length > 0 && (
+            <Panel title="Certifications">
+              <ul className="divide text-[13px]">
+                {career.certifications.map((c, i) => (
+                  <li key={i} className="flex justify-between gap-3 px-3 py-2">
+                    <span>
+                      {c.name}
+                      {c.issuer && <span className="muted"> · {c.issuer}</span>}
+                    </span>
+                    <span className="mono faint text-[12px]">{formatCareerDate(c.date)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
           {career.awards.length > 0 && (
             <Panel title="Awards">
               <ul className="divide text-[13px]">
@@ -191,13 +283,27 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
           )}
         </div>
       </div>
+
+      {career.other && (
+        <Panel title="Other">
+          <p className="p-3 text-[13px] leading-relaxed whitespace-pre-line">{career.other}</p>
+        </Panel>
+      )}
     </div>
   );
 }
 
-function Dates({ start, end }: { start: string; end: string }) {
-  const text = [formatCareerDate(start), formatCareerDate(end)].filter(Boolean).join(" – ");
-  return text ? <span className="mono faint shrink-0 text-[12px]">{text}</span> : null;
+function Heading({ title, sub, start, end }: { title: string; sub: string; start: string; end: string }) {
+  const dates = [formatCareerDate(start), formatCareerDate(end)].filter(Boolean).join(" – ");
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+      <span>
+        <span className="font-medium">{title}</span>
+        {sub && <span className="muted"> · {sub}</span>}
+      </span>
+      {dates && <span className="mono faint shrink-0 text-[12px]">{dates}</span>}
+    </div>
+  );
 }
 
 function Meta({ items }: { items: string[] }) {
@@ -224,8 +330,11 @@ const clean = (xs: string[]) => xs.map((s) => s.trim()).filter(Boolean);
 const tidy = (c: Career): Career => ({
   ...c,
   experiences: c.experiences.map((e) => ({ ...e, highlights: clean(e.highlights), skills: clean(e.skills) })),
+  projects: c.projects.map((p) => ({ ...p, skills: clean(p.skills) })).filter((p) => p.name.trim() || p.description.trim()),
   skills: c.skills.map((g) => ({ ...g, items: clean(g.items) })).filter((g) => g.group.trim() || g.items.length),
   languages: c.languages.filter((l) => l.language.trim()),
+  certifications: c.certifications.filter((x) => x.name.trim()),
+  awards: c.awards.filter((a) => a.title.trim()),
 });
 
 /** Everything editable at once; Save posts the whole career as JSON (validated server-side). */
@@ -239,6 +348,13 @@ function CareerEditor(props: { draft: Career; setDraft: (c: Career) => void; onC
     out.splice(Math.max(0, Math.min(out.length, i + by)), 0, x);
     return out;
   };
+  const tools = <T,>(key: "experiences" | "education" | "projects", list: T[], i: number) => (
+    <EntryTools
+      onUp={i > 0 ? () => set({ [key]: move(list, i, -1) }) : undefined}
+      onDown={i < list.length - 1 ? () => set({ [key]: move(list, i, 1) }) : undefined}
+      onRemove={() => set({ [key]: list.filter((_, j) => j !== i) })}
+    />
+  );
 
   return (
     <form
@@ -260,11 +376,7 @@ function CareerEditor(props: { draft: Career; setDraft: (c: Career) => void; onC
         <ol className="divide">
           {d.experiences.map((e, i) => (
             <li key={i} className="space-y-2 p-3">
-              <EntryTools
-                onUp={i > 0 ? () => set({ experiences: move(d.experiences, i, -1) }) : undefined}
-                onDown={i < d.experiences.length - 1 ? () => set({ experiences: move(d.experiences, i, 1) }) : undefined}
-                onRemove={() => set({ experiences: d.experiences.filter((_, j) => j !== i) })}
-              />
+              {tools("experiences", d.experiences, i)}
               <Grid>
                 <Text label="Title" value={e.title} onChange={(v) => set({ experiences: setAt(d.experiences, i, { title: v }) })} />
                 <Text label="Company" value={e.company} onChange={(v) => set({ experiences: setAt(d.experiences, i, { company: v }) })} />
@@ -290,11 +402,7 @@ function CareerEditor(props: { draft: Career; setDraft: (c: Career) => void; onC
         <ol className="divide">
           {d.education.map((e, i) => (
             <li key={i} className="space-y-2 p-3">
-              <EntryTools
-                onUp={i > 0 ? () => set({ education: move(d.education, i, -1) }) : undefined}
-                onDown={i < d.education.length - 1 ? () => set({ education: move(d.education, i, 1) }) : undefined}
-                onRemove={() => set({ education: d.education.filter((_, j) => j !== i) })}
-              />
+              {tools("education", d.education, i)}
               <Grid>
                 <Text label="Degree" value={e.degree} onChange={(v) => set({ education: setAt(d.education, i, { degree: v }) })} />
                 <Text label="School" value={e.school} onChange={(v) => set({ education: setAt(d.education, i, { school: v }) })} />
@@ -309,15 +417,29 @@ function CareerEditor(props: { draft: Career; setDraft: (c: Career) => void; onC
         </ol>
       </Panel>
 
+      <Panel title="Projects" aside={<AddButton onClick={() => set({ projects: [NEW_PROJECT, ...d.projects] })}>Add project</AddButton>}>
+        <ol className="divide">
+          {d.projects.map((p, i) => (
+            <li key={i} className="space-y-2 p-3">
+              {tools("projects", d.projects, i)}
+              <Grid>
+                <Text label="Name" value={p.name} onChange={(v) => set({ projects: setAt(d.projects, i, { name: v }) })} />
+                <Text label="Link" value={p.url} placeholder="https://…" mono onChange={(v) => set({ projects: setAt(d.projects, i, { url: v }) })} />
+              </Grid>
+              <Area label="What it is, and your part" value={p.description} rows={2} onChange={(v) => set({ projects: setAt(d.projects, i, { description: v }) })} />
+              <Text label="Skills (comma-separated)" value={p.skills.join(", ")} onChange={(v) => set({ projects: setAt(d.projects, i, { skills: commas(v) }) })} />
+            </li>
+          ))}
+        </ol>
+      </Panel>
+
       <Panel title="Skills" aside={<AddButton onClick={() => set({ skills: [...d.skills, { group: "", items: [] }] })}>Add group</AddButton>}>
         <ol className="divide">
           {d.skills.map((g, i) => (
             <li key={i} className="grid gap-2 p-3 sm:grid-cols-[12rem_1fr_auto] sm:items-end">
               <Text label="Group" value={g.group} onChange={(v) => set({ skills: setAt(d.skills, i, { group: v }) })} />
               <Text label="Skills (comma-separated)" value={g.items.join(", ")} onChange={(v) => set({ skills: setAt(d.skills, i, { items: commas(v) }) })} />
-              <button type="button" className="btn btn-field" onClick={() => set({ skills: d.skills.filter((_, j) => j !== i) })}>
-                Remove
-              </button>
+              <RemoveButton onClick={() => set({ skills: d.skills.filter((_, j) => j !== i) })} />
             </li>
           ))}
         </ol>
@@ -329,12 +451,54 @@ function CareerEditor(props: { draft: Career; setDraft: (c: Career) => void; onC
             <li key={i} className="grid gap-2 p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
               <Text label="Language" value={l.language} onChange={(v) => set({ languages: setAt(d.languages, i, { language: v }) })} />
               <Text label="Level" value={l.level} placeholder="native, C1, fluent…" onChange={(v) => set({ languages: setAt(d.languages, i, { level: v }) })} />
-              <button type="button" className="btn btn-field" onClick={() => set({ languages: d.languages.filter((_, j) => j !== i) })}>
-                Remove
-              </button>
+              <RemoveButton onClick={() => set({ languages: d.languages.filter((_, j) => j !== i) })} />
             </li>
           ))}
         </ol>
+      </Panel>
+
+      <Panel
+        title="Certifications"
+        aside={<AddButton onClick={() => set({ certifications: [...d.certifications, { name: "", issuer: "", date: "" }] })}>Add certification</AddButton>}
+      >
+        <ol className="divide">
+          {d.certifications.map((x, i) => (
+            <li key={i} className="grid gap-2 p-3 sm:grid-cols-[1fr_1fr_8rem_auto] sm:items-end">
+              <Text label="Name" value={x.name} onChange={(v) => set({ certifications: setAt(d.certifications, i, { name: v }) })} />
+              <Text label="Issuer" value={x.issuer} onChange={(v) => set({ certifications: setAt(d.certifications, i, { issuer: v }) })} />
+              <Text label="Date" value={x.date} placeholder="2024-05" mono onChange={(v) => set({ certifications: setAt(d.certifications, i, { date: v }) })} />
+              <RemoveButton onClick={() => set({ certifications: d.certifications.filter((_, j) => j !== i) })} />
+            </li>
+          ))}
+        </ol>
+      </Panel>
+
+      <Panel title="Awards" aside={<AddButton onClick={() => set({ awards: [...d.awards, { title: "", issuer: "", date: "", details: "" }] })}>Add award</AddButton>}>
+        <ol className="divide">
+          {d.awards.map((a, i) => (
+            <li key={i} className="space-y-2 p-3">
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_8rem_auto] sm:items-end">
+                <Text label="Title" value={a.title} onChange={(v) => set({ awards: setAt(d.awards, i, { title: v }) })} />
+                <Text label="Issuer" value={a.issuer} onChange={(v) => set({ awards: setAt(d.awards, i, { issuer: v }) })} />
+                <Text label="Date" value={a.date} placeholder="2023" mono onChange={(v) => set({ awards: setAt(d.awards, i, { date: v }) })} />
+                <RemoveButton onClick={() => set({ awards: d.awards.filter((_, j) => j !== i) })} />
+              </div>
+              <Text label="Details" value={a.details} onChange={(v) => set({ awards: setAt(d.awards, i, { details: v }) })} />
+            </li>
+          ))}
+        </ol>
+      </Panel>
+
+      <Panel title="Other">
+        <div className="p-3">
+          <textarea
+            className="input"
+            rows={3}
+            value={d.other}
+            onChange={(e) => set({ other: e.target.value })}
+            placeholder="Anything else worth knowing: publications, volunteering, interests…"
+          />
+        </div>
       </Panel>
 
       <div className="flex gap-2">
@@ -351,6 +515,14 @@ function AddButton(props: { onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" onClick={props.onClick} className="link cursor-pointer font-sans text-[12px] normal-case tracking-normal">
       + {props.children}
+    </button>
+  );
+}
+
+function RemoveButton(props: { onClick: () => void }) {
+  return (
+    <button type="button" className="btn btn-field" onClick={props.onClick}>
+      Remove
     </button>
   );
 }

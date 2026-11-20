@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { CareerSchema, extractCareer } from "@/lib/career";
+import { withDefaults } from "@/lib/career-schema";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
@@ -188,7 +189,8 @@ const RESET_SCORE = { score: null, score_summary: null, score_pros: null, score_
  * Applies the saved criteria to jobs you haven't acted on (waiting, scored, filtered):
  * - fails the filters now → Filtered (with the new reason)
  * - was filtered, passes now → waiting to be scored (described first if it never was)
- * - with `rescore`: scored jobs that still pass → waiting to be scored again
+ * - with `rescore`: scored jobs that still pass → scored again at the next run, first; they
+ *   keep their old score (and their place in the Inbox) until then
  * Free by itself; scoring happens at the next runs. Decisions and the Pipeline are untouched.
  */
 export async function reevaluate(form: FormData) {
@@ -200,6 +202,7 @@ export async function reevaluate(form: FormData) {
 
   const toFiltered = new Map<string, string[]>(); // reason → ids
   const toWaiting: string[] = [];
+  const toRescore: string[] = [];
   let kept = 0;
   let moved = 0; // newly filtered
   const PAGE = 500;
@@ -223,8 +226,10 @@ export async function reevaluate(form: FormData) {
         if (j.status !== "filtered" || j.filter_reason !== reason) toFiltered.set(reason, [...(toFiltered.get(reason) ?? []), j.id]);
         if (j.status === "filtered") kept++;
         else moved++;
-      } else if (j.status === "filtered" || (rescore && j.status === "scored")) {
+      } else if (j.status === "filtered") {
         toWaiting.push(j.id);
+      } else if (rescore && j.status === "scored") {
+        toRescore.push(j.id);
       } else {
         kept++;
       }
@@ -242,9 +247,19 @@ export async function reevaluate(form: FormData) {
   for (const part of chunks(toWaiting)) {
     check((await supabase.from("matches").update({ status: "new", filter_reason: null, ...RESET_SCORE }).in("job_id", part)).error);
   }
+  // Re-scores keep their status and score (they stay in the Inbox); a cleared scored_at
+  // tells the worker to score them again, first, and the new score replaces the old.
+  for (const part of chunks(toRescore)) {
+    check((await supabase.from("matches").update({ scored_at: null }).in("job_id", part)).error);
+  }
 
   revalidatePath("/", "layout");
-  const summary = new URLSearchParams({ filtered: String(moved), waiting: String(toWaiting.length), kept: String(kept) });
+  const summary = new URLSearchParams({
+    filtered: String(moved),
+    waiting: String(toWaiting.length),
+    rescore: String(toRescore.length),
+    kept: String(kept),
+  });
   redirect(`/criteria?${summary}#reevaluate`);
 }
 
@@ -436,116 +451,90 @@ export async function saveProfile(form: FormData) {
 /** "github.com/me" → "https://github.com/me"; empty stays empty. */
 const url = (v: string) => (v && !/^https?:\/\//i.test(v) ? `https://${v}` : v);
 
-export async function saveCvText(form: FormData) {
-  const supabase = await db();
-  const me = await currentUser(supabase);
-  check(
-    (await supabase.from("profile").update({ cv_text: str(form, "cv_text"), updated_at: new Date().toISOString() }).eq("user_id", me.id))
-      .error,
-  );
-  revalidatePath("/profile");
-}
-
 export type CareerResult = { tone: "ok" | "bad"; message: string; at: number } | null;
 
 /**
- * Builds the structured career from the CV text (Profile page, useActionState).
- * Replaces what was there; the person reviews it afterwards.
+ * Fills the career from a CV PDF (Profile page, useActionState): its text is read in
+ * memory and given to the writing model; the PDF itself isn't kept. Replaces the career
+ * that was there (the page asks first); the person reviews it afterwards.
  */
-export async function extractCareerAction(): Promise<CareerResult> {
+export async function careerFromPdf(_prev: CareerResult, form: FormData): Promise<CareerResult> {
   const at = Date.now();
-  if (!process.env.ANTHROPIC_API_KEY) return { tone: "bad", message: "The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.", at };
+  const bad = (message: string) => ({ tone: "bad" as const, message, at });
+  if (!process.env.ANTHROPIC_API_KEY) return bad("The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.");
+  const file = form.get("cv");
+  if (!(file instanceof File) || file.size === 0) return bad("Choose a PDF file first.");
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return bad("Only PDF files are supported.");
+  if (file.size > MAX_CV_BYTES) return bad("That file is over 5 MB.");
+  let text = "";
+  try {
+    text = (await extractPdfText(await file.arrayBuffer())).trim();
+  } catch {
+    return bad("Couldn't read that PDF. Is it password-protected or damaged?");
+  }
+  if (!text) return bad("That PDF has no text layer (probably a scan), so there's nothing to read. Fill the career in by hand instead.");
+
   const supabase = await db();
   const me = await currentUser(supabase);
-  const [{ data: p }, { data: st }] = await Promise.all([
-    supabase.from("profile").select("cv_text").single(),
-    supabase.from("settings").select("writing_model").single(),
-  ]);
-  if (!p?.cv_text?.trim()) return { tone: "bad", message: "Add your CV first (upload a PDF or paste the text below).", at };
+  const { data: st } = await supabase.from("settings").select("writing_model").single();
   // The admin's writing model (Settings); Haiku until one is set.
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const { career, costUsd } = await extractCareer(new Anthropic(), model, p.cv_text);
+    const { career, costUsd } = await extractCareer(new Anthropic(), model, text);
     check(
       (await supabase.from("profile").update({ career, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
     );
-    revalidatePath("/profile");
+    revalidatePath("/", "layout"); // the Inbox says when scoring waits for a career
     return {
       tone: "ok",
-      message: `Built from your CV: ${career.experiences.length} roles, ${career.education.length} degrees. Cost $${costUsd.toFixed(4)}. Check it below.`,
+      message: `Filled from ${file.name}: ${career.experiences.length} roles, ${career.education.length} degrees, ${career.projects.length} projects. Cost $${costUsd.toFixed(4)}. Check it below.`,
       at,
     };
   } catch (e) {
-    return { tone: "bad", message: `Extraction failed: ${e instanceof Error ? e.message : e}`, at };
+    return bad(`Reading the CV failed: ${e instanceof Error ? e.message : e}`);
   }
+}
+
+/**
+ * Restores a career from an exported JSON file (Profile page, useActionState): the file's
+ * text arrives as `json`, is checked against the schema and replaces the career.
+ * Accepts the export ({ career: … }) or a bare career object.
+ */
+export async function careerFromJson(_prev: CareerResult, form: FormData): Promise<CareerResult> {
+  const at = Date.now();
+  let data: unknown;
+  try {
+    data = JSON.parse(str(form, "json"));
+  } catch {
+    return { tone: "bad", message: "That file isn't valid JSON.", at };
+  }
+  const career = data && typeof data === "object" && "career" in data ? (data as { career: unknown }).career : data;
+  const parsed = CareerSchema.safeParse(withDefaults(career as Parameters<typeof withDefaults>[0]));
+  if (!parsed.success) return { tone: "bad", message: "That JSON isn't a Bullseye career export, so nothing was changed.", at };
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  check(
+    (await supabase.from("profile").update({ career: parsed.data, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
+  );
+  revalidatePath("/", "layout");
+  return {
+    tone: "ok",
+    message: `Imported: ${parsed.data.experiences.length} roles, ${parsed.data.education.length} degrees, ${parsed.data.projects.length} projects.`,
+    at,
+  };
 }
 
 /** Saves the edited career (the editor posts it as JSON), validated against the schema. */
 export async function saveCareer(form: FormData) {
   const supabase = await db();
   const me = await currentUser(supabase);
-  const parsed = CareerSchema.safeParse(JSON.parse(str(form, "career") || "null"));
+  const parsed = CareerSchema.safeParse(withDefaults(JSON.parse(str(form, "career") || "null")));
   if (!parsed.success) throw new Error("The career data didn't validate; nothing was saved.");
   check(
     (await supabase.from("profile").update({ career: parsed.data, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
   );
-  revalidatePath("/profile");
-}
-
-/** Stores the PDF in the private "cv" bucket and fills cv_text from it. */
-export async function uploadCv(form: FormData) {
-  const supabase = await db();
-  const back = (q: Record<string, string>) => redirect(`/profile?${new URLSearchParams(q)}#cv`);
-  const file = form.get("cv");
-  if (!(file instanceof File) || file.size === 0) back({ cv_error: "Choose a PDF file first." });
-  const pdf = file as File;
-  if (pdf.type !== "application/pdf" && !pdf.name.toLowerCase().endsWith(".pdf")) back({ cv_error: "Only PDF files are supported." });
-  if (pdf.size > MAX_CV_BYTES) back({ cv_error: "That file is over 5 MB." });
-
-  const bytes = await pdf.arrayBuffer();
-  let text = "";
-  try {
-    text = await extractPdfText(bytes);
-  } catch {
-    back({ cv_error: "Couldn't read that PDF. Is it password-protected or damaged?" });
-  }
-
-  const me = await currentUser(supabase);
-  const { data: before } = await supabase.from("profile").select("cv_file_path").single();
-  const path = `${me.id}/cv-${Date.now()}.pdf`;
-  const up = await supabase.storage.from("cv").upload(path, bytes, { contentType: "application/pdf" });
-  if (up.error) back({ cv_error: `Upload failed: ${up.error.message}` });
-
-  check(
-    (
-      await supabase
-        .from("profile")
-        .update({
-          cv_file_path: path,
-          cv_file_name: pdf.name,
-          cv_uploaded_at: new Date().toISOString(),
-          // Keep the old text if the PDF has no text layer (a scan), so nothing is lost.
-          ...(text ? { cv_text: text } : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", me.id)
-    ).error,
-  );
-  if (before?.cv_file_path) await supabase.storage.from("cv").remove([before.cv_file_path]);
-  revalidatePath("/profile");
-  back(text ? { cv: "uploaded" } : { cv: "no_text" });
-}
-
-export async function deleteCv() {
-  const supabase = await db();
-  const me = await currentUser(supabase);
-  const { data } = await supabase.from("profile").select("cv_file_path").single();
-  if (data?.cv_file_path) await supabase.storage.from("cv").remove([data.cv_file_path]);
-  check(
-    (await supabase.from("profile").update({ cv_file_path: null, cv_file_name: null, cv_uploaded_at: null }).eq("user_id", me.id)).error,
-  );
-  revalidatePath("/profile");
+  revalidatePath("/", "layout"); // the Inbox says when scoring waits for a career
 }
 
 export async function saveAnswer(form: FormData) {
