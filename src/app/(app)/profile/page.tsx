@@ -74,7 +74,6 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
             career={profile.career ?? null}
             updatedAt={profile.career_updated_at ?? null}
             hasCv={Boolean(profile.cv_text.trim())}
-            website={profile.website_url}
           />
         </section>
 

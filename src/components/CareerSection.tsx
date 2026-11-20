@@ -11,32 +11,27 @@ const NEW_EXPERIENCE: Experience = { title: "", company: "", location: "", start
 const NEW_EDUCATION: Education = { degree: "", school: "", location: "", start: "", end: "", details: "" };
 
 /**
- * The structured career on the Profile page: built from the CV text and/or the website by
- * the model, shown as lists, and edited here (Edit → change, add, remove, reorder → Save).
+ * The structured career on the Profile page: built from the CV text by the model, or
+ * filled in by hand; shown as lists and edited here (Edit → change, add, remove,
+ * reorder → Save).
  */
-export function CareerSection(props: { career: Career | null; updatedAt: string | null; hasCv: boolean; website: string }) {
+export function CareerSection(props: { career: Career | null; updatedAt: string | null; hasCv: boolean }) {
   const [editing, setEditing] = useState(false);
   const [rebuild, setRebuild] = useState(false);
   const [draft, setDraft] = useState<Career>(props.career ?? EMPTY_CAREER);
-  const [result, extract] = useActionState<CareerResult, FormData>(extractCareerAction, null);
+  const [result, extract] = useActionState<CareerResult>(extractCareerAction, null);
   const career = props.career;
 
   const extractForm = (
     <form action={extract} className="space-y-3 p-3">
-      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
-        <label className={`flex items-center gap-2 ${props.hasCv ? "" : "opacity-50"}`}>
-          <input type="checkbox" name="use_cv" defaultChecked={props.hasCv} disabled={!props.hasCv} />
-          CV text {!props.hasCv && <span className="faint">(none yet)</span>}
-        </label>
-        <label className={`flex items-center gap-2 ${props.website ? "" : "opacity-50"}`}>
-          <input type="checkbox" name="use_website" defaultChecked={Boolean(props.website)} disabled={!props.website} />
-          Website {props.website ? <span className="mono faint">{props.website.replace(/^https?:\/\//, "")}</span> : <span className="faint">(set one under Links)</span>}
-        </label>
-      </div>
       <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton className="btn-primary">{career ? "Rebuild career" : "Build career"}</SubmitButton>
+        <SubmitButton className="btn-primary" disabled={!props.hasCv}>
+          {career ? "Rebuild from CV" : "Build from CV"}
+        </SubmitButton>
         <span className="hint">
-          Claude Haiku reads them and lists only what they say; under a cent.{career ? " Replaces the career below." : ""}
+          {props.hasCv
+            ? `Claude Haiku reads your CV and lists only what it says; under a cent.${career ? " Replaces the career below." : ""}`
+            : "Add your CV below first (PDF or text)."}
         </span>
       </div>
       {result && (
@@ -47,29 +42,34 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
     </form>
   );
 
-  if (!career) {
-    return (
-      <Panel title="Build your career">
-        <p className="muted px-3 pt-3 text-[13px]">
-          Turn your CV (and website) into lists of roles, education and skills: easier to check here, and what CV and cover
-          letter drafts will be built from.
-        </p>
-        {extractForm}
-      </Panel>
-    );
-  }
-
   if (editing) {
     return (
       <CareerEditor
         draft={draft}
         setDraft={setDraft}
         onCancel={() => {
-          setDraft(career);
+          setDraft(career ?? EMPTY_CAREER);
           setEditing(false);
         }}
         onSaved={() => setEditing(false)}
       />
+    );
+  }
+
+  if (!career) {
+    return (
+      <Panel title="Build your career">
+        <p className="muted px-3 pt-3 text-[13px]">
+          Your roles, education and skills as lists: easier to check here, and what CV and cover letter drafts will be built
+          from. Build them from your CV, or fill them in yourself.
+        </p>
+        {extractForm}
+        <div className="border-t border-[var(--border)] px-3 py-2.5">
+          <button type="button" className="btn" onClick={() => (setDraft(EMPTY_CAREER), setEditing(true))}>
+            Fill in by hand
+          </button>
+        </div>
+      </Panel>
     );
   }
 
@@ -84,7 +84,7 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
         </button>
         {props.updatedAt && <span className="hint">updated {new Date(props.updatedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</span>}
       </div>
-      {(rebuild || result) && <Panel title="Rebuild from sources">{extractForm}</Panel>}
+      {(rebuild || result) && <Panel title="Rebuild from CV">{extractForm}</Panel>}
 
       {career.summary && (
         <Panel title="Summary">
