@@ -16,7 +16,8 @@ export function AddBoardForm({ systems }: { systems: string }) {
   return (
     <div>
       <Panel title="Add a board">
-        <form action={action} className="space-y-3 p-3">
+        {/* One row above the tables (below xl), stacked in the side column (xl). */}
+        <form action={action} className="grid items-end gap-3 p-3 sm:grid-cols-[2fr_1fr_auto] xl:grid-cols-1">
           <input type="hidden" name="ats" value="auto" />
           <label className="field">
             <span className="label">Careers page or job posting</span>
@@ -27,7 +28,7 @@ export function AddBoardForm({ systems }: { systems: string }) {
             <input name="company_name" className="input" placeholder="Guessed if empty" />
           </label>
           <SubmitButton className="btn-primary btn-field w-full">Add board</SubmitButton>
-          <details className="group hint">
+          <details className="group hint sm:col-span-3 xl:col-span-1">
             <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
               <span className="link">Supported sites</span>{" "}
               <IconChevronDown width={10} height={10} className="inline transition-transform group-open:rotate-180" />

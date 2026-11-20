@@ -184,8 +184,10 @@ input[type="radio"]:checked:hover {
   /* The app's one two-column layout: a main column plus a fixed 320px side column.
      Use it for every side-by-side pair, so the gap falls in the same place on every page. */
   .split { @apply grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]; }
-  /* A narrower side column, for pages whose main column holds wide tables (Sources). */
-  .split-narrow { @apply lg:grid-cols-[minmax(0,1fr)_288px]; }
+  /* A narrower side column that only appears from xl, for pages whose main column holds
+     wide tables (Sources): below xl the tables need the full width, and the side
+     content goes above them (order-first on the aside). */
+  .split-narrow { @apply lg:grid-cols-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_288px]; }
 
   /* --- tables ------------------------------------------------------------- */
   .table { @apply w-full border-collapse text-left; }
@@ -226,9 +228,9 @@ input[type="radio"]:checked:hover {
   }
 
   /* The same card layout, by the table's own width rather than the window's (Sources,
-     whose tables share the row with a side column): below 32rem of room. The wrapper is
-     an @container; cells opt in with @max-lg:* utilities. */
-  @container (max-width: 31.99rem) {
+     whose tables share the row with a side column): below 30rem of room. The wrapper is
+     an @container; cells opt in with @max-[30rem]:* utilities. */
+  @container (max-width: 29.99rem) {
     .table-stack-lg thead { display: none; }
     .table-stack-lg, .table-stack-lg tbody { display: block; }
     .table-stack-lg tr {

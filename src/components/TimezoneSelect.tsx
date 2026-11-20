@@ -16,7 +16,7 @@ export function TimezoneSelect({ name, value, options }: { name: string; value: 
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select name={name} value={tz} onChange={(e) => setTz(e.target.value)} className="input w-auto min-w-[220px]">
+      <select name={name} value={tz} onChange={(e) => setTz(e.target.value)} className="input w-full max-w-[20rem]">
         {(options.includes(tz) ? options : [tz, ...options]).map((o) => (
           <option key={o} value={o}>
             {o.replace(/_/g, " ")}
