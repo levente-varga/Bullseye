@@ -5,6 +5,7 @@ import { PendingBar } from "@/components/PendingBar";
 import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
 import { CreditChart } from "@/components/CreditChart";
+import { NewJobsChart, type DayCount } from "@/components/NewJobsChart";
 import { Bar, Dot, Empty, PageHeader, Panel, SectionHeader, Stat, type Tone } from "@/components/ui";
 import { buildSeries, dayStart, type TopUp } from "@/lib/credits";
 import { formatRunCost, formatUsd } from "@/lib/pricing";
@@ -65,10 +66,14 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
       return [f.status, count ?? 0] as const;
     }),
   );
-  const [{ data: runRows, count: runTotal, error }, { data: scores }] = await Promise.all([
+  const { data: tzRow } = await supabase.from("settings").select("timezone").single();
+  const timezone = (tzRow?.timezone as string | undefined) ?? "UTC";
+  const [{ data: runRows, count: runTotal, error }, { data: scores }, { data: perDay }] = await Promise.all([
     runsQuery.order("started_at", { ascending: false }).limit(runLimit),
     supabase.from("my_jobs").select("score").not("score", "is", null).limit(10000),
+    supabase.rpc("my_new_per_day", { p_days: 30, p_tz: timezone }),
   ]);
+  const newPerDay = fillDays((perDay ?? []) as DayCount[], timezone);
   if (error) throw new Error(error.message);
   // The admin sees each run as a whole (all spend is theirs); everyone else sees their own share.
   const runs = (runRows as (Run & { run_users: { user_id: string; stats: Run["stats"] }[] })[]).map((r) =>
@@ -130,6 +135,12 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
           <Stat label="Responses" value={responded} unit="interview + offer" />
           <Stat label="Response rate" value={applied ? Math.round((responded / applied) * 100) : "–"} unit={applied ? "%" : undefined} />
         </section>
+
+        <Panel title="New listings per day" aside={`last ${newPerDay.length} ${newPerDay.length === 1 ? "day" : "days"} · ${timezone.replace(/_/g, " ")}`}>
+          <div className="p-3">
+            {newPerDay.length ? <NewJobsChart days={newPerDay} /> : <Empty>No listings in the last 30 days.</Empty>}
+          </div>
+        </Panel>
 
         <div className="split">
           <Panel title="Funnel" aside="all time">
@@ -326,4 +337,22 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
       </div>
     </>
   );
+}
+
+/**
+ * Every day from the first with listings through today (in `timezone`), with 0 for days
+ * nothing came in: the counts only list days that had some.
+ */
+function fillDays(rows: DayCount[], timezone: string): DayCount[] {
+  if (!rows.length) return [];
+  const byDay = new Map(rows.map((r) => [r.day, r]));
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date()); // YYYY-MM-DD
+  const out: DayCount[] = [];
+  for (let d = new Date(`${rows[0].day}T00:00:00Z`); ; d.setUTCDate(d.getUTCDate() + 1)) {
+    const day = d.toISOString().slice(0, 10);
+    const r = byDay.get(day);
+    out.push({ day, passed: Number(r?.passed ?? 0), filtered: Number(r?.filtered ?? 0) });
+    if (day >= today || out.length >= 30) break;
+  }
+  return out;
 }
