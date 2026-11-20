@@ -15,7 +15,7 @@ const NEW_EDUCATION: Education = { degree: "", school: "", location: "", start: 
  * filled in by hand; shown as lists and edited here (Edit → change, add, remove,
  * reorder → Save).
  */
-export function CareerSection(props: { career: Career | null; updatedAt: string | null; hasCv: boolean }) {
+export function CareerSection(props: { career: Career | null; updatedAt: string | null; hasCv: boolean; modelLabel: string }) {
   const [editing, setEditing] = useState(false);
   const [rebuild, setRebuild] = useState(false);
   const [draft, setDraft] = useState<Career>(props.career ?? EMPTY_CAREER);
@@ -30,7 +30,7 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
         </SubmitButton>
         <span className="hint">
           {props.hasCv
-            ? `Claude Haiku reads your CV and lists only what it says; under a cent.${career ? " Replaces the career below." : ""}`
+            ? `${props.modelLabel} reads your CV and lists only what it says${props.modelLabel.includes("Haiku") ? "; under a cent" : ""}.${career ? " Replaces the career below." : ""}`
             : "Add your CV below first (PDF or text)."}
         </span>
       </div>

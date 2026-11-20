@@ -135,6 +135,9 @@ export async function saveSettings(form: FormData) {
           scoring_model: SCORING_MODELS.some((m) => m.id === str(form, "scoring_model"))
             ? str(form, "scoring_model")
             : DEFAULT_SCORING_MODEL,
+          writing_model: SCORING_MODELS.some((m) => m.id === str(form, "writing_model"))
+            ? str(form, "writing_model")
+            : DEFAULT_SCORING_MODEL,
           max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd")),
           ...scheduleFields(form),
           updated_at: new Date().toISOString(),
@@ -154,10 +157,11 @@ export async function saveSettings(form: FormData) {
         .eq("user_id", me.id)
     ).error,
   );
-  revalidatePath("/criteria");
+  revalidatePath("/settings");
+  revalidatePath("/criteria"); // its schedule line
 }
 
-/** Schedule fields from the Criteria form, validated so a bad value can't stop the worker. */
+/** Schedule fields from the Settings form, validated so a bad value can't stop the worker. */
 function scheduleFields(form: FormData) {
   const interval = Number(str(form, "watch_interval_minutes"));
   const time = str(form, "daily_time");
@@ -453,11 +457,16 @@ export async function extractCareerAction(): Promise<CareerResult> {
   if (!process.env.ANTHROPIC_API_KEY) return { tone: "bad", message: "The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.", at };
   const supabase = await db();
   const me = await currentUser(supabase);
-  const { data: p } = await supabase.from("profile").select("cv_text").single();
+  const [{ data: p }, { data: st }] = await Promise.all([
+    supabase.from("profile").select("cv_text").single(),
+    supabase.from("settings").select("writing_model").single(),
+  ]);
   if (!p?.cv_text?.trim()) return { tone: "bad", message: "Add your CV first (upload a PDF or paste the text below).", at };
+  // The admin's writing model (Settings); Haiku until one is set.
+  const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const { career, costUsd } = await extractCareer(new Anthropic(), p.cv_text);
+    const { career, costUsd } = await extractCareer(new Anthropic(), model, p.cv_text);
     check(
       (await supabase.from("profile").update({ career, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
     );

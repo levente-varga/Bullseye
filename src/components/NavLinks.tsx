@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { PendingBar } from "./PendingBar";
-import { IconChart, IconInbox, IconPipeline, IconSliders, IconSources, IconUser, IconUsers } from "./icons";
+import { IconChart, IconInbox, IconPipeline, IconSettings, IconSliders, IconSources, IconUser, IconUsers } from "./icons";
 
 export const NAV = [
   { href: "/", label: "Inbox", Icon: IconInbox, key: "inbox" },
@@ -16,7 +16,11 @@ export const NAV = [
 ] as const;
 
 /** Admin only: the Members page. */
-const ADMIN_NAV = { href: "/admin", label: "Members", Icon: IconUsers, key: "admin" } as const;
+/** Admin-only pages: members and invites; the shared schedule and AI settings. */
+const ADMIN_NAV = [
+  { href: "/admin", label: "Members", Icon: IconUsers, key: "admin" },
+  { href: "/settings", label: "Settings", Icon: IconSettings, key: "settings" },
+] as const;
 
 export type NavCounts = Partial<Record<(typeof NAV)[number]["key"], string | number>>;
 
@@ -47,7 +51,7 @@ export function SidebarNav({ counts: initial, admin = false }: { counts?: NavCou
   const counts = live ?? initial ?? {};
   return (
     <nav className="space-y-px">
-      {[...NAV, ...(admin ? [ADMIN_NAV] : [])].map(({ href, label, Icon, key }) => {
+      {[...NAV, ...(admin ? ADMIN_NAV : [])].map(({ href, label, Icon, key }) => {
         const active = isActive(path, href);
         return (
           <Link
@@ -59,7 +63,7 @@ export function SidebarNav({ counts: initial, admin = false }: { counts?: NavCou
           >
             <Icon className={active ? "text-[var(--accent-strong)]" : "text-[var(--faint)]"} />
             <span className="flex-1">{label}</span>
-            {key !== "admin" && counts[key] !== undefined && <span className="mono faint text-[11px]">{counts[key]}</span>}
+            {counts[key as keyof NavCounts] !== undefined && <span className="mono faint text-[11px]">{counts[key as keyof NavCounts]}</span>}
             <PendingBar />
           </Link>
         );
@@ -68,12 +72,12 @@ export function SidebarNav({ counts: initial, admin = false }: { counts?: NavCou
   );
 }
 
-/** Horizontal nav for narrow screens. `admin` adds the Members page. */
+/** Horizontal nav for narrow screens. `admin` adds the Members and Settings pages. */
 export function TopNav({ admin = false }: { admin?: boolean }) {
   const path = usePathname();
   return (
     <nav className="flex flex-wrap gap-x-0.5 gap-y-1">
-      {[...NAV, ...(admin ? [ADMIN_NAV] : [])].map(({ href, label }) => (
+      {[...NAV, ...(admin ? ADMIN_NAV : [])].map(({ href, label }) => (
         <Link
           key={href}
           href={href}

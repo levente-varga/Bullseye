@@ -2,16 +2,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { CareerSchema, type Career } from "./career-schema";
 import { costUsd, type TokenUsage } from "./pricing";
+import type { ScoringModel } from "./types";
 
 /** A CV is a few thousand characters; this bounds a pasted wall of text. */
 const MAX_CV_CHARS = 60_000;
 
-export const CAREER_MODEL = "claude-haiku-5-5";
-
-/** Extracts a structured career from the CV text. */
-export async function extractCareer(client: Anthropic, cvText: string): Promise<{ career: Career; usage: TokenUsage; costUsd: number }> {
+/** Extracts a structured career from the CV text, with the writing model (Settings). */
+export async function extractCareer(
+  client: Anthropic,
+  model: ScoringModel,
+  cvText: string,
+): Promise<{ career: Career; usage: TokenUsage; costUsd: number }> {
   const response = await client.beta.messages.parse({
-    model: CAREER_MODEL,
+    model,
     max_tokens: 8000,
     system: `You turn a candidate's CV into a structured career record.
 
@@ -29,7 +32,7 @@ Leave a field "" (or a list empty) when the CV doesn't say.`,
     cacheWrite: u.cache_creation_input_tokens ?? 0,
     cacheRead: u.cache_read_input_tokens ?? 0,
   };
-  return { career: response.parsed_output, usage, costUsd: costUsd(CAREER_MODEL, usage) };
+  return { career: response.parsed_output, usage, costUsd: costUsd(model, usage) };
 }
 
 export { CareerSchema, EMPTY_CAREER, formatCareerDate, type Career } from "./career-schema";
