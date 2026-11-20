@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, isHaileyPosting, fetchHaileyDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchOracleDescription, fetchTaleoDescription, isTaleoPosting, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, isHaileyPosting, fetchHaileyDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -40,6 +40,10 @@ export async function describe(
   if (rippling) return fetchRipplingDescription(...rippling);
   // Eightfold: the job's entry in the careers API has the description.
   if (source.ats === "eightfold") return fetchEightfoldDescription(source.slug, job.external_id);
+  // Oracle Recruiting: the job's details in the same API have the text.
+  if (source.ats === "oracle") return fetchOracleDescription(source.slug, job.external_id);
+  // Taleo: the posting page renders its text from a hidden field.
+  if (isTaleoPosting(job.url)) return fetchTaleoDescription(job.url);
   // BambooHR: the job's detail JSON has the description and the country.
   if (isBambooPosting(job.url)) return fetchBambooDescription(job.url);
   // HaileyHR: the ad is Markdown in the job page's embedded data.
@@ -56,7 +60,7 @@ export async function describe(
   if (isAppleUrl(job.url)) return fetchAppleDescription(job.url);
   // Jobylon lists and Personio careers pages name the city only: the posting's structured
   // data adds the country.
-  if (isJobylonPosting(job.url) || isPersonioPosting(job.url)) {
+  if (isJobylonPosting(job.url) || isPersonioPosting(job.url) || CITY_ONLY_LISTS.test(job.url)) {
     const { text, location } = await describePage(job.url);
     return { text, location };
   }
@@ -68,6 +72,9 @@ export async function describe(
   }
   return { text: await describeFromPage(job.url) };
 }
+
+/** Career sites whose lists name the city only (or nothing): the posting's structured data adds the country. */
+const CITY_ONLY_LISTS = /^https:\/\/(join\.com\/companies\/|jobs\.jobvite\.com\/|[^/]+\.softgarden\.io\/|[^/]+\.applytojob\.com\/)/;
 
 /** Fetches a posting page and extracts its text: schema.org JobPosting first, then the page body. */
 export async function describeFromPage(url: string): Promise<string> {

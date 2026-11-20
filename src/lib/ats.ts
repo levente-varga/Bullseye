@@ -61,7 +61,7 @@ const looksRemote = (s: string) => /\bremote\b/i.test(s);
  * GET with one retry when the server hiccups (5xx, timeout, dropped connection: Lever's
  * API returns the odd 502 for big boards) or rate-limits (429). Other 4xx aren't retried.
  */
-async function get(url: string, accept: string, timeoutMs = 20_000, post?: { json: unknown }): Promise<Response> {
+async function get(url: string, accept: string, timeoutMs = 20_000, post?: { json: unknown; headers?: Record<string, string> }): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     let res: Response;
     countRequest();
@@ -69,7 +69,7 @@ async function get(url: string, accept: string, timeoutMs = 20_000, post?: { jso
       res = await fetch(url, {
         // A JSON POST (Workday's list API) gets the same retries and counting as a GET.
         ...(post ? { method: "POST", body: JSON.stringify(post.json) } : {}),
-        headers: { Accept: accept, "User-Agent": USER_AGENT, ...(post ? { "Content-Type": "application/json" } : {}) },
+        headers: { Accept: accept, "User-Agent": USER_AGENT, ...(post ? { "Content-Type": "application/json", ...post.headers } : {}) },
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
@@ -105,8 +105,8 @@ async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {
   return (await (await get(url, "application/json", timeoutMs)).json()) as T;
 }
 
-async function postJson<T>(url: string, json: unknown, timeoutMs?: number): Promise<T> {
-  return (await (await get(url, "application/json", timeoutMs, { json })).json()) as T;
+async function postJson<T>(url: string, json: unknown, timeoutMs?: number, headers?: Record<string, string>): Promise<T> {
+  return (await (await get(url, "application/json", timeoutMs, { json, headers })).json()) as T;
 }
 
 // --- Greenhouse -------------------------------------------------------------
@@ -2113,6 +2113,529 @@ export async function appleTotal(): Promise<number> {
  * Fetches a source's listings and counts the HTTP requests it made (retries included),
  * which the Sources page shows as what the source costs to run.
  */
+// --- Oracle Recruiting Cloud (Oracle HCM "Candidate Experience" sites) ------------------------
+// Slug: "<host>/<site number>", e.g. "eeho.fa.us2.oraclecloud.com/CX_45001". The site's own
+// public REST API is searched by role (large employers list thousands of jobs).
+
+const ORACLE_PAGE = 25;
+const ORACLE_MAX_PAGES = 4;
+
+interface OracleReq {
+  Id: string;
+  Title: string;
+  PostedDate?: string | null;
+  PrimaryLocation?: string | null;
+  PrimaryLocationCountry?: string | null;
+  WorkplaceType?: string | null;
+  ShortDescriptionStr?: string | null;
+  secondaryLocations?: { Name?: string }[];
+}
+
+function oracleSite(slug: string): { host: string; site: string } {
+  const [host, site] = slug.split("/");
+  return { host, site };
+}
+
+async function oraclePage(slug: string, term: string | null, offset: number) {
+  const { host, site } = oracleSite(slug);
+  const finder = [`siteNumber=${site}`, `limit=${ORACLE_PAGE}`, `offset=${offset}`, "sortBy=POSTING_DATES_DESC", term ? `keyword=${JSON.stringify(term)}` : ""]
+    .filter(Boolean)
+    .join(",");
+  const d = await getJson<{ items?: { TotalJobsCount?: number; requisitionList?: OracleReq[] }[] }>(
+    `https://${host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;${encodeURIComponent(finder).replace(/%3D/g, "=").replace(/%2C/g, ",")}`,
+  );
+  const item = d.items?.[0];
+  return { reqs: item?.requisitionList ?? [], total: item?.TotalJobsCount ?? 0 };
+}
+
+async function fetchOracle(slug: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  const { host, site } = oracleSite(slug);
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 0; page < ORACLE_MAX_PAGES; page++) {
+      const { reqs, total } = await oraclePage(slug, term, page * ORACLE_PAGE);
+      for (const r of reqs) {
+        const places = [...new Set([r.PrimaryLocation ?? "", ...(r.secondaryLocations ?? []).map((l) => l.Name ?? "")].filter(Boolean))];
+        out.push({
+          external_id: r.Id,
+          title: r.Title.trim(),
+          company,
+          location: places.join(" | "),
+          remote: /remote/i.test(r.WorkplaceType ?? "") || places.some(looksRemote),
+          url: `https://${host}/hcmUI/CandidateExperience/en/sites/${site}/job/${r.Id}`,
+          description: "", // from the job's details
+          compensation: null,
+          posted_at: r.PostedDate ? new Date(r.PostedDate).toISOString() : null,
+        });
+      }
+      if (reqs.length < ORACLE_PAGE || (page + 1) * ORACLE_PAGE >= total) break;
+    }
+    return out;
+  });
+}
+
+/** Number of jobs on an Oracle careers site (Add board shows it). */
+export async function oracleTotal(slug: string): Promise<number> {
+  return (await oraclePage(slug, null, 0)).total;
+}
+
+/** "eeho.fa.us2.oraclecloud.com/CX_45001" from any page of an Oracle careers site, or null. */
+export function oracleSlug(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.endsWith(".oraclecloud.com")) return null;
+    const site = u.pathname.match(/\/CandidateExperience\/[a-z]{2}(?:-[A-Za-z]{2})?\/sites\/([A-Za-z0-9_]+)/)?.[1];
+    return site ? `${u.hostname.toLowerCase()}/${site}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** An Oracle job's description, from its details in the same API. */
+export async function fetchOracleDescription(slug: string, id: string): Promise<{ text: string; location?: string }> {
+  const { host, site } = oracleSite(slug);
+  const d = await getJson<{ items?: Record<string, string | null>[] }>(
+    `https://${host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder=ById;Id=%22${encodeURIComponent(id)}%22,siteNumber=${site}`,
+  );
+  const r = d.items?.[0];
+  if (!r) throw new Error(`Oracle: no details for job ${id}`);
+  const text = [r.ExternalDescriptionStr, r.ExternalResponsibilitiesStr, r.ExternalQualificationsStr, r.CorporateDescriptionStr]
+    .filter((x): x is string => Boolean(x))
+    .map(htmlToText)
+    .join("\n\n");
+  return { text: clip(text), location: r.PrimaryLocation ?? undefined };
+}
+
+// --- Taleo (Oracle Taleo career sections) ------------------------------------------------------
+// Slug: "<host>/<career section>", e.g. "careers.who.int/ex" or "acme.taleo.net/2". The career
+// section's page names its job board ("portal=…"); its search endpoint takes a keyword.
+
+const TALEO_PAGE = 25;
+const TALEO_MAX_PAGES = 4;
+const taleoPortals = new Map<string, string>();
+
+function taleoSite(slug: string): { host: string; section: string } {
+  const [host, section] = slug.split("/");
+  return { host, section };
+}
+
+async function taleoPortal(slug: string): Promise<string> {
+  const known = taleoPortals.get(slug);
+  if (known) return known;
+  const { host, section } = taleoSite(slug);
+  const html = await (await get(`https://${host}/careersection/${section}/jobsearch.ftl?lang=en`, "text/html")).text();
+  const portal = html.match(/[?&]portal=(\d+)/)?.[1];
+  if (!portal) throw new Error("Taleo: no job board id on the career section page");
+  taleoPortals.set(slug, portal);
+  return portal;
+}
+
+interface TaleoReq {
+  jobId: string;
+  contestNo: string;
+  column: string[];
+  locationsColumns?: number[];
+}
+
+async function taleoPage(slug: string, term: string | null, pageNo: number) {
+  const { host } = taleoSite(slug);
+  const portal = await taleoPortal(slug);
+  const d = await postJson<{ requisitionList?: TaleoReq[]; pagingData?: { totalCount?: number } }>(
+    `https://${host}/careersection/rest/jobboard/searchjobs?lang=en&portal=${portal}`,
+    {
+      multilineEnabled: false,
+      sortingSelection: { sortBySelectionParam: "3", ascendingSortingOrder: "false" }, // newest first
+      fieldData: { fields: { KEYWORD: term ?? "", LOCATION: "" }, valid: true },
+      filterSelectionParam: { searchFilterSelections: [] },
+      advancedSearchFiltersSelectionParam: { searchFilterSelections: [] },
+      pageNo,
+    },
+    undefined,
+    // Taleo's search fails (500) without the visitor's time zone, which its page sends.
+    { tz: "GMT+00:00", tzname: "UTC" },
+  );
+  return { reqs: d.requisitionList ?? [], total: d.pagingData?.totalCount ?? 0 };
+}
+
+/** Taleo locations read "Country-City" ("Ukraine-Kyiv"): turned into "Kyiv, Ukraine". */
+function taleoPlace(raw: string): string {
+  let list: string[];
+  try {
+    const parsed = JSON.parse(raw);
+    list = Array.isArray(parsed) ? parsed.map(String) : [raw];
+  } catch {
+    list = [raw];
+  }
+  return list
+    .map((p) => {
+      const parts = p.split("-").map((x) => x.trim()).filter(Boolean);
+      return parts.length > 1 ? [...parts.slice(1).reverse(), parts[0]].join(", ") : p.trim();
+    })
+    .filter(Boolean)
+    .join(" | ");
+}
+
+async function fetchTaleo(slug: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
+  const { host, section } = taleoSite(slug);
+  return perTerm(terms, async (term) => {
+    const out: FetchedJob[] = [];
+    for (let page = 1; page <= TALEO_MAX_PAGES; page++) {
+      const { reqs, total } = await taleoPage(slug, term, page);
+      for (const r of reqs) {
+        const location = (r.locationsColumns ?? [1]).map((i) => taleoPlace(r.column[i] ?? "")).filter(Boolean).join(" | ");
+        const posted = r.column.find((c) => /^[A-Z][a-z]{2} \d{1,2}, \d{4}/.test(c));
+        out.push({
+          external_id: r.contestNo || r.jobId,
+          title: (r.column[0] ?? "").trim(),
+          company,
+          location,
+          remote: looksRemote(location),
+          url: `https://${host}/careersection/${section}/jobdetail.ftl?job=${encodeURIComponent(r.contestNo || r.jobId)}&lang=en`,
+          description: "", // from the posting page
+          compensation: null,
+          posted_at: posted && !Number.isNaN(Date.parse(posted)) ? new Date(posted).toISOString() : null,
+        });
+      }
+      if (reqs.length < TALEO_PAGE || page * TALEO_PAGE >= total) break;
+    }
+    return out;
+  });
+}
+
+/** Number of jobs in a Taleo career section (Add board shows it). */
+export async function taleoTotal(slug: string): Promise<number> {
+  return (await taleoPage(slug, null, 1)).total;
+}
+
+/** "careers.who.int/ex" from a Taleo career section link (jobsearch.ftl, jobdetail.ftl…), or null. */
+export function taleoSlug(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const section = u.pathname.match(/^\/careersection\/([^/]+)\/[a-z]+\.ftl$/i)?.[1];
+    return section && section !== "rest" ? `${u.hostname.toLowerCase()}/${section}` : null;
+  } catch {
+    return null;
+  }
+}
+
+export const isTaleoPosting = (url: string) => /\/careersection\/[^/]+\/jobdetail\.ftl/i.test(url);
+
+/**
+ * A Taleo job's text. The posting page renders it in the browser from a hidden field
+ * ("initialHistory"): URL-encoded HTML chunks separated by "!|!"; the description is the
+ * longest of them.
+ */
+export async function fetchTaleoDescription(url: string): Promise<{ text: string }> {
+  const html = await (await get(url, "text/html")).text();
+  const raw = html.match(/id="initialHistory"[^>]*value="([^"]*)"/)?.[1] ?? html.match(/value="([^"]*)"[^>]*id="initialHistory"/)?.[1];
+  if (!raw) throw new Error("Taleo: no job text on the posting page");
+  const chunks = decodeEntities(raw)
+    .split("!|!")
+    // Sequence by sequence: a stray "%" (as in "100%") would make decodeURIComponent throw.
+    .map((c) => c.replace(/(?:%[0-9A-F]{2})+/gi, (seq) => {
+      try {
+        return decodeURIComponent(seq);
+      } catch {
+        return seq;
+      }
+    }));
+  const best = chunks.reduce((a, b) => (b.length > a.length ? b : a), "");
+  return { text: clip(htmlToText(best.replace(/!\*!/g, ""))) };
+}
+
+// --- Gem (job boards at jobs.gem.com/<board>) --------------------------------------------------
+
+interface GemJob {
+  id: string;
+  title: string;
+  absolute_url: string;
+  content_plain?: string;
+  content?: string;
+  location?: { name?: string };
+  location_type?: string;
+  offices?: { location?: { name?: string } }[];
+  first_published_at?: string;
+}
+
+async function fetchGem(board: string, company: string): Promise<FetchedJob[]> {
+  const jobs = await getJson<GemJob[]>(`https://api.gem.com/job_board/v0/${encodeURIComponent(board)}/job_posts/`);
+  return jobs.map((j) => {
+    const places = [...new Set([j.location?.name ?? "", ...(j.offices ?? []).map((o) => o.location?.name ?? "")].filter(Boolean))];
+    const remote = /remote/i.test(j.location_type ?? "") || places.some(looksRemote);
+    return {
+      external_id: j.id,
+      title: j.title.trim(),
+      company,
+      location: [...places, remote && !places.some(looksRemote) ? "Remote" : ""].filter(Boolean).join(" | "),
+      remote,
+      url: j.absolute_url,
+      description: clip(j.content_plain ?? htmlToText(j.content ?? "")),
+      compensation: null,
+      posted_at: j.first_published_at ?? null,
+    };
+  });
+}
+
+// --- Manatal (career pages at careers-page.com/<company>) -------------------------------------
+
+const MANATAL_MAX_PAGES = 20;
+
+interface ManatalJob {
+  id: number;
+  hash: string;
+  position_name: string;
+  description?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  location_display?: string;
+  is_remote?: boolean | null;
+  created_at?: string;
+}
+
+async function fetchManatal(slug: string, company: string): Promise<FetchedJob[]> {
+  const out: FetchedJob[] = [];
+  let next: string | null = `https://api.manatal.com/open/v3/career-page/${encodeURIComponent(slug)}/jobs/`;
+  for (let page = 0; next && page < MANATAL_MAX_PAGES; page++) {
+    const d: { next?: string | null; results?: ManatalJob[] } = await getJson(next);
+    for (const j of d.results ?? []) {
+      const location = j.location_display || [j.city, j.country].filter(Boolean).join(", ");
+      out.push({
+        external_id: String(j.id),
+        title: j.position_name.trim(),
+        company,
+        location,
+        remote: Boolean(j.is_remote) || looksRemote(location),
+        url: `https://www.careers-page.com/${slug}/job/${j.hash}`,
+        description: clip(htmlToText(j.description ?? "")),
+        compensation: null,
+        posted_at: j.created_at ?? null,
+      });
+    }
+    next = d.next ?? null;
+  }
+  return out;
+}
+
+// --- Traffit (Polish ATS: <company>.traffit.com) ----------------------------------------------
+
+interface TraffitPost {
+  id: number;
+  url: string;
+  valid_start?: string;
+  options?: Record<string, string>;
+  advert?: {
+    name?: string;
+    values?: { field_id: string; value: string }[];
+    locations?: { locality?: string; region1?: string; iso?: string }[];
+  };
+}
+
+async function fetchTraffit(host: string, company: string): Promise<FetchedJob[]> {
+  const posts = await getJson<TraffitPost[]>(`https://${host}/public/job_posts/published`);
+  return posts.map((p) => {
+    const places = [...new Set((p.advert?.locations ?? []).map((l) => [l.locality, countryName(l.iso?.toUpperCase())].filter(Boolean).join(", ")).filter(Boolean))];
+    const location = places.join(" | ") || p.options?.x_location || "";
+    const text = (p.advert?.values ?? [])
+      .filter((v) => typeof v.value === "string" && /<|\s/.test(v.value) && v.value.length > 40)
+      .map((v) => htmlToText(v.value))
+      .join("\n\n");
+    const remote = looksRemote(location) || /zdaln|remote/i.test(JSON.stringify(p.options ?? {}));
+    return {
+      external_id: String(p.id),
+      title: (p.advert?.name ?? "").trim(),
+      company,
+      location,
+      remote,
+      url: p.url,
+      description: clip(text),
+      compensation: null,
+      posted_at: p.valid_start ? new Date(p.valid_start.replace(" ", "T") + "Z").toISOString() : null,
+    };
+  });
+}
+
+// --- JOIN (join.com/companies/<company>) -------------------------------------------------------
+// The company page's embedded data lists the jobs, a page at a time; the posting pages have
+// structured data for the text.
+
+const JOIN_MAX_PAGES = 20;
+
+interface JoinJob {
+  idParam: string;
+  id: number;
+  title: string;
+  createdAt?: string;
+  workplaceType?: string | null;
+  remoteType?: string | null;
+  city?: { cityName?: string; countryName?: string } | null;
+}
+
+async function fetchJoin(slug: string, company: string): Promise<FetchedJob[]> {
+  const out: FetchedJob[] = [];
+  for (let page = 1; page <= JOIN_MAX_PAGES; page++) {
+    const html = await (await get(`https://join.com/companies/${encodeURIComponent(slug)}?page=${page}`, "text/html")).text();
+    const data = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/)?.[1];
+    if (!data) throw new Error("JOIN: no page data (layout changed?)");
+    const jobs = JSON.parse(data)?.props?.pageProps?.pageData?.jobs as { items?: JoinJob[]; pagination?: { pageCount?: number } } | undefined;
+    if (!jobs) throw new Error("JOIN: no job list in the page data");
+    for (const j of jobs.items ?? []) {
+      const remote = /remote/i.test(`${j.workplaceType ?? ""} ${j.remoteType ?? ""}`);
+      const place = [j.city?.cityName, j.city?.countryName].filter(Boolean).join(", ");
+      out.push({
+        external_id: String(j.id),
+        title: j.title.trim(),
+        company,
+        location: [place, remote ? "Remote" : ""].filter(Boolean).join(" | "),
+        remote,
+        url: `https://join.com/companies/${slug}/${j.idParam}`,
+        description: "", // from the posting page
+        compensation: null,
+        posted_at: j.createdAt ?? null,
+      });
+    }
+    if (page >= (jobs.pagination?.pageCount ?? 1)) break;
+  }
+  return out;
+}
+
+// --- Jobvite (jobs.jobvite.com/<company>) ------------------------------------------------------
+// The careers page lists every job in a table (title link, location); posting pages have
+// structured data for the text.
+
+async function fetchJobvite(slug: string, company: string): Promise<FetchedJob[]> {
+  const html = await (await get(`https://jobs.jobvite.com/${encodeURIComponent(slug)}/jobs`, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const row of html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? []) {
+    const link = row.match(/<td class="jv-job-list-name">\s*<a href="([^"]*\/job\/([A-Za-z0-9]+))"[^>]*>([\s\S]*?)<\/a>/);
+    if (!link) continue;
+    const location = htmlToText(row.match(/<td class="jv-job-list-location">([\s\S]*?)<\/td>/)?.[1] ?? "").replace(/\s+/g, " ").trim();
+    out.set(link[2], {
+      external_id: link[2],
+      title: htmlToText(link[3]).trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: new URL(link[1], "https://jobs.jobvite.com").toString(),
+      description: "", // from the posting page
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  if (!out.size && !/jv-job-list|no (current )?(openings|jobs)/i.test(html)) throw new Error("Jobvite: no job list on the careers page (layout changed?)");
+  return [...out.values()];
+}
+
+// --- softgarden (<company>.softgarden.io) ------------------------------------------------------
+// The vacancies page lists every job (title link, city); posting pages have structured data.
+
+async function fetchSoftgarden(host: string, company: string): Promise<FetchedJob[]> {
+  const html = await (await get(`https://${host}/en/vacancies`, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const m of html.matchAll(/<div class="matchElement[^"]*" id="job_id_(\d+)">([\s\S]*?)(?=<div class="matchElement|<\/body>)/g)) {
+    const [, id, block] = m;
+    const link = block.match(/<a href="([^"]*\/job\/\d+[^"]*)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!link) continue;
+    const cities = [...block.matchAll(/<span class="location-view-item">([\s\S]*?)<\/span>/g)].map((c) => htmlToText(c[1]).trim()).filter(Boolean);
+    const location = [...new Set(cities)].join(" | ");
+    const href = decodeEntities(link[1]).replace(/^\.\.\//, "/").replace(/[?&]jobDbPVId=\d+/, "");
+    out.set(id, {
+      external_id: id,
+      title: htmlToText(link[2]).trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: new URL(href, `https://${host}/`).toString(),
+      description: "", // from the posting page
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  if (!out.size && !/matchElement|no (current )?(vacancies|jobs)|keine/i.test(html)) throw new Error("softgarden: no job list on the vacancies page (layout changed?)");
+  return [...out.values()];
+}
+
+// --- Trakstar Hire, formerly Recruiterbox (<company>.hire.trakstar.com) ------------------------
+// Each careers site publishes an RSS feed of its openings (/jobfeeds/<company>).
+
+async function fetchTrakstar(slug: string, company: string): Promise<FetchedJob[]> {
+  const xml = await (await get(`https://${slug}.hire.trakstar.com/jobfeeds/${slug}`, "application/rss+xml")).text();
+  return (xml.match(/<item>[\s\S]*?<\/item>/g) ?? []).map((item) => {
+    const link = decodeEntities(xmlTag(item, "link"));
+    const location = decodeEntities(
+      xmlTag(item, "job:location") || [xmlTag(item, "job:city"), xmlTag(item, "job:state"), xmlTag(item, "job:country")].filter(Boolean).join(", "),
+    );
+    const pub = xmlTag(item, "pubDate");
+    return {
+      external_id: xmlTag(item, "guid") || link,
+      title: decodeEntities(xmlTag(item, "title")),
+      company,
+      location,
+      remote: looksRemote(location) || /remote/i.test(xmlTag(item, "job:is_remote") || xmlTag(item, "job:remote")),
+      url: link,
+      description: clip(htmlToText(xmlTag(item, "description"))),
+      compensation: null,
+      posted_at: pub && !Number.isNaN(Date.parse(pub)) ? new Date(pub).toISOString() : null,
+    };
+  });
+}
+
+// --- Homerun (<company>.homerun.co) ------------------------------------------------------------
+// The careers page links its Atom feed (feed.homerun.co/jobs_atom_<id>.xml), which has every
+// job with its text.
+
+async function fetchHomerun(host: string, company: string): Promise<FetchedJob[]> {
+  const html = await (await get(`https://${host}/`, "text/html")).text();
+  const feed = html.match(/https:\/\/feed\.homerun\.co\/[A-Za-z0-9_./-]+/)?.[0];
+  if (!feed) throw new Error("Homerun: no job feed linked on the careers page");
+  const xml = await (await get(feed, "application/atom+xml")).text();
+  return (xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? [])
+    .map((entry) => {
+      const url = entry.match(/<link[^>]+rel="alternate"[^>]+href="([^"]+)"/)?.[1] ?? entry.match(/<link[^>]+href="([^"]+)"/)?.[1] ?? "";
+      // <location><name>Amsterdam</name></location>, one per office.
+      const location = [...new Set([...entry.matchAll(/<location>([\s\S]*?)<\/location>/g)].map((l) => decodeEntities(htmlToText(xmlTag(l[1], "name") || l[1]).trim())).filter(Boolean))].join(" | ");
+      const updated = xmlTag(entry, "published") || xmlTag(entry, "updated");
+      return {
+        external_id: xmlTag(entry, "id") || url,
+        title: decodeEntities(xmlTag(entry, "title")),
+        company,
+        location,
+        remote: looksRemote(location),
+        url,
+        description: clip(htmlToText(xmlTag(entry, "description") || xmlTag(entry, "content"))),
+        compensation: null,
+        posted_at: updated && !Number.isNaN(Date.parse(updated)) ? new Date(updated).toISOString() : null,
+      };
+    })
+    .filter((j) => j.url && !/\/open\/?$/.test(j.url)); // the standing "open application"
+}
+
+// --- JazzHR (<company>.applytojob.com) ---------------------------------------------------------
+// The careers page lists every job (title link, location); posting pages have the text.
+
+async function fetchJazzHr(slug: string, company: string): Promise<FetchedJob[]> {
+  const base = `https://${slug}.applytojob.com`;
+  const html = await (await get(`${base}/apply`, "text/html")).text();
+  const out = new Map<string, FetchedJob>();
+  for (const m of html.matchAll(/<li class="list-group-item">([\s\S]*?)<\/li>\s*(?=<li class="list-group-item">|<\/ul>)/g)) {
+    const link = m[1].match(/<a href="([^"]*\/apply\/([A-Za-z0-9]+)\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!link) continue;
+    const location = htmlToText(m[1].match(/fa-map-marker[^>]*><\/i>([\s\S]*?)<\/li>/)?.[1] ?? "").replace(/\s+/g, " ").trim();
+    out.set(link[2], {
+      external_id: link[2],
+      title: htmlToText(link[3]).trim(),
+      company,
+      location,
+      remote: looksRemote(location),
+      url: new URL(link[1], base).toString(),
+      description: "", // from the posting page
+      compensation: null,
+      posted_at: null,
+    });
+  }
+  return [...out.values()];
+}
+
 export async function fetchBoardCounted(
   source: Pick<Source, "ats" | "slug" | "company_name" | "country" | "last_success_at">,
   terms?: string[],
@@ -2179,6 +2702,28 @@ export function fetchBoard(
       return fetchSuccessFactors(slug, company, terms);
     case "eightfold":
       return fetchEightfold(slug, company, terms);
+    case "oracle":
+      return fetchOracle(slug, company, terms);
+    case "taleo":
+      return fetchTaleo(slug, company, terms);
+    case "gem":
+      return fetchGem(slug, company);
+    case "manatal":
+      return fetchManatal(slug, company);
+    case "traffit":
+      return fetchTraffit(slug, company);
+    case "join":
+      return fetchJoin(slug, company);
+    case "jobvite":
+      return fetchJobvite(slug, company);
+    case "softgarden":
+      return fetchSoftgarden(slug, company);
+    case "trakstar":
+      return fetchTrakstar(slug, company);
+    case "homerun":
+      return fetchHomerun(slug, company);
+    case "jazzhr":
+      return fetchJazzHr(slug, company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -2248,6 +2793,23 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
     return `https://${host}/${org}/${lang}/career`;
   },
   eightfold: (s) => `https://${s}/careers`,
+  oracle: (s) => {
+    const [host, site] = s.split("/");
+    return `https://${host}/hcmUI/CandidateExperience/en/sites/${site}/jobs`;
+  },
+  taleo: (s) => {
+    const [host, section] = s.split("/");
+    return `https://${host}/careersection/${section}/jobsearch.ftl?lang=en`;
+  },
+  gem: (s) => `https://jobs.gem.com/${s}`,
+  manatal: (s) => `https://www.careers-page.com/${s}`,
+  traffit: (s) => `https://${s}/career/`,
+  join: (s) => `https://join.com/companies/${s}`,
+  jobvite: (s) => `https://jobs.jobvite.com/${s}/jobs`,
+  softgarden: (s) => `https://${s}/en/vacancies`,
+  trakstar: (s) => `https://${s}.hire.trakstar.com/`,
+  homerun: (s) => `https://${s}/`,
+  jazzhr: (s) => `https://${s}.applytojob.com/apply`,
 };
 
 /** Whether a custom domain runs a Teamtailor (/jobs.rss) or Recruitee (/api/offers/) career site. */

@@ -22,6 +22,17 @@ export type Ats =
   | "radancy"
   | "haileyhr"
   | "eightfold"
+  | "oracle"
+  | "taleo"
+  | "gem"
+  | "manatal"
+  | "traffit"
+  | "join"
+  | "jobvite"
+  | "softgarden"
+  | "trakstar"
+  | "homerun"
+  | "jazzhr"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -140,6 +151,33 @@ export const ATS_INFO: Record<
     // Searched by role: a job missing from one fetch isn't closed.
     partial: true,
   },
+  oracle: {
+    fetch: "search",
+    label: "Oracle Recruiting",
+    slugLabel: "Careers site URL",
+    slugExample: "eeho.fa.us2.oraclecloud.com/CX_45001",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
+  taleo: {
+    fetch: "search",
+    label: "Taleo",
+    slugLabel: "Career section URL",
+    slugExample: "careers.who.int/ex",
+    searchable: true,
+    // Searched by role: a job missing from one fetch isn't closed.
+    partial: true,
+  },
+  gem: { fetch: "board", label: "Gem", slugLabel: "Job board URL", slugExample: "jobs.gem.com/gem" },
+  manatal: { fetch: "paged", label: "Manatal", slugLabel: "Career page URL", slugExample: "careers-page.com/manatal" },
+  traffit: { fetch: "board", label: "Traffit", slugLabel: "Career site URL", slugExample: "kubo.traffit.com" },
+  join: { fetch: "paged", label: "JOIN", slugLabel: "Company page URL", slugExample: "join.com/companies/join" },
+  jobvite: { fetch: "board", label: "Jobvite", slugLabel: "Careers page URL", slugExample: "jobs.jobvite.com/egnyte" },
+  softgarden: { fetch: "board", label: "softgarden", slugLabel: "Career site URL", slugExample: "softgarden.softgarden.io" },
+  trakstar: { fetch: "feed", label: "Trakstar Hire", slugLabel: "Careers site URL", slugExample: "trakstar.hire.trakstar.com" },
+  homerun: { fetch: "feed", label: "Homerun", slugLabel: "Careers site URL", slugExample: "acme.homerun.co" },
+  jazzhr: { fetch: "board", label: "JazzHR", slugLabel: "Careers page URL", slugExample: "irongalaxy.applytojob.com" },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
   avature: {
     fetch: "paged",
