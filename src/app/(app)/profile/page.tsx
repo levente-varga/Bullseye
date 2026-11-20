@@ -1,18 +1,22 @@
 import { createClient } from "@/lib/supabase/server";
+import { CareerSection } from "@/components/CareerSection";
 import { Notice } from "@/components/Notice";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
-import type { Profile } from "@/lib/types";
+import { SCORING_MODELS, type Profile } from "@/lib/types";
 import { deleteAnswer, deleteCv, saveAnswer, saveCvText, saveProfile, uploadCv } from "../actions";
 
 export default async function ProfilePage({ searchParams }: PageProps<"/profile">) {
   const sp = await searchParams;
   const supabase = await createClient();
-  const [{ data: p, error }, { data: answers }] = await Promise.all([
+  const [{ data: p, error }, { data: answers }, { data: st }] = await Promise.all([
     supabase.from("profile").select("*").single(),
     supabase.from("answers").select("*").order("question"),
+    supabase.from("settings").select("writing_model").single(),
   ]);
+  // The writing model (Settings) builds the career; named in the Build hint.
+  const writingModel = SCORING_MODELS.find((m) => m.id === st?.writing_model) ?? SCORING_MODELS[0];
   if (error) throw new Error(error.message);
   const profile = p as Profile;
   const cvWords = profile.cv_text.trim() ? profile.cv_text.trim().split(/\s+/).length : 0;
@@ -66,6 +70,16 @@ export default async function ProfilePage({ searchParams }: PageProps<"/profile"
 
           <SubmitButton className="btn-primary" done="Saved">Save details & links</SubmitButton>
         </form>
+
+        <section id="career" className="scroll-mt-6">
+          <SectionHeader title="Career" actions={<span className="faint">roles, education and skills: what CV and cover letter drafts use</span>} />
+          <CareerSection
+            career={profile.career ?? null}
+            updatedAt={profile.career_updated_at ?? null}
+            hasCv={Boolean(profile.cv_text.trim())}
+            modelLabel={writingModel.label}
+          />
+        </section>
 
         <section id="cv" className="scroll-mt-6">
           <SectionHeader title="CV" actions={<span className="faint">{cvWords ? `${cvWords} words for the scorer` : "not added yet"}</span>} />

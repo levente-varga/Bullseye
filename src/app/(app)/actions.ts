@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { CareerSchema, extractCareer } from "@/lib/career";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { detectAts } from "@/lib/dedupe";
@@ -134,6 +135,9 @@ export async function saveSettings(form: FormData) {
           scoring_model: SCORING_MODELS.some((m) => m.id === str(form, "scoring_model"))
             ? str(form, "scoring_model")
             : DEFAULT_SCORING_MODEL,
+          writing_model: SCORING_MODELS.some((m) => m.id === str(form, "writing_model"))
+            ? str(form, "writing_model")
+            : DEFAULT_SCORING_MODEL,
           max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd")),
           ...scheduleFields(form),
           updated_at: new Date().toISOString(),
@@ -153,10 +157,11 @@ export async function saveSettings(form: FormData) {
         .eq("user_id", me.id)
     ).error,
   );
-  revalidatePath("/criteria");
+  revalidatePath("/settings");
+  revalidatePath("/criteria"); // its schedule line
 }
 
-/** Schedule fields from the Criteria form, validated so a bad value can't stop the worker. */
+/** Schedule fields from the Settings form, validated so a bad value can't stop the worker. */
 function scheduleFields(form: FormData) {
   const interval = Number(str(form, "watch_interval_minutes"));
   const time = str(form, "daily_time");
@@ -441,6 +446,53 @@ export async function saveCvText(form: FormData) {
   revalidatePath("/profile");
 }
 
+export type CareerResult = { tone: "ok" | "bad"; message: string; at: number } | null;
+
+/**
+ * Builds the structured career from the CV text (Profile page, useActionState).
+ * Replaces what was there; the person reviews it afterwards.
+ */
+export async function extractCareerAction(): Promise<CareerResult> {
+  const at = Date.now();
+  if (!process.env.ANTHROPIC_API_KEY) return { tone: "bad", message: "The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.", at };
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  const [{ data: p }, { data: st }] = await Promise.all([
+    supabase.from("profile").select("cv_text").single(),
+    supabase.from("settings").select("writing_model").single(),
+  ]);
+  if (!p?.cv_text?.trim()) return { tone: "bad", message: "Add your CV first (upload a PDF or paste the text below).", at };
+  // The admin's writing model (Settings); Haiku until one is set.
+  const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
+  try {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const { career, costUsd } = await extractCareer(new Anthropic(), model, p.cv_text);
+    check(
+      (await supabase.from("profile").update({ career, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
+    );
+    revalidatePath("/profile");
+    return {
+      tone: "ok",
+      message: `Built from your CV: ${career.experiences.length} roles, ${career.education.length} degrees. Cost $${costUsd.toFixed(4)}. Check it below.`,
+      at,
+    };
+  } catch (e) {
+    return { tone: "bad", message: `Extraction failed: ${e instanceof Error ? e.message : e}`, at };
+  }
+}
+
+/** Saves the edited career (the editor posts it as JSON), validated against the schema. */
+export async function saveCareer(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  const parsed = CareerSchema.safeParse(JSON.parse(str(form, "career") || "null"));
+  if (!parsed.success) throw new Error("The career data didn't validate; nothing was saved.");
+  check(
+    (await supabase.from("profile").update({ career: parsed.data, career_updated_at: new Date().toISOString() }).eq("user_id", me.id)).error,
+  );
+  revalidatePath("/profile");
+}
+
 /** Stores the PDF in the private "cv" bucket and fills cv_text from it. */
 export async function uploadCv(form: FormData) {
   const supabase = await db();
@@ -516,6 +568,8 @@ export async function deleteAnswer(form: FormData) {
 /** Records a credit top-up: an amount added on a day. It counts from that day's start, so the day's runs are included. */
 export async function addCreditEntry(form: FormData) {
   const supabase = await db();
+  // The admin's Anthropic balance: RLS (credit_admin) refuses others too.
+  if (!(await currentUser(supabase)).isAdmin) return;
   const amount = Number(str(form, "amount").replace(/[$,\s]/g, ""));
   if (!Number.isFinite(amount) || amount <= 0) return;
   const today = new Date().toISOString().slice(0, 10);
@@ -528,6 +582,7 @@ export async function addCreditEntry(form: FormData) {
 
 export async function deleteCreditEntry(form: FormData) {
   const supabase = await db();
+  if (!(await currentUser(supabase)).isAdmin) return;
   check((await supabase.from("credit_entries").delete().eq("id", str(form, "id"))).error);
   revalidatePath("/report");
 }
@@ -558,6 +613,8 @@ export async function inviteMember(form: FormData) {
 
 export async function cancelInvite(form: FormData) {
   const supabase = await db();
+  // RLS (invites_admin) refuses others too; checked here as well, like every admin action.
+  if (!(await currentUser(supabase)).isAdmin) return;
   check((await supabase.from("invites").delete().eq("email", str(form, "email"))).error);
   revalidatePath("/admin");
 }
