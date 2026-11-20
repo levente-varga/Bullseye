@@ -277,7 +277,8 @@ function SettingsForm(props: {
         <Panel title="AI scoring" aside={isAdmin ? undefined : "set by the admin"}>
           <div className="divide">
             <Row label="Model" hint="For everyone, from the next run.">
-              <div className="grid gap-px border border-[var(--border)] bg-[var(--border)] sm:grid-cols-3">
+              {/* Three across when the value has room for them, stacked otherwise. */}
+              <div className="grid gap-px border border-[var(--border)] bg-[var(--border)] @md:grid-cols-3">
                 {SCORING_MODELS.map((m) => (
                   <label
                     key={m.id}
@@ -344,14 +345,21 @@ function Money(props: { name: string; label: string; value: number }) {
   );
 }
 
+/**
+ * A label (and hint) beside its value when the row has room (28rem, by its own width:
+ * the main column narrows when the side panel shows), above it otherwise. The value
+ * is a container too, so what's inside can lay itself out by its width.
+ */
 function Row(props: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="grid gap-2 px-3 py-3 sm:grid-cols-[180px_1fr] sm:gap-4">
-      <div>
-        <div className="text-[13px]">{props.label}</div>
-        {props.hint && <div className="hint mt-0.5">{props.hint}</div>}
+    <div className="@container">
+      <div className="grid gap-2 px-3 py-3 @md:grid-cols-[180px_1fr] @md:gap-4">
+        <div>
+          <div className="text-[13px]">{props.label}</div>
+          {props.hint && <div className="hint mt-0.5">{props.hint}</div>}
+        </div>
+        <div className="@container min-w-0">{props.children}</div>
       </div>
-      <div className="min-w-0">{props.children}</div>
     </div>
   );
 }
