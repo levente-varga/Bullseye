@@ -87,7 +87,7 @@ export async function approveJob(form: FormData) {
 /** The scorer's reasoning for one job, loaded when its Inbox row is opened. */
 export async function getJobDetails(id: string): Promise<JobDetails | null> {
   const supabase = await db();
-  const { data } = await supabase.from("my_jobs").select("url, score_summary, score_pros, score_cons").eq("id", id).single();
+  const { data } = await supabase.from("my_jobs").select("url, score_checks, score_summary, score_pros, score_cons").eq("id", id).single();
   return (data as JobDetails | null) ?? null;
 }
 
@@ -218,7 +218,7 @@ function scheduleFields(form: FormData) {
 /** Columns the hard filters read, plus what deciding the outcome needs. */
 type EvalRow = { id: string; url: string; title: string; location: string; remote: boolean; description: string; thin: boolean; status: JobStatus; filter_reason: string | null };
 
-const RESET_SCORE = { score: null, score_summary: null, score_pros: null, score_cons: null, scored_at: null };
+const RESET_SCORE = { score: null, score_checks: null, score_summary: null, score_pros: null, score_cons: null, scored_at: null };
 
 /**
  * Applies the saved criteria to jobs you haven't acted on (waiting, scored, filtered):

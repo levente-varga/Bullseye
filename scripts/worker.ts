@@ -331,7 +331,7 @@ async function syncSource(
       // Scored on title and location only: score again now that there's a description.
       if (m.thin) {
         await must(
-          db.from("matches").update({ status: "new", score: null, score_summary: null, score_pros: null, score_cons: null, scored_at: null })
+          db.from("matches").update({ status: "new", score: null, score_checks: null, score_summary: null, score_pros: null, score_cons: null, scored_at: null })
             .eq("job_id", m.id).eq("status", "scored"),
         );
       }
@@ -655,6 +655,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
               .update({
                 status: "scored",
                 score: s.score,
+                score_checks: s.checks,
                 score_summary: s.summary,
                 score_pros: s.pros.slice(0, 6), // a sanity cap, not a target
                 score_cons: s.cons.slice(0, 6),
