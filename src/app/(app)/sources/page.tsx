@@ -8,6 +8,7 @@ import { Notice } from "@/components/Notice";
 import { SourceName } from "@/components/SourceName";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ATS_BOARD_URL } from "@/lib/ats";
+import { SourceSearch } from "@/components/SourceSearch";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
 import { ATS_INFO, FETCH_MODES, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
@@ -79,7 +80,8 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
       {/* The add form sits beside the tables (sticky), so its result is in view without scrolling. */}
       <div className="split split-narrow">
-      <div className="space-y-10">
+      <div id="sources-list" className="space-y-10">
+        <SourceSearch />
         <section>
           <SectionHeader title="Company boards" count={boards.length} />
           <Panel>
@@ -159,7 +161,7 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                   </thead>
                   <tbody>
                     {addable.map((s, i) => (
-                      <tr key={s.id}>
+                      <tr key={s.id} data-search={searchText(s.company_name, s.slug, s.ats)}>
                         <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
                         <td className="max-md:w-full">
                           <div className="font-medium">{s.company_name}</div>
@@ -211,6 +213,10 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   );
 }
 
+/** What the search bar matches a row on: company, address and type, lower-cased. */
+const searchText = (company: string, slug: string, ats: string) =>
+  [company, slug, ATS_INFO[ats as Ats]?.label ?? ats].join(" ").toLowerCase();
+
 /** One table of sources (company boards or aggregators), with health, counts and actions. */
 function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort: Sort; watchEvery: number; aggregators?: boolean }) {
   return (
@@ -243,7 +249,7 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
         </thead>
         <tbody>
           {props.rows.map((s) => (
-            <tr key={s.id} className={`group ${s.enabled ? "" : "opacity-55"}`}>
+            <tr key={s.id} data-search={searchText(s.company_name, s.slug, s.ats)} className={`group ${s.enabled ? "" : "opacity-55"}`}>
               <td className="@max-[30rem]:w-full">
                 {/* The dot stays beside the name; the name wraps between words (at least 7rem wide). */}
                 <div className="flex min-w-[7rem] items-start gap-2">

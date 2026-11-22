@@ -232,7 +232,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
           <div className="split">
             <Panel
               title={accountView ? "Remaining API credit" : viewing ? "Their AI balance" : "Your AI balance"}
-              aside={series?.perDay ? `trend: last ${Math.round(series.windowDays)}d` : undefined}
+              aside={series?.perDay ? `weighted: ${series.halfLifeDays}d half-life` : undefined}
             >
               {series ? (
                 <>

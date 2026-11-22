@@ -69,3 +69,24 @@ its headings; the rest are a list of links to job pages.
 - **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL
   (even `robots.txt`) returns the same empty shell, with no job links or text; the jobs
   come from an undocumented internal API.
+
+## Job systems not supported
+
+Checked when Oracle Recruiting, Taleo, Gem, Manatal, Traffit, JOIN, Jobvite, softgarden,
+Trakstar Hire, Homerun and JazzHR were added:
+
+- **iCIMS** (`careers-<company>.icims.com`): `robots.txt` disallows everything.
+- **Kenjo**, **Factorial**, **TalentLyft**: `robots.txt` disallows everything.
+- **Welcome to the Jungle**: its CDN answers bots with 403.
+- **Dayforce** (`jobs.dayforcehcm.com`): the job search API answers 403 without a browser
+  session.
+- **Dover** (`jobs.dover.com`): a Cloudflare-protected app whose API is disallowed in
+  `robots.txt`.
+- **Cornerstone OnDemand**, **Comeet**: the job lists need a token issued by the page.
+
+Not built yet for lack of a live example (send a link to one and it can be checked):
+UKG (UltiPro), Paylocity, ADP Workforce Now, Zoho Recruit, Freshteam, d.vinci, rexx,
+Abacus Umantis, onlyfy (Prescreen), eRecruiter.
+
+Built but not yet tried on a board with openings: **Trakstar Hire** (RSS feed) and
+**JazzHR** (careers page list); fix their parsing on the first real board.

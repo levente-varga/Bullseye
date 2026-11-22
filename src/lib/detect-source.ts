@@ -5,11 +5,13 @@ import {
   fetchBoard,
   isEightfoldSite,
   isSuccessFactorsPage,
+  oracleTotal,
   phenomBase,
   phenomTotal,
   probeHost,
   radancyBase,
   successFactorsTotal,
+  taleoTotal,
   workdayTotal,
 } from "./ats";
 import { detectAts } from "./dedupe";
@@ -49,6 +51,15 @@ const EMBEDDED: { ats: Ats; re: RegExp; slug: (m: RegExpMatchArray) => string }[
   { ats: "breezy", re: /([a-z0-9-]+)\.breezy\.hr/i, slug: (m) => m[1].toLowerCase() },
   { ats: "rippling", re: /ats\.rippling\.com\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?([a-z0-9-]+)\/jobs/i, slug: (m) => m[1].toLowerCase() },
   { ats: "bamboohr", re: /([a-z0-9-]+)\.bamboohr\.com\/(?:careers|jobs)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "jobvite", re: /jobs\.jobvite\.com\/([a-z0-9_-]+)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "join", re: /join\.com\/companies\/([a-z0-9_-]+)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "gem", re: /jobs\.gem\.com\/([a-z0-9_-]+)/i, slug: (m) => m[1] },
+  { ats: "manatal", re: /careers-page\.com\/([a-z0-9_-]+)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "softgarden", re: /([a-z0-9-]+\.softgarden\.io)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "traffit", re: /([a-z0-9-]+\.traffit\.com)/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "trakstar", re: /([a-z0-9-]+)\.hire\.trakstar\.com/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "homerun", re: /((?!jobs\.|feed\.|www\.)[a-z0-9-]+\.homerun\.co)\b/i, slug: (m) => m[1].toLowerCase() },
+  { ats: "jazzhr", re: /([a-z0-9-]+)\.applytojob\.com/i, slug: (m) => m[1].toLowerCase() },
   // Jobylon: the widget on a careers page (jbl_company_id = 2986), a posting page
   // (company_id = 2986;), or a company/embed link.
   {
@@ -141,6 +152,9 @@ export async function detectSource(input: string): Promise<Detected | { error: s
       if (c.ats === "successfactors") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await successFactorsTotal(c.slug) };
       // Eightfold lists 10 a page: its count comes with the first.
       if (c.ats === "eightfold") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await eightfoldTotal(c.slug) };
+      // Oracle and Taleo are searched by role: their totals come from one search page.
+      if (c.ats === "oracle") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await oracleTotal(c.slug) };
+      if (c.ats === "taleo") return { ...c, companyGuess: guessName(c.ats, c.slug), jobCount: await taleoTotal(c.slug) };
       const jobs = await fetchBoard({ ats: c.ats, slug: c.slug, company_name: "", country: null });
       // Jobylon's slug is a number; its listings carry the company's name.
       const companyGuess = c.ats === "jobylon" && jobs[0]?.company ? jobs[0].company : guessName(c.ats, c.slug);
@@ -193,7 +207,7 @@ function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
   if (ats === "inrecruiting") slug = slug.split("/")[1] ?? slug; // the company segment
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors", "eightfold", "radancy"].includes(ats)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors", "eightfold", "radancy", "taleo", "traffit", "softgarden", "homerun", "oracle"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
   // "disneycareers" → "disney"; a Rippling board "kinetic-games-careers" → "kinetic-games"
