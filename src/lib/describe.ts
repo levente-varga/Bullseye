@@ -1,4 +1,4 @@
-import { USER_AGENT, fetchOracleDescription, fetchTaleoDescription, isTaleoPosting, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, isHaileyPosting, fetchHaileyDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl } from "./ats";
+import { USER_AGENT, fetchOracleDescription, fetchTaleoDescription, isTaleoPosting, fetchAppleDescription, fetchAvatureDescription, fetchBambooDescription, fetchRipplingDescription, fetchEightfoldDescription, ripplingJob, isAvaturePosting, isBambooPosting, isRadancyPosting, isHaileyPosting, fetchHaileyDescription, fetchSmartRecruitersDescription, fetchWorkdayPosting, htmlToText, isAppleUrl, isJobylonPosting, isPersonioPosting, countryName, workdayFromUrl, CITY_ONLY_LISTS, isLandingJobsPosting, fetchLandingJobsPosting } from "./ats";
 import type { Source } from "./types";
 
 /**
@@ -54,6 +54,8 @@ export async function describe(
     const { text, location, title } = await describePage(job.url);
     return { text, location, title };
   }
+  // Landing.jobs: the sitemap gives only the link; the page's data has everything else.
+  if (isLandingJobsPosting(job.url)) return fetchLandingJobsPosting(job.url);
   // Avature: description, locations and work model are fields on the posting page.
   if (isAvaturePosting(job.url)) return fetchAvatureDescription(job.url);
   // Apple's posting pages render in the browser; their page data has the text.
@@ -73,8 +75,7 @@ export async function describe(
   return { text: await describeFromPage(job.url) };
 }
 
-/** Career sites whose lists name the city only (or nothing): the posting's structured data adds the country. */
-const CITY_ONLY_LISTS = /^https:\/\/(join\.com\/companies\/|jobs\.jobvite\.com\/|[^/]+\.softgarden\.io\/|[^/]+\.applytojob\.com\/)/;
+
 
 /** Fetches a posting page and extracts its text: schema.org JobPosting first, then the page body. */
 export async function describeFromPage(url: string): Promise<string> {

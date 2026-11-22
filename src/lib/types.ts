@@ -319,7 +319,7 @@ export const ATS_INFO: Record<
     blurb: "Startups in Berlin",
   },
   landingjobs: {
-    fetch: "paged",
+    fetch: "feed",
     label: "Landing.jobs (aggregator)",
     slugLabel: "—",
     slugExample: "landing.jobs",
