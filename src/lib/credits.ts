@@ -25,16 +25,16 @@ export interface BalancePoint {
 export interface CreditSeries {
   points: BalancePoint[];
   current: number;
-  /** Average spend per day over the trend window, or null without enough data. */
+  /** Spend per day, weighted towards recent days, or null without enough data. */
   perDay: number | null;
   /** When the balance would reach zero at that rate, or null. */
   zeroAt: number | null;
-  /** Days covered by the trend window. */
-  windowDays: number;
+  /** Half-life of the weighting, in days: spend this old counts half as much as today's. */
+  halfLifeDays: number;
 }
 
 const DAY = 86_400_000;
-const TREND_WINDOW_DAYS = 30;
+const HALF_LIFE_DAYS = 3;
 
 /** Midnight UTC of the given time's day: a top-up counts for its whole day, so that day's runs are included. */
 export const dayStart = (iso: string) => {
@@ -65,14 +65,21 @@ export function buildSeries(topUps: TopUp[], runs: CostedRun[], now: number): Cr
   }
   points.push({ t: now, balance, kind: "now" });
 
-  // Trend: spend in the last 30 days (or since the first top-up, if that's more recent).
-  const windowStart = Math.max(start, now - TREND_WINDOW_DAYS * DAY);
-  const spent = runs
-    .filter((r) => +new Date(r.at) >= windowStart && +new Date(r.at) <= now)
-    .reduce((a, r) => a + r.cost_usd, 0);
-  const windowDays = Math.max(1, (now - windowStart) / DAY); // at least a day, so one run doesn't explode the rate
-  const perDay = spent > 0 ? spent / windowDays : null;
+  // Trend: an exponentially weighted spend rate. Each run's cost counts e^(-age/tau),
+  // so last week's runs dominate and a month-old spike fades out. Dividing by the
+  // integral of the same weight over the observed span (since the first top-up) makes
+  // it a true per-day rate: with steady spend it equals the plain average, and days
+  // with no runs pull it down, as they should.
+  const tau = (HALF_LIFE_DAYS * DAY) / Math.LN2;
+  const span = Math.max(DAY, now - start); // at least a day, so one run doesn't explode the rate
+  let weighted = 0;
+  for (const r of runs) {
+    const t = +new Date(r.at);
+    if (t >= start && t <= now) weighted += r.cost_usd * Math.exp(-(now - t) / tau);
+  }
+  const weightDays = (tau * (1 - Math.exp(-span / tau))) / DAY;
+  const perDay = weighted > 0 ? weighted / weightDays : null;
   const zeroAt = perDay && balance > 0 ? now + (balance / perDay) * DAY : null;
 
-  return { points, current: balance, perDay, zeroAt, windowDays };
+  return { points, current: balance, perDay, zeroAt, halfLifeDays: HALF_LIFE_DAYS };
 }
