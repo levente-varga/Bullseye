@@ -15,7 +15,7 @@
 import "./env";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchBoardCounted, locationNeedsDetail, probeHost } from "../src/lib/ats";
+import { fetchBoardCounted, isLandingJobsPosting, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
 import { hardFilter } from "../src/lib/filters";
@@ -363,7 +363,8 @@ async function syncSource(
       if (found.location) j.location = found.location;
       if (found.remote) j.remote = true; // Avature: the work model is on the posting page
       if (found.title) j.title = found.title; // Radancy: the link only has a rough title
-      if (found.company && !j.company) j.company = found.company; // Magnet.me lists have none
+      // Magnet.me lists have no company; Landing.jobs' is guessed from the link.
+      if (found.company && (!j.company || isLandingJobsPosting(j.url))) j.company = found.company;
       stats.described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {

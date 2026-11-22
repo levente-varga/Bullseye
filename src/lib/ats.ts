@@ -81,7 +81,7 @@ async function get(url: string, accept: string, timeoutMs = 20_000, post?: { jso
     }
     if (res.ok) return res;
     // A rate limit (429) waits as long as the site asks (Retry-After, capped), then retries.
-    if ((res.status >= 500 || res.status === 429) && attempt < 2) {
+    if ((res.status >= 500 && attempt < 2) || (res.status === 429 && attempt < 3)) {
       const after = Number(res.headers.get("retry-after"));
       await res.body?.cancel();
       await sleep(res.status === 429 ? Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 10_000, 60_000) : RETRY_DELAY_MS);
@@ -753,7 +753,7 @@ export async function successFactorsTotal(host: string): Promise<number> {
 
 const EIGHTFOLD_PAGE = 10;
 const EIGHTFOLD_MAX_PAGES = 5;
-const EIGHTFOLD_SPACING_MS = 2_000;
+const EIGHTFOLD_SPACING_MS = 3_000; // Netflix answered 429 at 2 s
 
 interface EightfoldPosition {
   id: number;
@@ -1816,23 +1816,22 @@ async function fetchBerlinStartupJobs(): Promise<FetchedJob[]> {
   return [...out.values()];
 }
 
-// Landing.jobs: curated tech jobs, mostly Portugal and elsewhere in Europe, through its
-// public API (50 a page, the whole board). No company field: it's in the URL
-// (landing.jobs/at/<company>/<job>).
-interface LandingJob {
-  id: string | number;
-  title: string;
-  url: string;
-  remote?: boolean;
+// Landing.jobs: curated tech jobs, mostly Portugal and elsewhere in Europe. Its API is
+// closed to bots in robots.txt, so the sitemap lists the jobs (landing.jobs/at/<company>/<job>:
+// a rough title and the company) and each new posting's page data has the rest.
+const LANDING_JOB = /^https:\/\/landing\.jobs\/at\/([^/?#]+)\/([^/?#]+)\/?$/;
+export const isLandingJobsPosting = (url: string) => LANDING_JOB.test(url);
+
+interface LandingJobAd {
+  title?: string;
+  company_name?: string;
+  office_locations?: { city?: string | null; country_code?: string | null }[];
+  allows_remote?: boolean;
+  is_global_remote?: boolean;
   role_description?: string | null;
   main_requirements?: string | null;
   nice_to_have?: string | null;
   perks?: string | null;
-  currency_code?: string | null;
-  gross_salary_low?: number | null;
-  gross_salary_high?: number | null;
-  published_at?: string | null;
-  locations?: { city?: string | null; country_code?: string | null }[];
 }
 
 export const countryName = (code?: string | null) => {
@@ -1845,29 +1844,43 @@ export const countryName = (code?: string | null) => {
 };
 
 async function fetchLandingJobs(): Promise<FetchedJob[]> {
-  const out: FetchedJob[] = [];
-  for (let offset = 0; offset < 2000; offset += 50) {
-    const jobs = await getJson<LandingJob[]>(`https://landing.jobs/api/v1/jobs?offset=${offset}`);
-    for (const j of jobs) {
-      const company = j.url.match(/\/at\/([^/]+)\//)?.[1] ?? "";
-      const places = (j.locations ?? []).map((l) => [l.city, countryName(l.country_code)].filter(Boolean).join(", ")).filter(Boolean);
-      out.push({
-        external_id: String(j.id),
-        title: j.title.trim(),
-        company: company ? company.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Unknown company",
-        location: [...places, j.remote ? "Remote" : ""].filter(Boolean).join(" | "),
-        remote: Boolean(j.remote),
-        url: j.url,
-        description: clip(
-          [j.role_description, j.main_requirements, j.nice_to_have, j.perks].filter(Boolean).map((h) => htmlToText(String(h))).join("\n\n"),
-        ),
-        compensation: salary(j.gross_salary_low, j.gross_salary_high, j.currency_code),
-        posted_at: j.published_at ?? null,
-      });
-    }
-    if (jobs.length < 50) break;
+  const xml = await (await get("https://landing.jobs/sitemap.xml", "application/xml", 40_000)).text();
+  const out = new Map<string, FetchedJob>();
+  for (const m of xml.matchAll(/<loc>([^<]+)<\/loc>/g)) {
+    const url = decodeEntities(m[1]).trim();
+    const j = url.match(LANDING_JOB);
+    if (!j || out.has(url)) continue;
+    out.set(url, {
+      external_id: `${j[1]}/${j[2]}`,
+      title: unslug(j[2]), // replaced by the posting's own title when it's described
+      company: unslug(j[1]), // likewise
+      location: "", // comes with the posting page
+      remote: false,
+      url,
+      description: "",
+      compensation: null,
+      posted_at: null,
+    });
   }
-  return out;
+  if (!out.size) throw new Error("Landing.jobs: no jobs in the sitemap");
+  return [...out.values()];
+}
+
+/** A Landing.jobs posting's text, title, company and places, from the page's embedded data. */
+export async function fetchLandingJobsPosting(url: string): Promise<{ text: string; title?: string; company?: string; location?: string; remote?: boolean }> {
+  const html = await (await get(url, "text/html")).text();
+  const props = html.match(/data-react-props="([^"]*jobAd[^"]*)"/)?.[1];
+  const ad = props ? (JSON.parse(decodeEntities(props)) as { jobAd?: { attributes?: LandingJobAd } }).jobAd?.attributes : undefined;
+  if (!ad) throw new Error("Landing.jobs: no job data on the page");
+  const remote = Boolean(ad.allows_remote || ad.is_global_remote);
+  const places = (ad.office_locations ?? []).map((l) => [l.city, countryName(l.country_code)].filter(Boolean).join(", ")).filter(Boolean);
+  return {
+    text: clip([ad.role_description, ad.main_requirements, ad.nice_to_have, ad.perks].filter(Boolean).map((h) => htmlToText(String(h))).join("\n\n")),
+    title: ad.title?.trim() || undefined,
+    company: ad.company_name?.trim() || undefined,
+    location: [...places, remote ? "Remote" : ""].filter(Boolean).join(" | ") || undefined,
+    remote,
+  };
 }
 
 // jobs.ch: Switzerland's largest job board, through its public search API (20 a page, up
@@ -1928,7 +1941,12 @@ export const locationNeedsDetail = (url: string) =>
   isAvaturePosting(url) ||
   isPersonioPosting(url) ||
   isBambooPosting(url) ||
-  isRadancyPosting(url);
+  isRadancyPosting(url) ||
+  isLandingJobsPosting(url) ||
+  CITY_ONLY_LISTS.test(url);
+
+/** Career sites whose lists name the city only (or nothing): the posting's structured data adds the country. */
+export const CITY_ONLY_LISTS = /^https:\/\/(join\.com\/companies\/|jobs\.jobvite\.com\/|[^/]+\.softgarden\.io\/|[^/]+\.applytojob\.com\/)/;
 
 /** A Personio job link. Read from a careers page, its list location is a city only. */
 export const isPersonioPosting = (url: string) => /\.jobs\.personio\.(?:de|com)\/job\/\d+/i.test(url);
