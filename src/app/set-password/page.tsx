@@ -32,7 +32,7 @@ export default async function SetPasswordPage({ searchParams }: PageProps<"/set-
         <div className="border-b border-[var(--border)] px-5 py-5">
           <div className="flex items-center gap-2">
             <IconBullseye width={18} height={18} className="text-[var(--accent-strong)]" />
-            <span className="serif text-[1.5rem] leading-none tracking-tight">bullseye</span>
+            <span className="serif text-[1.5rem] leading-none tracking-tight">Bullseye</span>
           </div>
           <p className="faint mt-2 text-[12px]">Set a password for {email || "your account"}.</p>
         </div>

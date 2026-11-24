@@ -24,7 +24,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         <div className="border-b border-[var(--border)] px-5 py-5">
           <div className="flex items-center gap-2">
             <IconBullseye width={18} height={18} className="text-[var(--accent-strong)]" />
-            <span className="serif text-[1.5rem] leading-none tracking-tight">bullseye</span>
+            <span className="serif text-[1.5rem] leading-none tracking-tight">Bullseye</span>
           </div>
           <p className="faint mt-2 text-[12px]">Sign in to your job search.</p>
         </div>
