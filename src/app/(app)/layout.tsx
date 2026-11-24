@@ -5,12 +5,17 @@ import { TopNav } from "@/components/NavLinks";
 import { SidebarData, SidebarFallback, TopNavData } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { signOut } from "./actions";
+import pkg from "../../../package.json";
 
 function Wordmark() {
   return (
     <Link href="/" className="flex items-center gap-2">
       <IconBullseye width={18} height={18} className="text-[var(--accent-strong)]" />
       <span className="serif text-[1.35rem] leading-none tracking-tight">bullseye</span>
+      {/* The app's version (package.json), raised with each release. */}
+      <span className="mono faint self-end text-[11px] leading-none" title="Bullseye version">
+        v{pkg.version}
+      </span>
     </Link>
   );
 }
