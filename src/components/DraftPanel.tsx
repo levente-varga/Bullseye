@@ -163,7 +163,7 @@ function Questions(props: { answers: LetterQA[]; busy: boolean; submitLabel?: st
           <span className="text-[13px]">{a.question}</span>
           <textarea
             rows={2}
-            className="input"
+            className={GROW}
             value={a.answer}
             onChange={(e) => setQa(qa.map((x, j) => (j === i ? { ...x, answer: e.target.value } : x)))}
           />
@@ -196,7 +196,51 @@ function useSave(id: string) {
   return { save, label, saving: state === "saving" };
 }
 
-const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
+/** Text boxes grow with their text (field-sizing), so nothing hides behind a scrollbar. */
+const GROW = "input resize-none [field-sizing:content]";
+
+/** One box per bullet, so a long, wrapped bullet can't be mistaken for two. Empty ones are dropped on save. */
+function BulletsField(props: { label: ReactNode; items: string[]; onChange: (items: string[]) => void }) {
+  return (
+    <fieldset className="field">
+      <legend className="label mb-1 normal-case">{props.label}</legend>
+      <div className="space-y-1">
+        {props.items.map((b, i) => (
+          <div key={i} className="flex items-start gap-1.5">
+            <span className="faint pt-1.5" aria-hidden="true">
+              •
+            </span>
+            <textarea
+              rows={1}
+              className={`${GROW} min-w-0 flex-1`}
+              value={b}
+              aria-label={`Bullet ${i + 1}`}
+              onChange={(e) => props.onChange(props.items.map((x, j) => (j === i ? e.target.value : x)))}
+            />
+            <button
+              type="button"
+              className="btn btn-icon"
+              title="Remove this line"
+              onClick={() => props.onChange(props.items.filter((_, j) => j !== i))}
+            >
+              ×<span className="sr-only">Remove this line</span>
+            </button>
+          </div>
+        ))}
+        <button type="button" className="link text-[12px]" onClick={() => props.onChange([...props.items, ""])}>
+          + Add a line
+        </button>
+      </div>
+    </fieldset>
+  );
+}
+
+/** The CV as saved: no empty bullets or skills. */
+const tidyCv = (cv: CvDraft): CvDraft => ({
+  ...cv,
+  experiences: cv.experiences.map((e) => ({ ...e, highlights: e.highlights.map((h) => h.trim()).filter(Boolean) })),
+  skills: cv.skills.map((s) => s.trim()).filter(Boolean),
+});
 
 function CvEditor({ draft }: { draft: DraftRow }) {
   const [cv, setCv] = useState(draft.content as CvDraft);
@@ -230,7 +274,9 @@ function CvEditor({ draft }: { draft: DraftRow }) {
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
-          void save(cv);
+          const tidy = tidyCv(cv);
+          setCv(tidy);
+          void save(tidy);
         }}
       >
         <label className="field">
@@ -239,31 +285,29 @@ function CvEditor({ draft }: { draft: DraftRow }) {
         </label>
         <label className="field">
           <span className="label">Summary</span>
-          <textarea rows={3} className="input" value={cv.summary} onChange={(e) => setCv({ ...cv, summary: e.target.value })} />
+          <textarea rows={3} className={GROW} value={cv.summary} onChange={(e) => setCv({ ...cv, summary: e.target.value })} />
         </label>
         {cv.experiences.map((r, i) => (
-          <label key={`${r.company}-${i}`} className="field">
-            <span className="label normal-case">
-              {r.title} · {r.company}{" "}
-              <span className="mono faint">
-                {[formatCareerDate(r.start), formatCareerDate(r.end)].filter(Boolean).join(" – ")}
-              </span>
-            </span>
-            <textarea
-              rows={Math.max(2, r.highlights.length + 1)}
-              className="input"
-              value={r.highlights.join("\n")}
-              onChange={(e) => setCv({ ...cv, experiences: cv.experiences.map((x, j) => (j === i ? { ...x, highlights: e.target.value.split("\n") } : x)) })}
-              onBlur={(e) => setCv({ ...cv, experiences: cv.experiences.map((x, j) => (j === i ? { ...x, highlights: lines(e.target.value) } : x)) })}
-            />
-          </label>
+          <BulletsField
+            key={`${r.company}-${i}`}
+            label={
+              <>
+                {r.title} · {r.company}{" "}
+                <span className="mono faint whitespace-nowrap">
+                  {[formatCareerDate(r.start), formatCareerDate(r.end)].filter(Boolean).join(" – ")}
+                </span>
+              </>
+            }
+            items={r.highlights}
+            onChange={(highlights) => setCv({ ...cv, experiences: cv.experiences.map((x, j) => (j === i ? { ...x, highlights } : x)) })}
+          />
         ))}
         {cv.projects.map((p, i) => (
           <label key={`${p.name}-${i}`} className="field">
             <span className="label normal-case">Project · {p.name}</span>
             <textarea
               rows={2}
-              className="input"
+              className={GROW}
               value={p.description}
               onChange={(e) => setCv({ ...cv, projects: cv.projects.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)) })}
             />
@@ -273,13 +317,12 @@ function CvEditor({ draft }: { draft: DraftRow }) {
           <span className="label">Skills</span>
           <textarea
             rows={2}
-            className="input"
+            className={GROW}
             value={cv.skills.join(", ")}
             onChange={(e) => setCv({ ...cv, skills: e.target.value.split(",").map((s) => s.trimStart()) })}
-            onBlur={(e) => setCv({ ...cv, skills: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
           />
         </label>
-        <p className="faint text-[12px]">One line per bullet. Titles, companies and dates come from your career.</p>
+        <p className="faint text-[12px]">Titles, companies and dates come from your career. Skills: comma-separated.</p>
         <button type="submit" className="btn" disabled={saving}>
           {label}
         </button>
@@ -306,7 +349,7 @@ function LetterEditor({ draft }: { draft: DraftRow }) {
           <textarea
             key={i}
             rows={4}
-            className="input"
+            className={GROW}
             value={p}
             aria-label={`Paragraph ${i + 1}`}
             onChange={(e) => setLetter({ ...letter, paragraphs: letter.paragraphs.map((x, j) => (j === i ? e.target.value : x)) })}
