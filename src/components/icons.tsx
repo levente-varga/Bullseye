@@ -21,23 +21,28 @@ export const IconBullseye = (p: SVGProps<SVGSVGElement>) => (
     <circle cx="8" cy="8" r="1.9" fill="currentColor" stroke="none" />
   </svg>
 );
-/** An in-tray, filled with every corner on the 16px grid (whole or half units). */
 export const IconInbox = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <path fill="currentColor" stroke="none" fillRule="evenodd" d="M4 2 L12 2 L14 9 L14 14 L2 14 L2 9ZM5 3 L11 3 L13 9 L11 9 L9.5 10.5 L6.5 10.5 L5 9 L3 9ZM3 10 L5 10 L6.5 11.5 L9.5 11.5 L11 10 L13 10 L13 13 L3 13Z" />
+    {/* One closed outline (its corners join), and the tray line ending flat inside the walls. */}
+    <path d="M2 9.5L4 3H12L14 9.5V13.5H2Z" />
+    <path strokeLinecap="butt" d="M2 9.5H5.5L6.5 11H9.5L10.5 9.5H14" />
   </svg>
 );
-/** A pipe tee seen from the side, branch to the right, with flanges on its three ends. */
+/** A pipe tee seen from the side, branch to the right, with flanges on its three ends (lines on whole or half units). */
 export const IconPipeline = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    {/* Filled, not stroked: every edge sits on the 16px grid, so it draws crisp at 1x. */}
-    <path fill="currentColor" stroke="none" d="M3 3h1v10h-1ZM6 3h1v4h-1ZM6 9h1v4h-1ZM7 6h5v1h-5ZM7 9h5v1h-5ZM2 1h6v2h-6ZM2 13h6v2h-6ZM12 5h2v6h-2Z" />
+    <path d="M3.5 3V13M6.5 3V6.5H12M6.5 13V9.5H12" />
+    <rect x="2.5" y="1.5" width="5" height="1.5" />
+    <rect x="2.5" y="13" width="5" height="1.5" />
+    <rect x="12" y="5.5" width="1.5" height="5" />
   </svg>
 );
-/** Three sliders, filled with every corner on the 16px grid (whole or half units). */
 export const IconSliders = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <path fill="currentColor" stroke="none" fillRule="evenodd" d="M2 3 L9 3 L9 4 L2 4ZM12 3 L14 3 L14 4 L12 4ZM9 2 L12 2 L12 5 L9 5ZM2 7.5 L6 7.5 L6 8.5 L2 8.5ZM9 7.5 L14 7.5 L14 8.5 L9 8.5ZM6 6.5 L9 6.5 L9 9.5 L6 9.5ZM2 12 L4 12 L4 13 L2 13ZM7 12 L14 12 L14 13 L7 13ZM4 11 L7 11 L7 14 L4 14ZM10 3 L11 3 L11 4 L10 4ZM7 7.5 L8 7.5 L8 8.5 L7 8.5ZM5 12 L6 12 L6 13 L5 13Z" />
+    <path d="M2 4h7M12 4h2M2 12h2M7 12h7M2 8h4M9 8h5" />
+    <rect x="9" y="2.5" width="3" height="3" />
+    <rect x="4" y="10.5" width="3" height="3" />
+    <rect x="6" y="6.5" width="3" height="3" />
   </svg>
 );
 /** A globe: sources are the sites jobs come from. */
@@ -61,10 +66,10 @@ export const IconUsers = (p: SVGProps<SVGSVGElement>) => (
     <path d="M10.5 3.2a2.5 2.5 0 0 1 0 4.6M12 10.3c1.3.5 2.2 1.7 2.5 3.7" />
   </svg>
 );
-/** A line chart, filled with every corner on the 16px grid (whole or half units); the line is 45° steps. */
 export const IconChart = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <path fill="currentColor" stroke="none" fillRule="evenodd" d="M2 2 L3 2 L3 14 L2 14ZM3 13 L14 13 L14 14 L3 14ZM4 10 L7 7 L9 9 L13 5 L13 6.5 L9 10.5 L7 8.5 L4 11.5Z" />
+    <path d="M2 2v12h12" />
+    <path d="M5 10.5l2.5-3 2 2L13 5" />
   </svg>
 );
 export const IconSun = (p: SVGProps<SVGSVGElement>) => (
