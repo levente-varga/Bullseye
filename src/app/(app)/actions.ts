@@ -910,13 +910,13 @@ async function draftContext(jobId: string): Promise<DraftContext> {
   if (!job || !PIPELINE_STATUSES.includes(job.status as JobStatus)) return { error: "Drafts are made for jobs in your Pipeline." };
   const career = withDefaults((profile as Profile | null)?.career);
   if (!profile || !career || !career.experiences.length) return { error: "Fill in your career on the Profile page first: drafts are built from it." };
-  const checks = (job.score_checks ?? []) as { key: string; rating: number; note: string }[];
+  const checks = (job.score_checks ?? []) as { key: string; rating: number; max?: number; note: string }[];
   const draftJob: DraftJob = {
     title: job.title,
     company: job.company,
     location: job.location ?? "",
     description: job.description ?? "",
-    scoreNotes: [job.score_summary, ...checks.map((c) => `${c.key} ${c.rating}/10: ${c.note}`)].filter(Boolean).join("\n"),
+    scoreNotes: [job.score_summary, ...checks.map((c) => `${c.key} ${c.rating}/${c.max ?? 10}: ${c.note}`)].filter(Boolean).join("\n"),
   };
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
