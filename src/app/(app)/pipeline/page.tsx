@@ -1,6 +1,7 @@
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { AddJobForm } from "@/components/AddJobForm";
 import { DraftPanel } from "@/components/DraftPanel";
+import { RowMenu, type RowMenuItem } from "@/components/RowMenu";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
@@ -25,6 +26,20 @@ const ACTION: Partial<Record<JobStatus, string>> = {
   rejected: "Rejected",
   skipped: "Drop",
 };
+
+/** Moves that aren't the main one (going backwards or out) live in the row's ⋮ menu. */
+const isMain = (to: JobStatus) => to !== "rejected" && to !== "skipped";
+
+/** A row's ⋮ menu: the other moves, plus "Followed up" for applied and "Back to Inbox" for to-apply. */
+function menuFor(status: JobStatus, id: string): RowMenuItem[] {
+  return [
+    ...(status === "applied" ? [{ label: "Followed up", action: markFollowedUp, fields: { id } }] : []),
+    ...(NEXT[status] ?? [])
+      .filter((to) => !isMain(to))
+      .map((to) => ({ label: ACTION[to] ?? to, action: setStatus, fields: { id, status: to } })),
+    ...(status === "approved" ? [{ label: "Back to Inbox", action: restoreToInbox, fields: { id } }] : []),
+  ];
+}
 
 const NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
   approved: ["applied", "skipped"],
@@ -106,30 +121,17 @@ export default async function PipelinePage() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {status === "applied" && (
-                                <form action={markFollowedUp}>
-                                  <input type="hidden" name="id" value={job.id} />
-                                  <SubmitButton className="btn">Followed up</SubmitButton>
-                                </form>
-                              )}
-                              {(NEXT[status] ?? []).map((to) => (
+                            {/* On phones the buttons get their own row under the title, as on Sources. */}
+                            <div className="flex items-center gap-1.5 max-sm:w-full">
+                              {/* The main move forward; everything else is in the ⋮ menu. */}
+                              {(NEXT[status] ?? []).filter(isMain).map((to) => (
                                 <form key={to} action={setStatus}>
                                   <input type="hidden" name="id" value={job.id} />
                                   <input type="hidden" name="status" value={to} />
-                                  <SubmitButton className={to === "rejected" || to === "skipped" ? "btn" : "btn-primary"}>
-                                    {ACTION[to]}
-                                  </SubmitButton>
+                                  <SubmitButton className="btn-primary">{ACTION[to]}</SubmitButton>
                                 </form>
                               ))}
-                              {status === "approved" && (
-                                <form action={restoreToInbox}>
-                                  <input type="hidden" name="id" value={job.id} />
-                                  <SubmitButton className="btn" title="Undo the approval: back to the Inbox, as if untouched">
-                                    Back to Inbox
-                                  </SubmitButton>
-                                </form>
-                              )}
+                              {menuFor(status, job.id).length > 0 && <RowMenu items={menuFor(status, job.id)} />}
                               <ExpandToggle />
                             </div>
                           </>

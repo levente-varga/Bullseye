@@ -105,6 +105,14 @@ export const IconRefresh = (p: SVGProps<SVGSVGElement>) => (
     <path d="M13 8a5 5 0 1 1-1.46-3.54M13 2.5v2.5h-2.5" />
   </svg>
 );
+/** More actions: three dots in a column. */
+export const IconMore = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <rect x="7" y="2.5" width="2" height="2" />
+    <rect x="7" y="7" width="2" height="2" />
+    <rect x="7" y="11.5" width="2" height="2" />
+  </svg>
+);
 /** Delete: a bin with a lid. */
 export const IconTrash = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
