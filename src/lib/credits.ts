@@ -34,7 +34,9 @@ export interface CreditSeries {
 }
 
 const DAY = 86_400_000;
-const HALF_LIFE_DAYS = 3;
+const HALF_LIFE_DAYS = 2;
+/** A day's spend counts at most this many times the typical (median) day of the past week. */
+const SPIKE_CAP = 2;
 
 /** Midnight UTC of the given time's day: a top-up counts for its whole day, so that day's runs are included. */
 export const dayStart = (iso: string) => {
@@ -66,16 +68,29 @@ export function buildSeries(topUps: TopUp[], runs: CostedRun[], now: number): Cr
   points.push({ t: now, balance, kind: "now" });
 
   // Trend: an exponentially weighted spend rate. Each run's cost counts e^(-age/tau),
-  // so last week's runs dominate and a month-old spike fades out. Dividing by the
-  // integral of the same weight over the observed span (since the first top-up) makes
-  // it a true per-day rate: with steady spend it equals the plain average, and days
-  // with no runs pull it down, as they should.
+  // so the last few days dominate. Dividing by the integral of the same weight over the
+  // observed span (since the first top-up) makes it a true per-day rate: with steady
+  // spend it equals the plain average, and days with no runs pull it down.
+  // A one-off spike (a backlog scored after adding sources) isn't a trend: each day's
+  // spend is trimmed to SPIKE_CAP times the median day of the past week.
   const tau = (HALF_LIFE_DAYS * DAY) / Math.LN2;
   const span = Math.max(DAY, now - start); // at least a day, so one run doesn't explode the rate
+  const inRange = runs.filter((r) => +new Date(r.at) >= start && +new Date(r.at) <= now);
+  const dayOf = (t: number) => Math.floor((now - t) / DAY); // 0 = the last 24 hours
+  const perDayTotal = new Map<number, number>();
+  for (const r of inRange) {
+    const d = dayOf(+new Date(r.at));
+    perDayTotal.set(d, (perDayTotal.get(d) ?? 0) + r.cost_usd);
+  }
+  const week = Array.from({ length: Math.min(7, Math.ceil(span / DAY)) }, (_, d) => perDayTotal.get(d) ?? 0).sort((a, b) => a - b);
+  const median = week.length ? (week[(week.length - 1) >> 1] + week[week.length >> 1]) / 2 : 0;
+  const cap = median > 0 ? SPIKE_CAP * median : Infinity;
   let weighted = 0;
-  for (const r of runs) {
+  for (const r of inRange) {
     const t = +new Date(r.at);
-    if (t >= start && t <= now) weighted += r.cost_usd * Math.exp(-(now - t) / tau);
+    const dayTotal = perDayTotal.get(dayOf(t)) ?? 0;
+    const trim = dayTotal > cap ? cap / dayTotal : 1;
+    weighted += r.cost_usd * trim * Math.exp(-(now - t) / tau);
   }
   const weightDays = (tau * (1 - Math.exp(-span / tau))) / DAY;
   const perDay = weighted > 0 ? weighted / weightDays : null;
