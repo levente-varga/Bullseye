@@ -20,6 +20,8 @@ export function ExpandableJobRow(props: {
   side?: ReactNode;
   /** Left padding of the opened panel on wide screens, to line up with the title column. */
   indent?: string;
+  /** A full-width block under the reasoning (e.g. the Pipeline's drafts). Mounted when the row opens. */
+  extra?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<JobDetails | null | undefined>(undefined);
@@ -78,6 +80,7 @@ export function ExpandableJobRow(props: {
             </a>
           </div>
           {props.side}
+          {props.extra && <div className={`border-t border-[var(--border)] pt-4 ${props.side ? "lg:col-span-2" : ""}`}>{props.extra}</div>}
         </div>
       )}
     </details>

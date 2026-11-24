@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { CareerSchema, extractCareer } from "@/lib/career";
 import { withDefaults } from "@/lib/career-schema";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
+import type { CvDraft, DraftRow, LetterDraft, LetterQA } from "@/lib/draft-types";
+import { generateCv, generateLetter, letterQuestions, type DraftJob } from "@/lib/drafts";
 import type { TokenUsage } from "@/lib/pricing";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { dedupeKey, detectAts } from "@/lib/dedupe";
@@ -23,6 +25,8 @@ import {
   type FetchedJob,
   type JobDetails,
   type JobStatus,
+  type Profile,
+  PIPELINE_STATUSES,
 } from "@/lib/types";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
@@ -791,4 +795,129 @@ export async function saveMemberDefaults(form: FormData) {
     ).error,
   );
   revalidatePath("/admin");
+}
+
+// --- CV and cover letter drafts ---------------------------------------------------------
+
+export type DraftResult = { tone: "ok" | "bad"; message: string; at: number } | null;
+
+type DraftContext =
+  | { error: string }
+  | {
+      supabase: Awaited<ReturnType<typeof db>>;
+      profile: Profile;
+      career: NonNullable<ReturnType<typeof withDefaults>>;
+      job: DraftJob;
+      model: (typeof SCORING_MODELS)[number]["id"];
+      client: import("@anthropic-ai/sdk").default;
+    };
+
+/** Everything a draft needs: the profile and career, the job, the writing model. Or why it can't run. */
+async function draftContext(jobId: string): Promise<DraftContext> {
+  if (!process.env.ANTHROPIC_API_KEY) return { error: "The app has no Anthropic API key (ANTHROPIC_API_KEY) yet." };
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  // Members spend from the balance the admin gave them; the admin draws on the account.
+  if (!me.isAdmin) {
+    const { data: bal } = await supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle();
+    if (Number(bal?.balance_usd ?? 0) <= 0) return { error: "Your AI balance is used up. Ask the admin for more credit." };
+  }
+  const [{ data: profile }, { data: job }, { data: st }] = await Promise.all([
+    supabase.from("profile").select("*").eq("user_id", me.id).single(),
+    supabase.from("my_jobs").select("id, title, company, location, description, status, score_summary, score_checks").eq("id", jobId).single(),
+    supabase.from("settings").select("writing_model").single(),
+  ]);
+  if (!job || !PIPELINE_STATUSES.includes(job.status as JobStatus)) return { error: "Drafts are made for jobs in your Pipeline." };
+  const career = withDefaults((profile as Profile | null)?.career);
+  if (!profile || !career || !career.experiences.length) return { error: "Fill in your career on the Profile page first: drafts are built from it." };
+  const checks = (job.score_checks ?? []) as { key: string; rating: number; note: string }[];
+  const draftJob: DraftJob = {
+    title: job.title,
+    company: job.company,
+    location: job.location ?? "",
+    description: job.description ?? "",
+    scoreNotes: [job.score_summary, ...checks.map((c) => `${c.key} ${c.rating}/10: ${c.note}`)].filter(Boolean).join("\n"),
+  };
+  const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  return { supabase, profile: profile as Profile, career, job: draftJob, model, client: new Anthropic() };
+}
+
+/** The job's drafts (Pipeline → opened row), loaded when the row opens. */
+export async function getDrafts(jobId: string): Promise<DraftRow[]> {
+  const supabase = await db();
+  const { data } = await supabase
+    .from("drafts")
+    .select("id, job_id, kind, language, content, answers, model, cost_usd, updated_at")
+    .eq("job_id", jobId);
+  return (data ?? []) as DraftRow[];
+}
+
+const upsertDraft = async (supabase: Awaited<ReturnType<typeof db>>, row: Record<string, unknown>) =>
+  check((await supabase.from("drafts").upsert({ ...row, updated_at: new Date().toISOString() }, { onConflict: "user_id,job_id,kind" })).error);
+
+/** Writes (or rewrites) the tailored CV for a Pipeline job. */
+export async function draftCv(jobId: string): Promise<DraftResult> {
+  const at = Date.now();
+  const ctx = await draftContext(jobId);
+  if ("error" in ctx) return { tone: "bad", message: ctx.error, at };
+  try {
+    const r = await generateCv(ctx.client, ctx.model, ctx.career, ctx.profile, ctx.job);
+    // Logged first, so the spend is on record even if saving fails.
+    await recordAiUsage(ctx.supabase, { kind: "cv_draft", model: r.model, usage: r.usage, costUsd: r.costUsd, detail: `${ctx.job.title} @ ${ctx.job.company}` });
+    await upsertDraft(ctx.supabase, { job_id: jobId, kind: "cv", language: ctx.profile.draft_language, content: r.draft, model: r.model, cost_usd: r.costUsd });
+    revalidatePath("/report");
+    return { tone: "ok", message: `CV drafted. Cost $${r.costUsd.toFixed(4)}.`, at };
+  } catch (e) {
+    return { tone: "bad", message: `Drafting the CV failed: ${e instanceof Error ? e.message : e}`, at };
+  }
+}
+
+/**
+ * Starts or rewrites a cover letter. With questions on (Profile → Drafts) and none asked
+ * yet for this job, it only asks them (saved on the draft); the panel then shows them.
+ * Otherwise it writes the letter with the given answers, or the saved ones.
+ */
+export async function draftLetter(jobId: string, answers?: LetterQA[]): Promise<DraftResult> {
+  const at = Date.now();
+  const ctx = await draftContext(jobId);
+  if ("error" in ctx) return { tone: "bad", message: ctx.error, at };
+  const { data: existing } = await ctx.supabase.from("drafts").select("answers").eq("job_id", jobId).eq("kind", "cover_letter").maybeSingle();
+  const saved = (existing?.answers ?? null) as LetterQA[] | null;
+  try {
+    if (!answers && ctx.profile.letter_questions && !saved) {
+      // A short call: Haiku is plenty for picking 1-2 questions.
+      const q = await letterQuestions(ctx.client, DEFAULT_SCORING_MODEL, ctx.career, ctx.job);
+      await recordAiUsage(ctx.supabase, { kind: "cover_letter", model: q.model, usage: q.usage, costUsd: q.costUsd, detail: `questions: ${ctx.job.title} @ ${ctx.job.company}` });
+      await upsertDraft(ctx.supabase, {
+        job_id: jobId,
+        kind: "cover_letter",
+        language: ctx.profile.draft_language,
+        answers: q.draft.map((question) => ({ question, answer: "" })),
+      });
+      return { tone: "ok", message: "", at };
+    }
+    const qa = (answers ?? saved ?? []).map((a) => ({ question: String(a.question).slice(0, 300), answer: String(a.answer).slice(0, 2000) }));
+    const r = await generateLetter(ctx.client, ctx.model, ctx.career, ctx.profile, ctx.job, qa);
+    await recordAiUsage(ctx.supabase, { kind: "cover_letter", model: r.model, usage: r.usage, costUsd: r.costUsd, detail: `${ctx.job.title} @ ${ctx.job.company}` });
+    await upsertDraft(ctx.supabase, {
+      job_id: jobId,
+      kind: "cover_letter",
+      language: ctx.profile.draft_language,
+      content: r.draft,
+      answers: qa.length ? qa : saved,
+      model: r.model,
+      cost_usd: r.costUsd,
+    });
+    revalidatePath("/report");
+    return { tone: "ok", message: `Cover letter written. Cost $${r.costUsd.toFixed(4)}.`, at };
+  } catch (e) {
+    return { tone: "bad", message: `Writing the cover letter failed: ${e instanceof Error ? e.message : e}`, at };
+  }
+}
+
+/** Saves edits to a draft (the editor sends the whole content back). */
+export async function saveDraft(id: string, content: CvDraft | LetterDraft): Promise<void> {
+  const supabase = await db();
+  check((await supabase.from("drafts").update({ content, updated_at: new Date().toISOString() }).eq("id", id)).error);
 }

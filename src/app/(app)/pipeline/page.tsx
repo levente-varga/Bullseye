@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { AddJobForm } from "@/components/AddJobForm";
+import { DraftPanel } from "@/components/DraftPanel";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
@@ -88,6 +89,7 @@ export default async function PipelinePage() {
                         id={job.id}
                         url={job.url}
                         indent="lg:pl-[88px]"
+                        extra={<DraftPanel jobId={job.id} />}
                         summaryClassName="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] [&::-webkit-details-marker]:hidden"
                         summary={
                           <>
