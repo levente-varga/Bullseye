@@ -15,14 +15,24 @@ import { approveJob, restoreToInbox } from "./actions";
 
 const PAGE = 50;
 
+/** Lower case without accents, like unaccent(lower(…)) in Postgres: "Göteborg" → "goteborg", "Straße" → "strasse". */
+const LIGATURES: Record<string, string> = { ß: "ss", æ: "ae", œ: "oe", ø: "o", ł: "l", đ: "d", þ: "th", ð: "d" };
+const foldAccents = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[ßæœøłđþð]/g, (c) => LIGATURES[c] ?? c);
+
 export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const { all, view: viewParam, n, q: qParam } = await searchParams;
-  // Search: every word must appear in the title, company, location or description.
-  // Characters with a meaning in PostgREST filters are dropped from the words.
+  // Search: every word must appear in the title, company, location or description, ignoring
+  // case and accents ("goteborg" finds "Göteborg"): the words are folded the way Postgres's
+  // unaccent folds the jobs' search_text. Wildcard characters are dropped.
   const q = (typeof qParam === "string" ? qParam : "").trim().slice(0, 200);
-  const words = q
+  const words = foldAccents(q)
     .split(/\s+/)
-    .map((w) => w.replace(/[,()"\\%_*:]/g, ""))
+    .map((w) => w.replace(/[%_*\\]/g, ""))
     .filter(Boolean)
     .slice(0, 8);
   // "above" (default), "all" scored, "waiting" (passed the filters, not scored yet), or
@@ -48,11 +58,10 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
           : rows().eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
   for (const w of words) {
     // Short words match whole words only ("go" shouldn't find "Google"); longer ones anywhere ("kube").
-    const filter =
+    rowsQuery =
       w.length <= 3
-        ? `imatch."${`(^|[^a-z0-9])${w.replace(/[.+?^${}|[\]\\#$-]/g, "\\$&")}([^a-z0-9]|$)`.replace(/\\/g, "\\\\")}"`
-        : `ilike.%${w}%`;
-    rowsQuery = rowsQuery.or(["title", "company", "location", "description"].map((col) => `${col}.${filter}`).join(","));
+        ? rowsQuery.filter("search_text", "imatch", `(^|[^a-z0-9])${w.replace(/[.+?^${}()|[\]\\#$-]/g, "\\$&")}([^a-z0-9]|$)`)
+        : rowsQuery.ilike("search_text", `%${w}%`);
   }
   const [{ data, error, count: matchCount }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }, { data: prof }] = await Promise.all([
     rowsQuery.limit(limit + 1), // one extra row tells us whether there's more
