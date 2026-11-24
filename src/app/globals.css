@@ -358,3 +358,14 @@ input[type="radio"]:checked:hover {
   .pending-bar { animation: none; width: 100%; opacity: 0.7; }
   a:has(> .pending-bar) { animation: none; opacity: 0.7; }
 }
+
+/* iOS Safari zooms the page in on focusing a field whose text is under 16px (ours are 13px).
+   On touch screens, fields get 16px text instead. Not by disabling zoom in the viewport:
+   that would also block pinch-zoom. Unlayered, so it wins over the text-[13px] utilities. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="file"], [type="hidden"], [type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
