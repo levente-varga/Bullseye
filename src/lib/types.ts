@@ -370,7 +370,11 @@ export const SCORING_MODELS = [
 export type ScoringModel = (typeof SCORING_MODELS)[number]["id"];
 export const DEFAULT_SCORING_MODEL: ScoringModel = "claude-haiku-5-5";
 
+/** Skipped because the posting is gone: says nothing about taste, so the scorer never learns from it. */
+export const SKIP_UNAVAILABLE = "No longer available";
+
 export const SKIP_REASONS = [
+  SKIP_UNAVAILABLE,
   "Too senior",
   "Too junior",
   "Wrong stack",

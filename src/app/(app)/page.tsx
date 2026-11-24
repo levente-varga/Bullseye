@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { IconExternal } from "@/components/icons";
+import { InboxSearch } from "@/components/InboxSearch";
 import { PendingBar } from "@/components/PendingBar";
 import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -15,7 +16,15 @@ import { approveJob, restoreToInbox } from "./actions";
 const PAGE = 50;
 
 export default async function InboxPage({ searchParams }: PageProps<"/">) {
-  const { all, view: viewParam, n } = await searchParams;
+  const { all, view: viewParam, n, q: qParam } = await searchParams;
+  // Search: every word must appear in the title, company, location or description.
+  // Characters with a meaning in PostgREST filters are dropped from the words.
+  const q = (typeof qParam === "string" ? qParam : "").trim().slice(0, 200);
+  const words = q
+    .split(/\s+/)
+    .map((w) => w.replace(/[,()"\\%_*:]/g, ""))
+    .filter(Boolean)
+    .slice(0, 8);
   // "above" (default), "all" scored, "waiting" (passed the filters, not scored yet), or
   // "skipped" (skipped in the Inbox or dropped from the Pipeline, restorable).
   const view =
@@ -27,15 +36,25 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const { data: criteria } = await supabase.from("criteria").select("score_threshold").single();
   const threshold = criteria?.score_threshold ?? 60;
 
-  const rowsQuery =
+  // With a search, the total number of matches comes back too.
+  const rows = () => supabase.from("my_jobs").select(JOB_LIST_COLUMNS, words.length ? { count: "exact" } : undefined);
+  let rowsQuery =
     view === "skipped"
-      ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "skipped").order("status_changed_at", { ascending: false })
+      ? rows().eq("status", "skipped").order("status_changed_at", { ascending: false })
       : view === "waiting"
-        ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "new").order("first_seen_at", { ascending: false })
+        ? rows().eq("status", "new").order("first_seen_at", { ascending: false })
         : view === "all"
-          ? supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").order("score", { ascending: false })
-          : supabase.from("my_jobs").select(JOB_LIST_COLUMNS).eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
-  const [{ data, error }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }, { data: prof }] = await Promise.all([
+          ? rows().eq("status", "scored").order("score", { ascending: false })
+          : rows().eq("status", "scored").gte("score", threshold).order("score", { ascending: false });
+  for (const w of words) {
+    // Short words match whole words only ("go" shouldn't find "Google"); longer ones anywhere ("kube").
+    const filter =
+      w.length <= 3
+        ? `imatch."${`(^|[^a-z0-9])${w.replace(/[.+?^${}|[\]\\#$-]/g, "\\$&")}([^a-z0-9]|$)`.replace(/\\/g, "\\\\")}"`
+        : `ilike.%${w}%`;
+    rowsQuery = rowsQuery.or(["title", "company", "location", "description"].map((col) => `${col}.${filter}`).join(","));
+  }
+  const [{ data, error, count: matchCount }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }, { data: prof }] = await Promise.all([
     rowsQuery.limit(limit + 1), // one extra row tells us whether there's more
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
@@ -47,7 +66,12 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   if (error) throw new Error(error.message);
   const hasMore = (data?.length ?? 0) > limit;
   const jobs = (data as unknown as Job[]).slice(0, limit);
-  const moreHref = `/?${new URLSearchParams({ ...(view !== "above" ? { view } : {}), n: String(limit + PAGE) })}`;
+  const moreHref = `/?${new URLSearchParams({ ...(view !== "above" ? { view } : {}), ...(q ? { q } : {}), n: String(limit + PAGE) })}`;
+  // The tabs keep the search.
+  const tab = (v?: string) => {
+    const qs = new URLSearchParams({ ...(v ? { view: v } : {}), ...(q ? { q } : {}) }).toString();
+    return qs ? `/?${qs}` : "/";
+  };
   const above = aboveCount ?? 0;
 
   return (
@@ -64,10 +88,10 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         actions={
           <Segmented
             options={[
-              { href: "/", label: "Above threshold", active: view === "above" },
-              { href: "/?view=all", label: "All scored", active: view === "all" },
-              { href: "/?view=waiting", label: "Waiting", active: view === "waiting" },
-              { href: "/?view=skipped", label: "Skipped", active: view === "skipped" },
+              { href: tab(), label: "Above threshold", active: view === "above" },
+              { href: tab("all"), label: "All scored", active: view === "all" },
+              { href: tab("waiting"), label: "Waiting", active: view === "waiting" },
+              { href: tab("skipped"), label: "Skipped", active: view === "skipped" },
             ]}
           />
         }
@@ -82,6 +106,8 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         </p>
       )}
 
+      <InboxSearch matches={words.length ? (matchCount ?? 0) : null} />
+
       <section className="panel">
         <div className="eyebrow hidden grid-cols-[28px_72px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
           <span>#</span>
@@ -92,7 +118,16 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
           <span />
         </div>
         {jobs.length === 0 ? (
-          view === "skipped" ? (
+          words.length ? (
+            <Empty>
+              No matches for “{q}” here.{" "}
+              {view !== "all" && (
+                <Link href={tab("all")} className="link">
+                  Search all scored
+                </Link>
+              )}
+            </Empty>
+          ) : view === "skipped" ? (
             <Empty>Nothing skipped.</Empty>
           ) : view === "waiting" ? (
             <Empty>Nothing waiting to be scored.</Empty>
