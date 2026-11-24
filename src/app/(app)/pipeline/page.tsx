@@ -1,11 +1,12 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, currentUser } from "@/lib/supabase/server";
 import { AddJobForm } from "@/components/AddJobForm";
 import { DraftPanel } from "@/components/DraftPanel";
 import { SubmitButton } from "@/components/SubmitButton";
 import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
+import { estimateTask } from "@/lib/estimates";
 import { agoText, nowMs } from "@/lib/time";
-import { JOB_LIST_COLUMNS, PIPELINE_STATUSES, type Job, type JobStatus } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, PIPELINE_STATUSES, SCORING_MODELS, type Job, type JobStatus } from "@/lib/types";
 import { markFollowedUp, restoreToInbox, setStatus } from "../actions";
 
 const LABEL: Record<string, string> = {
@@ -35,12 +36,24 @@ const NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
 
 export default async function PipelinePage() {
   const supabase = await createClient();
-  const [{ data, error }, { data: criteria }, { data: draftRows }] = await Promise.all([
+  const me = await currentUser(supabase);
+  const [{ data, error }, { data: criteria }, { data: draftRows }, { data: st }, { data: prof }] = await Promise.all([
     supabase.from("my_jobs").select(JOB_LIST_COLUMNS).in("status", PIPELINE_STATUSES).order("status_changed_at", { ascending: false }),
     supabase.from("criteria").select("followup_days").single(),
     // Written drafts only: a letter that waits for its questions has no content yet.
     supabase.from("drafts").select("job_id, kind").not("content", "is", null),
+    supabase.from("settings").select("writing_model").single(),
+    supabase.from("profile").select("letter_questions").single(),
   ]);
+  // Estimates for the draft buttons: drafts use the writing model, the questions Haiku.
+  const writingModel = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
+  const [cvEst, questionsEst, letterEst] = await Promise.all([
+    estimateTask(supabase, me.id, "cv_draft", writingModel),
+    estimateTask(supabase, me.id, "letter_questions", DEFAULT_SCORING_MODEL),
+    estimateTask(supabase, me.id, "cover_letter", writingModel),
+  ]);
+  const estimates = { cv: cvEst, questions: questionsEst, letter: letterEst };
+  const questionsOn = prof?.letter_questions ?? true;
   const drafted = new Set((draftRows ?? []).map((d) => `${d.job_id}:${d.kind}`));
   if (error) throw new Error(error.message);
   const jobs = data as unknown as Job[];
@@ -72,7 +85,7 @@ export default async function PipelinePage() {
                         id={job.id}
                         url={job.url}
                         indent="lg:pl-[88px]"
-                        extra={<DraftPanel jobId={job.id} />}
+                        extra={<DraftPanel jobId={job.id} estimates={estimates} questionsOn={questionsOn} />}
                         summaryClassName="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] [&::-webkit-details-marker]:hidden"
                         summary={
                           <>

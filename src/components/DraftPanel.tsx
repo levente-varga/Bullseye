@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { draftCv, draftLetter, getDrafts, saveDraft, type DraftResult } from "@/app/(app)/actions";
 import { Notice } from "@/components/Notice";
+import { Price } from "@/components/Price";
+import type { Estimate } from "@/lib/estimates";
 import { formatCareerDate } from "@/lib/career-schema";
 import type { CvDraft, DraftRow, LetterDraft, LetterQA } from "@/lib/draft-types";
 import { DRAFT_LANGUAGES } from "@/lib/types";
@@ -12,7 +14,14 @@ import { DRAFT_LANGUAGES } from "@/lib/types";
  * the row opens. Each card: make or remake the draft, download the PDF, and edit the text.
  * A cover letter may first ask 1-2 questions (Profile → Drafts), answered right here.
  */
-export function DraftPanel({ jobId }: { jobId: string }) {
+export interface DraftEstimates {
+  cv: Estimate;
+  /** The 1-2 questions before a letter (when they're on). */
+  questions: Estimate;
+  letter: Estimate;
+}
+
+export function DraftPanel({ jobId, estimates, questionsOn }: { jobId: string; estimates: DraftEstimates; questionsOn: boolean }) {
   const [drafts, setDrafts] = useState<DraftRow[] | null>(null);
   const [result, setResult] = useState<DraftResult>(null);
   const [busy, setBusy] = useState<"cv" | "cover_letter" | null>(null);
@@ -61,8 +70,13 @@ export function DraftPanel({ jobId }: { jobId: string }) {
             draft={cv}
             busy={busy === "cv"}
             actions={
-              <button type="button" className={cv?.content ? "btn" : "btn-primary"} disabled={!!busy} onClick={() => run("cv", () => draftCv(jobId))}>
-                {busy === "cv" ? "Writing…" : cv?.content ? "Rewrite" : "Draft CV"}
+              <button
+                type="button"
+                className={`${cv?.content ? "btn" : "btn-primary"} inline-flex items-center gap-2`}
+                disabled={!!busy}
+                onClick={() => run("cv", () => draftCv(jobId))}
+              >
+                {busy === "cv" ? "Writing…" : cv?.content ? "Rewrite" : "Draft CV"} <Price estimate={estimates.cv} />
               </button>
             }
           >
@@ -76,11 +90,13 @@ export function DraftPanel({ jobId }: { jobId: string }) {
               (!letter || letter.content) && (
                 <button
                   type="button"
-                  className={letter?.content ? "btn" : "btn-primary"}
+                  className={`${letter?.content ? "btn" : "btn-primary"} inline-flex items-center gap-2`}
                   disabled={!!busy}
                   onClick={() => run("cover_letter", () => draftLetter(jobId))}
                 >
-                  {busy === "cover_letter" ? "Writing…" : letter?.content ? "Rewrite" : "Draft cover letter"}
+                  {busy === "cover_letter" ? "Writing…" : letter?.content ? "Rewrite" : "Draft cover letter"}{" "}
+                  {/* A first press with questions on only asks them; the letter's own estimate shows on "Write letter". */}
+                  <Price estimate={!letter && questionsOn ? estimates.questions : estimates.letter} />
                 </button>
               )
             }
@@ -90,6 +106,7 @@ export function DraftPanel({ jobId }: { jobId: string }) {
                 key={letter.updated_at}
                 answers={letter.answers}
                 busy={busy === "cover_letter"}
+                estimate={estimates.letter}
                 onWrite={(qa) => run("cover_letter", () => draftLetter(jobId, qa))}
               />
             )}
@@ -103,6 +120,7 @@ export function DraftPanel({ jobId }: { jobId: string }) {
                       <Questions
                         answers={letter.answers}
                         busy={busy === "cover_letter"}
+                        estimate={estimates.letter}
                         submitLabel="Rewrite with these"
                         onWrite={(qa) => run("cover_letter", () => draftLetter(jobId, qa))}
                       />
@@ -125,11 +143,7 @@ function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: 
     <section className="border border-[var(--border)] bg-[var(--surface)]">
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2">
         <span className="font-medium">{props.title}</span>
-        {d?.content && (
-          <span className="mono faint text-[11px]">
-            {lang} · ${Number(d.cost_usd).toFixed(3)}
-          </span>
-        )}
+        {d?.content && <span className="mono faint text-[11px]">{lang}</span>}
         <span className="ml-auto flex gap-1.5">
           {d?.content && (
             <a className="btn" href={`/api/drafts/${d.id}/pdf`} target="_blank" rel="noreferrer">
@@ -147,7 +161,7 @@ function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: 
 }
 
 /** The cover letter's questions: answer what you like, then write. Empty answers are fine. */
-function Questions(props: { answers: LetterQA[]; busy: boolean; submitLabel?: string; onWrite: (qa: LetterQA[]) => void }) {
+function Questions(props: { answers: LetterQA[]; busy: boolean; estimate: Estimate; submitLabel?: string; onWrite: (qa: LetterQA[]) => void }) {
   const [qa, setQa] = useState(props.answers);
   return (
     <form
@@ -170,12 +184,17 @@ function Questions(props: { answers: LetterQA[]; busy: boolean; submitLabel?: st
         </label>
       ))}
       <div className="flex gap-1.5">
-        <button type="submit" className="btn-primary" disabled={props.busy}>
-          {props.busy ? "Writing…" : (props.submitLabel ?? "Write letter")}
+        <button type="submit" className="btn-primary inline-flex items-center gap-2" disabled={props.busy}>
+          {props.busy ? "Writing…" : (props.submitLabel ?? "Write letter")} <Price estimate={props.estimate} />
         </button>
         {!props.submitLabel && (
-          <button type="button" className="btn" disabled={props.busy} onClick={() => props.onWrite(qa.map((x) => ({ ...x, answer: "" })))}>
-            Skip questions
+          <button
+            type="button"
+            className="btn inline-flex items-center gap-2"
+            disabled={props.busy}
+            onClick={() => props.onWrite(qa.map((x) => ({ ...x, answer: "" })))}
+          >
+            Skip questions <Price estimate={props.estimate} />
           </button>
         )}
       </div>

@@ -3,10 +3,11 @@ import { Row } from "@/components/FormRow";
 import { SubmitButton } from "@/components/SubmitButton";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
-import { formatUsd } from "@/lib/pricing";
+import { Price } from "@/components/Price";
+import { estimateScoringPerJob } from "@/lib/estimates";
 import { dailySlots, formatNextRun } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
-import { type Criteria, type Member, type Settings } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, SCORING_MODELS, type Criteria, type Member, type Settings } from "@/lib/types";
 import { addExcludeKeyword, reevaluate, saveCriteria } from "../actions";
 
 export default async function CriteriaPage({ searchParams }: PageProps<"/criteria">) {
@@ -18,7 +19,6 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     { data: skips },
     { count: openCount },
     { count: scoredCount },
-    { data: scoredRuns },
     { data: st },
     { data: mem },
   ] = await Promise.all([
@@ -26,19 +26,14 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).in("status", ["new", "scored", "filtered"]),
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
-    // Your recent run shares that scored something: their cost per listing prices a re-score.
-    supabase.from("run_users").select("stats").eq("user_id", me.id).gt("stats->scored", 0).order("run_id").limit(20),
     supabase.from("settings").select("*").single(),
     supabase.from("members").select("*").eq("user_id", me.id).single(),
   ]);
   const settings = st as Settings;
   const member = mem as Member;
-  const spent = (scoredRuns ?? []).reduce(
-    (a, r) => ({ cost: a.cost + (Number(r.stats.cost_usd) || 0), jobs: a.jobs + (Number(r.stats.scored) || 0) }),
-    { cost: 0, jobs: 0 },
-  );
-  const perJob = spent.jobs ? spent.cost / spent.jobs : 0.0005;
-  const rescoreCost = (scoredCount ?? 0) * perJob;
+  // Re-scoring them all: scoring one job in your last runs, priced at the current scoring model.
+  const perJob = await estimateScoringPerJob(supabase, me.id, SCORING_MODELS.find((m) => m.id === settings.scoring_model)?.id ?? DEFAULT_SCORING_MODEL);
+  const rescoreEstimate = { ...perJob, usd: (scoredCount ?? 0) * perJob.usd };
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
   // A $0 cap (per run or per 24h) stops all scoring for this person.
@@ -178,7 +173,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                 <label className="flex items-start gap-2">
                   <input type="checkbox" name="rescore" className="mt-0.5" />
                   <span className="muted">
-                    Re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones too (~<span className="mono text-[var(--fg)]">{formatUsd(rescoreCost)}</span>).
+                    Re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones too <Price estimate={rescoreEstimate} />.
                     They keep their score in the Inbox until the new one arrives, and go first.
                   </span>
                 </label>

@@ -633,7 +633,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
   console.log(`[${p.email}] scoring ${pending.length} listings with ${model}, budget $${budget.toFixed(4)}`);
   let scored = 0;
   let errors = 0;
-  const spend = { cost: 0, tokensIn: 0, tokensOut: 0 };
+  const spend = { cost: 0, tokensIn: 0, tokensOut: 0, cacheWrite: 0, cacheRead: 0 };
 
   const queue = [...pending];
   await Promise.all(
@@ -649,6 +649,8 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
           runSpend.total += cost;
           spend.tokensIn += usage.input + usage.cacheWrite + usage.cacheRead;
           spend.tokensOut += usage.output;
+          spend.cacheWrite += usage.cacheWrite;
+          spend.cacheRead += usage.cacheRead;
           await must(
             db
               .from("matches")
@@ -682,6 +684,9 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
     cost_usd: Math.round(spend.cost * 1e6) / 1e6,
     tokens_in: spend.tokensIn,
     tokens_out: spend.tokensOut,
+    // Parts of tokens_in: cost estimates price them at the current model (src/lib/estimates.ts).
+    tokens_cache_write: spend.cacheWrite,
+    tokens_cache_read: spend.cacheRead,
   };
 }
 
