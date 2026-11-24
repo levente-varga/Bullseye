@@ -167,7 +167,6 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
                 <SubmitButton className="btn">Restore</SubmitButton>
               </form>
             )}
-            {!skipped && <RescoreButton id={job.id} />}
             <ExpandToggle />
           </div>
           </>
@@ -234,6 +233,9 @@ function DecisionPanel({ id }: { id: string }) {
       </form>
       <div className="border-t border-[var(--border)] pt-4">
         <SkipForm id={id} />
+      </div>
+      <div className="border-t border-[var(--border)] pt-4">
+        <RescoreButton id={id} />
       </div>
     </div>
   );

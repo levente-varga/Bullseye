@@ -1,44 +1,27 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { rescoreJob, type RescoreResult } from "@/app/(app)/actions";
 import { IconRefresh } from "./icons";
 
 /**
- * Re-scores one Inbox job now: filters with today's criteria, then a fresh AI score.
- * Sits in the row's <summary>, so the click mustn't open or close the row.
+ * Re-scores one Inbox job now (in its opened row): filters with today's criteria, then a
+ * fresh AI score. The row's reasoning reloads once the new score is in.
  */
 export function RescoreButton({ id }: { id: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<RescoreResult | null>(null);
 
-  useEffect(() => {
-    if (result?.tone !== "ok") return;
-    const t = setTimeout(() => setResult(null), 5000);
-    return () => clearTimeout(t);
-  }, [result]);
-
   return (
-    <span className="inline-flex items-center gap-1.5">
-      {result && (
-        <span
-          role="status"
-          className={`mono whitespace-nowrap text-[12px] ${result.tone === "ok" ? "muted" : "text-[var(--bad)]"}`}
-          title={result.message}
-        >
-          {result.short}
-        </span>
-      )}
+    <div className="space-y-2">
+      <div className="eyebrow">Score out of date?</div>
       <button
         type="button"
-        className="btn btn-icon"
-        title="Re-score this job now: your current filters, career and preferences"
+        className="btn inline-flex items-center gap-1.5"
         disabled={pending}
-        onClick={(e) => {
-          e.preventDefault(); // a button in a <summary> would toggle the row
-          e.stopPropagation();
+        onClick={() => {
           setResult(null);
           start(async () => {
             const r = await rescoreJob(id);
@@ -48,8 +31,15 @@ export function RescoreButton({ id }: { id: string }) {
         }}
       >
         <IconRefresh className={pending ? "animate-spin" : undefined} />
-        <span className="sr-only">{pending ? "Re-scoring…" : "Re-score this job"}</span>
+        {pending ? "Re-scoring…" : "Re-score now"}
       </button>
-    </span>
+      {result ? (
+        <p role="status" className={`text-[12px] ${result.tone === "ok" ? "muted" : "text-[var(--bad)]"}`}>
+          {result.message}
+        </p>
+      ) : (
+        <p className="faint text-[12px]">Filters and scores this job again with your current criteria, career and past decisions.</p>
+      )}
+    </div>
   );
 }
