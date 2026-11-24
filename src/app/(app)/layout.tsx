@@ -13,7 +13,7 @@ function Wordmark() {
       <IconBullseye width={18} height={18} className="text-[var(--accent-strong)]" />
       {/* The version shares the wordmark's baseline (its box bottom would sit at the "y" tail). */}
       <span className="flex items-baseline gap-2">
-        <span className="serif text-[1.35rem] leading-none tracking-tight">bullseye</span>
+        <span className="serif text-[1.35rem] leading-none tracking-tight">Bullseye</span>
         <span className="mono faint text-[11px] leading-none" title="Bullseye version">
           v{pkg.version}
         </span>
