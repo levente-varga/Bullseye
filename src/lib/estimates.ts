@@ -89,6 +89,7 @@ export async function estimateScoringPerJob(supabase: SupabaseClient, userId: st
 /** "~$0.02", "~$0.0008", "~$1.40"; "≈" when it isn't from the person's own history. */
 export function formatEstimate(e: Estimate): string {
   const v = e.usd;
-  const text = v >= 1 ? v.toFixed(2) : v > 0 ? String(Number(v.toPrecision(2))) : "0";
+  // Cents from 10 cents up ("$0.70", "$1.40"); below that two significant figures ("$0.0021").
+  const text = v >= 0.1 ? v.toFixed(2) : v > 0 ? v.toPrecision(2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") : "0";
   return `${e.guessed ? "≈" : "~"}$${text}`;
 }
