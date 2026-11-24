@@ -101,6 +101,12 @@ export const IconRefresh = (p: SVGProps<SVGSVGElement>) => (
     <path d="M13 8a5 5 0 1 1-1.46-3.54M13 2.5v2.5h-2.5" />
   </svg>
 );
+/** Delete: a bin with a lid. */
+export const IconTrash = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.75 6.5v4.5M9.25 6.5v4.5" />
+  </svg>
+);
 export const IconPencil = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5zM8.5 4.5l3 3" />

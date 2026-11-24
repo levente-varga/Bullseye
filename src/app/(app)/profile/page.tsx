@@ -66,7 +66,8 @@ export default async function ProfilePage() {
 
         <section id="drafts" className="scroll-mt-6">
           <SectionHeader title="Drafts" actions={<span className="faint">how CV and cover letter drafts come out</span>} />
-          <div className="grid gap-6 lg:grid-cols-2">
+          {/* min-w-0: grid items otherwise grow to their widest content (the file picker) on phones. */}
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
             <Panel title="Photo">
               <PhotoForm photoUrl={photoUrl} />
             </Panel>
