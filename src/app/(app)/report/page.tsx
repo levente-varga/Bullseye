@@ -530,6 +530,7 @@ const AI_TASKS: Record<string, string> = {
   career_import: "CV import into the career",
   cv_draft: "CV draft",
   cover_letter: "Cover letter draft",
+  rescore: "Single-job re-score",
 };
 
 /** Bookkeeping counters, shown under "details" (with their labels), in this order. */

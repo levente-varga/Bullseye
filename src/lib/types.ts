@@ -517,6 +517,7 @@ export interface Job {
   status_changed_at: string;
   filter_reason: string | null;
   score: number | null;
+  scored_at?: string | null;
   score_summary: string | null;
   score_pros: string[] | null;
   score_cons: string[] | null;
@@ -535,7 +536,7 @@ export interface Job {
  */
 export const JOB_LIST_COLUMNS =
   "id, source_id, title, company, location, remote, url, compensation, first_seen_at, status, status_changed_at, " +
-  "score, thin, applied_at, followed_up_at";
+  "score, scored_at, thin, applied_at, followed_up_at";
 
 export interface JobDetails {
   url: string;

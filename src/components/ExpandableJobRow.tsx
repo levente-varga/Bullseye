@@ -22,20 +22,24 @@ export function ExpandableJobRow(props: {
   indent?: string;
   /** A full-width block under the reasoning (e.g. the Pipeline's drafts). Mounted when the row opens. */
   extra?: ReactNode;
+  /** Changes when the reasoning does (e.g. scored_at after a re-score): an open row reloads it. */
+  version?: string | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [details, setDetails] = useState<JobDetails | null | undefined>(undefined);
+  const [loaded, setLoaded] = useState<{ version?: string | null; details: JobDetails | null } | null>(null);
+  const details = loaded && loaded.version === props.version ? loaded.details : undefined;
 
   useEffect(() => {
     if (!open || details !== undefined) return;
     let cancelled = false;
+    const version = props.version;
     getJobDetails(props.id).then((d) => {
-      if (!cancelled) setDetails(d);
+      if (!cancelled) setLoaded({ version, details: d });
     });
     return () => {
       cancelled = true;
     };
-  }, [open, details, props.id]);
+  }, [open, details, props.id, props.version]);
 
   return (
     <details className="group" onToggle={(e) => setOpen(e.currentTarget.open)}>
