@@ -5,6 +5,7 @@ import { IconExternal } from "@/components/icons";
 import { PendingBar } from "@/components/PendingBar";
 import { Segmented } from "@/components/Segmented";
 import { SubmitButton } from "@/components/SubmitButton";
+import { RescoreButton } from "@/components/RescoreButton";
 import { SkipForm } from "@/components/SkipForm";
 import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
 import { ago, pad2 } from "@/lib/time";
@@ -141,6 +142,7 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
         id={job.id}
         url={job.url}
         side={skipped ? undefined : <DecisionPanel id={job.id} />}
+        version={job.scored_at}
         summaryClassName={`grid cursor-pointer list-none grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[28px_72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
         summary={
           <>
@@ -165,6 +167,7 @@ function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: bo
                 <SubmitButton className="btn">Restore</SubmitButton>
               </form>
             )}
+            {!skipped && <RescoreButton id={job.id} />}
             <ExpandToggle />
           </div>
           </>
