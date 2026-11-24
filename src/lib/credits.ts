@@ -35,8 +35,10 @@ export interface CreditSeries {
 
 const DAY = 86_400_000;
 const HALF_LIFE_DAYS = 2;
-/** A day's spend counts at most this many times the typical (median) day of the past week. */
+/** A day's spend counts at most this many times the median of the last SPIKE_WINDOW_DAYS days. */
 const SPIKE_CAP = 2;
+/** Short, so a lasting rise counts in full once it's two of the last three days. */
+const SPIKE_WINDOW_DAYS = 3;
 
 /** Midnight UTC of the given time's day: a top-up counts for its whole day, so that day's runs are included. */
 export const dayStart = (iso: string) => {
@@ -72,7 +74,8 @@ export function buildSeries(topUps: TopUp[], runs: CostedRun[], now: number): Cr
   // observed span (since the first top-up) makes it a true per-day rate: with steady
   // spend it equals the plain average, and days with no runs pull it down.
   // A one-off spike (a backlog scored after adding sources) isn't a trend: each day's
-  // spend is trimmed to SPIKE_CAP times the median day of the past week.
+  // spend is trimmed to SPIKE_CAP times the median of the last 3 days: a single
+  // high day is trimmed, two in a row are the new normal.
   const tau = (HALF_LIFE_DAYS * DAY) / Math.LN2;
   const span = Math.max(DAY, now - start); // at least a day, so one run doesn't explode the rate
   const inRange = runs.filter((r) => +new Date(r.at) >= start && +new Date(r.at) <= now);
@@ -82,8 +85,8 @@ export function buildSeries(topUps: TopUp[], runs: CostedRun[], now: number): Cr
     const d = dayOf(+new Date(r.at));
     perDayTotal.set(d, (perDayTotal.get(d) ?? 0) + r.cost_usd);
   }
-  const week = Array.from({ length: Math.min(7, Math.ceil(span / DAY)) }, (_, d) => perDayTotal.get(d) ?? 0).sort((a, b) => a - b);
-  const median = week.length ? (week[(week.length - 1) >> 1] + week[week.length >> 1]) / 2 : 0;
+  const recent = Array.from({ length: Math.min(SPIKE_WINDOW_DAYS, Math.ceil(span / DAY)) }, (_, d) => perDayTotal.get(d) ?? 0).sort((a, b) => a - b);
+  const median = recent.length ? (recent[(recent.length - 1) >> 1] + recent[recent.length >> 1]) / 2 : 0;
   const cap = median > 0 ? SPIKE_CAP * median : Infinity;
   let weighted = 0;
   for (const r of inRange) {
