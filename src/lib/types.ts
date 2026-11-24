@@ -395,7 +395,25 @@ export interface Profile {
   /** The structured career (lib/career-schema.ts): what the scorer reads; null until filled in. */
   career: import("./career-schema").Career | null;
   career_updated_at: string | null;
+  /** The photo in the private "photos" bucket, or null. */
+  photo_path: string | null;
+  /** Language of CV and cover letter drafts. */
+  draft_language: DraftLanguage;
+  /** Put the photo on CVs. */
+  cv_photo: boolean;
+  cv_length: "one_page" | "two_pages";
+  /** Ask 1-2 questions about the job before writing a cover letter. */
+  letter_questions: boolean;
 }
+
+/** Languages drafts can be written in (section headings are translated in code). */
+export const DRAFT_LANGUAGES = [
+  { id: "en", label: "English" },
+  { id: "sv", label: "Swedish" },
+  { id: "de", label: "German" },
+  { id: "hu", label: "Hungarian" },
+] as const;
+export type DraftLanguage = (typeof DRAFT_LANGUAGES)[number]["id"];
 
 /** One person's search criteria (the shared schedule and model are in Settings). */
 export interface Criteria {
