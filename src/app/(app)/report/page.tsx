@@ -393,8 +393,8 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                       <th className="w-24">When</th>
                       <th className="w-24">Kind</th>
                       <th className="w-20">Took</th>
-                      <th className="w-24 text-right">Cost</th>
                       <th>Result</th>
+                      <th className="w-24 text-right">Cost</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -412,6 +412,15 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                             </span>
                           </td>
                           <td className="mono muted text-[12px] max-md:order-3" data-label="Took">{took == null ? "…" : took < 60 ? `${took}s` : `${Math.round(took / 60)}m`}</td>
+                          <td className="text-[12px] max-md:order-5 max-md:w-full md:max-w-0">
+                            {r.error ? (
+                              <ErrorDetails error={r.error} />
+                            ) : !r.finished_at ? (
+                              <span className="muted">running…</span>
+                            ) : (
+                              <RunResult run={r} mine={r.mine} />
+                            )}
+                          </td>
                           <td
                             className="mono text-right text-[12px] max-md:order-4 max-md:ml-auto"
                             title={
@@ -430,15 +439,6 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
                           >
                             {/* Only runs that used AI show a cost; the rest (digests, nothing to score) a dash. */}
                             {r.stats.cost_usd > 0 ? formatRunCost(r.stats.cost_usd) : <span className="faint">–</span>}
-                          </td>
-                          <td className="text-[12px] max-md:order-5 max-md:w-full md:max-w-0">
-                            {r.error ? (
-                              <ErrorDetails error={r.error} />
-                            ) : !r.finished_at ? (
-                              <span className="muted">running…</span>
-                            ) : (
-                              <RunResult run={r} mine={r.mine} />
-                            )}
                           </td>
                         </tr>
                       );
@@ -530,6 +530,7 @@ const AI_TASKS: Record<string, string> = {
   career_import: "CV import into the career",
   cv_draft: "CV draft",
   cover_letter: "Cover letter draft",
+  rescore: "Single-job re-score",
 };
 
 /** Bookkeeping counters, shown under "details" (with their labels), in this order. */

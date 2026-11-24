@@ -7,7 +7,8 @@ import { withDefaults } from "@/lib/career-schema";
 import { extractPdfText, MAX_CV_BYTES } from "@/lib/cv";
 import type { CvDraft, DraftRow, LetterDraft, LetterQA } from "@/lib/draft-types";
 import { generateCv, generateLetter, letterQuestions, type DraftJob } from "@/lib/drafts";
-import type { TokenUsage } from "@/lib/pricing";
+import { costUsd, type TokenUsage } from "@/lib/pricing";
+import { buildSystemPrompt, resolveModel, scoreJob, type FeedbackExample } from "@/lib/scoring";
 import { fetchBoard, locationNeedsDetail } from "@/lib/ats";
 import { dedupeKey, detectAts } from "@/lib/dedupe";
 import { detectSource } from "@/lib/detect-source";
@@ -795,6 +796,85 @@ export async function saveMemberDefaults(form: FormData) {
     ).error,
   );
   revalidatePath("/admin");
+}
+
+// --- Re-score one job ---------------------------------------------------------------------
+
+export type RescoreResult = { tone: "ok" | "bad"; message: string };
+
+/**
+ * Re-evaluates one Inbox job from scratch, right away (not on the next run): the hard
+ * filters with today's criteria, then a fresh AI score with today's career, preferences
+ * and past decisions. A job that no longer passes the filters leaves the Inbox as
+ * filtered. The cost is recorded as an AI task ("rescore").
+ */
+export async function rescoreJob(jobId: string): Promise<RescoreResult> {
+  const bad = (message: string) => ({ tone: "bad" as const, message });
+  if (!process.env.ANTHROPIC_API_KEY) return bad("The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.");
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  if (!me.isAdmin) {
+    const { data: bal } = await supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle();
+    if (Number(bal?.balance_usd ?? 0) <= 0) return bad("Your AI balance is used up. Ask the admin for more credit.");
+  }
+  const [{ data: job }, { data: c }, { data: p }, { data: st }, { data: fb }] = await Promise.all([
+    supabase.from("my_jobs").select("id, url, title, company, location, remote, description, compensation, posted_at, thin, status").eq("id", jobId).single(),
+    supabase.from("criteria").select("*").single(),
+    supabase.from("profile").select("*").single(),
+    supabase.from("settings").select("scoring_model").single(),
+    supabase.from("feedback").select("decision, reasons, note, jobs(title, company)").order("created_at", { ascending: false }).limit(40),
+  ]);
+  if (!job || !["new", "scored"].includes(job.status)) return bad("Only jobs in the Inbox can be re-scored.");
+  const profile = p as Profile | null;
+  if (!c || !profile || !withDefaults(profile.career)) return bad("Fill in your career on the Profile page first: the scorer reads it.");
+  const criteria = c as Criteria;
+
+  // 1. The filters, as the worker runs them.
+  const noText = !job.description || job.thin;
+  const reason = hardFilter(job as unknown as FetchedJob, criteria, {
+    skipKeywordCheck: noText,
+    locationPending: !job.description && locationNeedsDetail(job.url),
+  });
+  if (reason) {
+    check((await supabase.from("matches").update({ status: "filtered", filter_reason: reason, ...RESET_SCORE }).eq("job_id", jobId)).error);
+    revalidatePath("/", "layout");
+    return { tone: "ok", message: `No longer passes your filters (${reason}), so it left the Inbox.` };
+  }
+
+  // 2. A fresh score, with the same prompt and model as the worker.
+  type FbRow = { decision: "approve" | "skip"; reasons: string[]; note: string | null; jobs: { title: string; company: string } | { title: string; company: string }[] | null };
+  const feedback: FeedbackExample[] = ((fb ?? []) as FbRow[]).flatMap((r) => {
+    const j = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs;
+    return j ? [{ title: j.title, company: j.company, decision: r.decision, reasons: r.reasons, note: r.note }] : [];
+  });
+  const model = resolveModel(st?.scoring_model);
+  try {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const { score: s, model: answeredBy, usage } = await scoreJob(new Anthropic(), model, buildSystemPrompt(profile, criteria, feedback), job as unknown as FetchedJob);
+    const cost = costUsd(answeredBy, usage);
+    await recordAiUsage(supabase, { kind: "rescore", model: answeredBy, usage, costUsd: cost, detail: `${job.title} @ ${job.company}` });
+    check(
+      (
+        await supabase
+          .from("matches")
+          .update({
+            status: "scored",
+            filter_reason: null,
+            score: s.score,
+            score_checks: s.checks,
+            score_summary: s.summary,
+            score_pros: s.pros.slice(0, 6),
+            score_cons: s.cons.slice(0, 6),
+            scored_at: new Date().toISOString(),
+          })
+          .eq("job_id", jobId)
+      ).error,
+    );
+    revalidatePath("/", "layout");
+    return { tone: "ok", message: `Re-scored: ${s.score}. Cost $${cost.toFixed(4)}.` };
+  } catch (e) {
+    return bad(`Re-scoring failed: ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 // --- CV and cover letter drafts ---------------------------------------------------------
