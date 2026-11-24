@@ -57,7 +57,7 @@ export function RowMenu({ items, label = "More actions" }: { items: RowMenuItem[
         <IconMore />
       </button>
       {open && (
-        <div role="menu" className="panel absolute top-full right-0 z-20 mt-1 min-w-[11rem] py-1 shadow-lg">
+        <div role="menu" className="panel absolute top-full z-20 mt-1 min-w-[11rem] py-1 shadow-lg max-sm:left-0 sm:right-0">
           {items.map((item) => (
             <button
               key={item.label}
