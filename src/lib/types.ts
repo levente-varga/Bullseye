@@ -319,7 +319,7 @@ export const ATS_INFO: Record<
     blurb: "Startups in Berlin",
   },
   landingjobs: {
-    fetch: "paged",
+    fetch: "feed",
     label: "Landing.jobs (aggregator)",
     slugLabel: "—",
     slugExample: "landing.jobs",
@@ -521,6 +521,8 @@ export const JOB_LIST_COLUMNS =
 
 export interface JobDetails {
   url: string;
+  /** Checklist ratings (role, skills, level, location, taste), or null for jobs scored before checklists. */
+  score_checks: { key: string; rating: number; note: string }[] | null;
   score_summary: string | null;
   score_pros: string[] | null;
   score_cons: string[] | null;

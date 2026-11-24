@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { getJobDetails } from "@/app/(app)/actions";
 import type { JobDetails } from "@/lib/types";
 import { IconChevronDown, IconExternal } from "./icons";
+import { ScoreChecks } from "./ScoreChecks";
 
 /**
  * A job row that opens to show the scorer's reasoning. Only the summary line
@@ -50,6 +51,7 @@ export function ExpandableJobRow(props: {
               </div>
             ) : (
               <>
+                {details?.score_checks?.length ? <ScoreChecks checks={details.score_checks} /> : null}
                 {details?.score_summary && <p className="text-[13px] leading-relaxed">{details.score_summary}</p>}
                 <div className="grid gap-3 text-[13px] sm:grid-cols-2">
                   <ul className="space-y-1">
