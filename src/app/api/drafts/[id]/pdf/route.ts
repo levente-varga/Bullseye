@@ -34,7 +34,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext<"/api/drafts/[id]
 
   // "Levente Varga – CV – Larian.pdf"; the ASCII fallback for older clients.
   const name = [p.full_name || "Draft", draft.kind === "cv" ? "CV" : "Cover letter", job?.company].filter(Boolean).join(" – ") + ".pdf";
-  const ascii = name.normalize("NFKD").replace(/[^\x20-\x7e]/g, "").replace(/"/g, "");
+  const ascii = name.replace(/–/g, "-").normalize("NFKD").replace(/[^\x20-\x7e]/g, "").replace(/"/g, "");
   return new Response(new Uint8Array(pdf), {
     headers: {
       "Content-Type": "application/pdf",
