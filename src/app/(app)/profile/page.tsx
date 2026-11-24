@@ -1,11 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { CareerSection } from "@/components/CareerSection";
+import { PhotoForm } from "@/components/PhotoForm";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
 import { withDefaults } from "@/lib/career-schema";
 import { pad2 } from "@/lib/time";
-import { SCORING_MODELS, type Profile } from "@/lib/types";
-import { deleteAnswer, saveAnswer, saveProfile } from "../actions";
+import { DRAFT_LANGUAGES, SCORING_MODELS, type Profile } from "@/lib/types";
+import { deleteAnswer, saveAnswer, saveDraftSettings, saveProfile } from "../actions";
 
 export default async function ProfilePage() {
   const supabase = await createClient();
@@ -20,6 +21,10 @@ export default async function ProfilePage() {
   const profile = p as Profile;
   // Careers saved before projects/certifications/other existed get them empty.
   const career = withDefaults(profile.career);
+  // The photo is private: a signed link for this page view.
+  const photoUrl = profile.photo_path
+    ? ((await supabase.storage.from("photos").createSignedUrl(profile.photo_path, 3600)).data?.signedUrl ?? null)
+    : null;
 
   return (
     <>
@@ -58,6 +63,49 @@ export default async function ProfilePage() {
 
           <SubmitButton className="btn-primary" done="Saved">Save details & links</SubmitButton>
         </form>
+
+        <section id="drafts" className="scroll-mt-6">
+          <SectionHeader title="Drafts" actions={<span className="faint">how CV and cover letter drafts come out</span>} />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Panel title="Photo">
+              <PhotoForm photoUrl={photoUrl} />
+            </Panel>
+            <Panel title="Draft settings">
+              <form action={saveDraftSettings} className="space-y-3 p-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="field">
+                    <span className="label">Language</span>
+                    <select name="draft_language" defaultValue={profile.draft_language} className="input">
+                      {DRAFT_LANGUAGES.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span className="label">CV length</span>
+                    <select name="cv_length" defaultValue={profile.cv_length} className="input">
+                      <option value="one_page">One page</option>
+                      <option value="two_pages">Up to two pages</option>
+                    </select>
+                  </label>
+                </div>
+                <label className="flex items-start gap-2 text-[13px]">
+                  <input type="checkbox" name="cv_photo" defaultChecked={profile.cv_photo} className="mt-0.5" />
+                  <span className="muted">
+                    Photo on CVs{!photoUrl && <span className="faint"> (upload one first)</span>}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-[13px]">
+                  <input type="checkbox" name="letter_questions" defaultChecked={profile.letter_questions} className="mt-0.5" />
+                  <span className="muted">Ask me 1–2 questions about the job before writing a cover letter</span>
+                </label>
+                <SubmitButton className="btn-primary" done="Saved">Save draft settings</SubmitButton>
+              </form>
+            </Panel>
+          </div>
+        </section>
 
         <section id="career" className="scroll-mt-6">
           <SectionHeader title="Career" actions={<span className="faint">what the scorer reads, and what drafts are built from</span>} />

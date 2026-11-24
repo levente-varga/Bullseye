@@ -15,6 +15,7 @@ import {
   ATS_INFO,
   FETCH_MODES,
   DEFAULT_SCORING_MODEL,
+  DRAFT_LANGUAGES,
   SCORING_MODELS,
   WATCH_INTERVALS,
   type Ats,
@@ -480,6 +481,63 @@ export async function saveProfile(form: FormData) {
         .eq("user_id", me.id)
     ).error,
   );
+  revalidatePath("/profile");
+}
+
+/** Draft settings (Profile → Drafts): language, CV photo and length, cover letter questions. */
+export async function saveDraftSettings(form: FormData) {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  const language = str(form, "draft_language");
+  const length = str(form, "cv_length");
+  check(
+    (
+      await supabase
+        .from("profile")
+        .update({
+          draft_language: DRAFT_LANGUAGES.some((l) => l.id === language) ? language : "en",
+          cv_photo: form.get("cv_photo") === "on",
+          cv_length: length === "two_pages" ? "two_pages" : "one_page",
+          letter_questions: form.get("letter_questions") === "on",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", me.id)
+    ).error,
+  );
+  revalidatePath("/profile");
+}
+
+export type PhotoResult = { tone: "ok" | "bad"; message: string; at: number } | null;
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
+
+/** Uploads the profile photo (Profile → Photo, useActionState) to <user id>/photo.<ext>, replacing any earlier one. */
+export async function uploadPhoto(_prev: PhotoResult, form: FormData): Promise<PhotoResult> {
+  const at = Date.now();
+  const bad = (message: string) => ({ tone: "bad" as const, message, at });
+  const file = form.get("photo");
+  if (!(file instanceof File) || file.size === 0) return bad("Choose an image first.");
+  const ext = file.type === "image/png" ? "png" : file.type === "image/jpeg" ? "jpg" : null;
+  if (!ext) return bad("Only JPEG and PNG images are supported.");
+  if (file.size > MAX_PHOTO_BYTES) return bad("That image is over 2 MB.");
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  const { data: p } = await supabase.from("profile").select("photo_path").eq("user_id", me.id).single();
+  const path = `${me.id}/photo.${ext}`;
+  const up = await supabase.storage.from("photos").upload(path, file, { upsert: true, contentType: file.type });
+  if (up.error) return bad(`Upload failed: ${up.error.message}`);
+  // A PNG replacing a JPEG (or the other way round) leaves the old file behind: remove it.
+  if (p?.photo_path && p.photo_path !== path) await supabase.storage.from("photos").remove([p.photo_path]);
+  check((await supabase.from("profile").update({ photo_path: path, updated_at: new Date().toISOString() }).eq("user_id", me.id)).error);
+  revalidatePath("/profile");
+  return { tone: "ok", message: "Photo saved.", at };
+}
+
+export async function removePhoto() {
+  const supabase = await db();
+  const me = await currentUser(supabase);
+  const { data: p } = await supabase.from("profile").select("photo_path").eq("user_id", me.id).single();
+  if (p?.photo_path) check((await supabase.storage.from("photos").remove([p.photo_path])).error);
+  check((await supabase.from("profile").update({ photo_path: null, updated_at: new Date().toISOString() }).eq("user_id", me.id)).error);
   revalidatePath("/profile");
 }
 
