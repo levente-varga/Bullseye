@@ -531,6 +531,7 @@ const AI_TASKS: Record<string, string> = {
   cv_draft: "CV draft",
   cover_letter: "Cover letter draft",
   rescore: "Single-job re-score",
+  letter_questions: "Cover letter questions",
 };
 
 /** Bookkeeping counters, shown under "details" (with their labels), in this order. */

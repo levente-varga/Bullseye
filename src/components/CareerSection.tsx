@@ -5,7 +5,10 @@ import { careerFromJson, careerFromPdf, saveCareer, type CareerResult } from "@/
 import { EMPTY_CAREER, formatCareerDate, type Career, type Education, type Experience, type Project } from "@/lib/career-schema";
 import { Menu } from "@/components/Menu";
 import { Notice } from "@/components/Notice";
+import { Price } from "@/components/Price";
 import { SubmitButton } from "@/components/SubmitButton";
+import type { Estimate } from "@/lib/estimates";
+import Link from "next/link";
 import { Empty, Panel, Pill } from "@/components/ui";
 
 const NEW_EXPERIENCE: Experience = { title: "", company: "", location: "", start: "", end: "", kind: "", summary: "", highlights: [], skills: [] };
@@ -20,7 +23,7 @@ const REPLACE_WARNING = "This replaces your whole career, including anything you
  * PDF isn't kept), restored from an exported JSON file, or entered by hand; shown as
  * lists and edited here. Export downloads it as JSON, e.g. as a backup before a PDF import.
  */
-export function CareerSection(props: { career: Career | null; updatedAt: string | null; modelLabel: string }) {
+export function CareerSection(props: { career: Career | null; updatedAt: string | null; importEstimate: Estimate; isAdmin: boolean }) {
   const career = props.career;
   const [editing, setEditing] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -120,10 +123,19 @@ export function CareerSection(props: { career: Career | null; updatedAt: string 
           required
           className="max-w-full min-w-0 text-[13px] file:mr-3 file:cursor-pointer file:border file:border-[var(--border-strong)] file:bg-[var(--surface)] file:px-2.5 file:py-1 file:text-[13px] file:text-[var(--fg)]"
         />
-        <SubmitButton className="btn-primary">Read PDF</SubmitButton>
+        <SubmitButton className="btn-primary inline-flex items-center gap-2">
+          Read PDF <Price estimate={props.importEstimate} />
+        </SubmitButton>
         <p className="hint w-full">
-          {props.modelLabel} reads it and lists only what it says{props.modelLabel.includes("Haiku") ? ", for under a cent" : ""}. The PDF
-          isn&apos;t kept.{career ? " Replaces the career below." : ""}
+          Read by the{" "}
+          {props.isAdmin ? (
+            <Link href="/settings" className="link">
+              writing model
+            </Link>
+          ) : (
+            "writing model (set by the admin)"
+          )}
+          , using only what the CV says. The PDF isn&apos;t kept.{career ? " Replaces the career below." : ""}
         </p>
       </form>
     </Panel>

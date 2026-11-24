@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { removePhoto, uploadPhoto, type PhotoResult } from "@/app/(app)/actions";
+import { IconTrash } from "@/components/icons";
 import { SubmitButton } from "@/components/SubmitButton";
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -61,8 +62,15 @@ export function PhotoForm({ photoUrl }: { photoUrl: string | null }) {
             {photoUrl ? "Replace" : "Upload"}
           </SubmitButton>
           {/* Always there (disabled without a photo), so uploading doesn't reflow the row. */}
-          <SubmitButton formAction={removePhoto} formNoValidate disabled={!photoUrl} className="btn btn-danger">
-            Remove
+          <SubmitButton
+            formAction={removePhoto}
+            formNoValidate
+            disabled={!photoUrl}
+            className="btn btn-icon btn-danger"
+            title="Remove the photo"
+            aria-label="Remove the photo"
+          >
+            <IconTrash />
           </SubmitButton>
         </div>
         <Status fileError={fileError} result={result} />
