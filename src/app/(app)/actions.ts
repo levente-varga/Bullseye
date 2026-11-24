@@ -800,8 +800,7 @@ export async function saveMemberDefaults(form: FormData) {
 
 // --- Re-score one job ---------------------------------------------------------------------
 
-/** short: what fits beside the button ("→ 72"); message: the full story, on hover. */
-export type RescoreResult = { tone: "ok" | "bad"; short: string; message: string };
+export type RescoreResult = { tone: "ok" | "bad"; message: string };
 
 /**
  * Re-evaluates one Inbox job from scratch, right away (not on the next run): the hard
@@ -810,7 +809,7 @@ export type RescoreResult = { tone: "ok" | "bad"; short: string; message: string
  * filtered. The cost is recorded as an AI task ("rescore").
  */
 export async function rescoreJob(jobId: string): Promise<RescoreResult> {
-  const bad = (message: string) => ({ tone: "bad" as const, short: "Failed", message });
+  const bad = (message: string) => ({ tone: "bad" as const, message });
   if (!process.env.ANTHROPIC_API_KEY) return bad("The app has no Anthropic API key (ANTHROPIC_API_KEY) yet.");
   const supabase = await db();
   const me = await currentUser(supabase);
@@ -839,7 +838,7 @@ export async function rescoreJob(jobId: string): Promise<RescoreResult> {
   if (reason) {
     check((await supabase.from("matches").update({ status: "filtered", filter_reason: reason, ...RESET_SCORE }).eq("job_id", jobId)).error);
     revalidatePath("/", "layout");
-    return { tone: "ok", short: "Filtered", message: `No longer passes your filters (${reason}), so it left the Inbox.` };
+    return { tone: "ok", message: `No longer passes your filters (${reason}), so it left the Inbox.` };
   }
 
   // 2. A fresh score, with the same prompt and model as the worker.
@@ -872,7 +871,7 @@ export async function rescoreJob(jobId: string): Promise<RescoreResult> {
       ).error,
     );
     revalidatePath("/", "layout");
-    return { tone: "ok", short: `→ ${s.score}`, message: `Re-scored: ${s.score}. Cost $${cost.toFixed(4)}.` };
+    return { tone: "ok", message: `Re-scored: ${s.score}. Cost $${cost.toFixed(4)}.` };
   } catch (e) {
     return bad(`Re-scoring failed: ${e instanceof Error ? e.message : e}`);
   }
