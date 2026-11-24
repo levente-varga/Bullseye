@@ -13,14 +13,16 @@ import { SCORING_MODELS, SKIP_UNAVAILABLE, type Criteria, type FetchedJob, type 
 
 /**
  * Checklist scoring. One holistic 0-100 number clustered on a few favourite values and
- * rarely went above the low 70s, so the model rates each part of the fit 0-10 against
+ * rarely went above the low 70s, so the model rates each part of the fit 0-5 against
  * fixed anchors and the score is computed here: a weighted sum, capped by dealbreakers.
  */
 /** A rating at or below this on role or location makes the job a clear mismatch, whatever else fits. */
-const DEALBREAKER = 2;
+const DEALBREAKER = 1;
+/** Ratings are 0-RATING_MAX. Checks saved before the 0-5 scale have no max and were 0-10. */
+export const RATING_MAX = 5;
 
 const Check = z.object({
-  rating: z.number().int().min(0).max(10),
+  rating: z.number().int().min(0).max(RATING_MAX),
   note: z.string().describe("At most 6 words, concrete: name the skill, place or gap."),
 });
 
@@ -39,6 +41,8 @@ export type ScoreOutput = z.infer<typeof ScoreSchema>;
 export interface ScoreCheck {
   key: CheckKey;
   rating: number;
+  /** The scale's top: 5 now; absent on checks saved on the old 0-10 scale. */
+  max?: number;
   note: string;
 }
 
@@ -65,8 +69,8 @@ export function combine(checks: ScoreCheck[]): number {
     sum += c.weight * r;
     weights += c.weight;
   }
-  let score = weights ? Math.round((sum / weights) * 10) : 0;
-  const low = (k: CheckKey) => (byKey.get(k) ?? 10) <= DEALBREAKER;
+  let score = weights ? Math.round((sum / weights) * (100 / RATING_MAX)) : 0;
+  const low = (k: CheckKey) => (byKey.get(k) ?? RATING_MAX) <= DEALBREAKER;
   if (low("role") || low("location")) score = Math.min(score, 30);
   else if (low("skills") || low("seniority")) score = Math.min(score, 50);
   return score;
@@ -76,7 +80,7 @@ export function toScore(out: ScoreOutput): Score {
   const checks: ScoreCheck[] = [];
   for (const c of CHECKS) {
     const v = out[c.key];
-    if (v) checks.push({ key: c.key, rating: v.rating, note: v.note.trim() });
+    if (v) checks.push({ key: c.key, rating: v.rating, max: RATING_MAX, note: v.note.trim() });
   }
   return { score: combine(checks), checks, summary: out.summary, pros: out.pros, cons: out.cons };
 }
@@ -116,13 +120,13 @@ export function buildSystemPrompt(
     : "(no decisions yet)";
 
   const checks = CHECKS.map((c) => `- ${c.key}: ${c.about}`).join("\n");
-  return `You rate job listings for one candidate, one part of the fit at a time. Rate each part 0-10:
+  return `You rate job listings for one candidate, one part of the fit at a time. Rate each part 0-5:
 ${checks}
 
 Use the whole scale and judge each part on its own, not by the overall impression:
-10 = exactly what the candidate wants or has; 8 = strong, a small gap; 6 = acceptable, clear gaps; 4 = weak; 2 = mismatch; 0 = the opposite of what fits.
+5 = exactly what the candidate wants or has; 4 = strong, a small gap; 3 = acceptable, clear gaps; 2 = weak; 1 = mismatch; 0 = the opposite of what fits.
 Seniority: compare the years and level the listing asks for with the candidate's actual experience (from dates and titles); over- and under-qualified both count against it.
-Location: a remote role restricted to a country or region the candidate is not in is a mismatch, not a remote fit. An unknown location is a 5.
+Location: a remote role restricted to a country or region the candidate is not in is a mismatch, not a remote fit. An unknown location is a 3.
 Taste: treat the candidate's past decisions as the strongest signal; if they repeatedly skipped jobs for a reason, rate listings with that trait low. Give null when nothing in the preferences or decisions bears on this listing.
 Be concrete in notes, pros and cons (name the skill, the location, the seniority gap). Do not invent facts that are not in the listing.
 List only the pros and cons that actually bear on the decision. Their number should follow the listing: a clear match may have one con or none, a thin listing may have one pro. Do not aim for a fixed or balanced count, and do not restate one point in different words to fill the list.
@@ -181,7 +185,7 @@ Company: ${job.company}
 Location: ${job.location || "unknown"}${job.remote ? " (remote possible)" : ""}
 Compensation: ${job.compensation ?? "not stated"}
 
-${job.description || "(No description available: judge on title, company and location only; rate skills and seniority 5 unless the title makes them clear.)"}
+${job.description || "(No description available: judge on title, company and location only; rate skills and seniority 3 unless the title makes them clear.)"}
 </listing>`,
       },
     ],
