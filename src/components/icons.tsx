@@ -23,14 +23,18 @@ export const IconBullseye = (p: SVGProps<SVGSVGElement>) => (
 );
 export const IconInbox = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <path d="M2 9.5h3.5l1 1.5h3l1-1.5H14M2 9.5V13.5h12V9.5M2 9.5L4 3h8l2 6.5" />
+    {/* One closed outline (its corners join), and the tray line ending flat inside the walls. */}
+    <path d="M2 9.5L4 3H12L14 9.5V13.5H2Z" />
+    <path strokeLinecap="butt" d="M2 9.5H5.5L6.5 11H9.5L10.5 9.5H14" />
   </svg>
 );
+/** A pipe tee seen from the side, branch to the right, with flanges on its three ends (lines on whole or half units). */
 export const IconPipeline = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <rect x="2" y="2.5" width="3" height="11" />
-    <rect x="6.5" y="2.5" width="3" height="7.5" />
-    <rect x="11" y="2.5" width="3" height="4.5" />
+    <path d="M3.75 3V13M6.75 3V6.5H12.25M6.75 13V9.5H12.25" />
+    <rect x="2.75" y="1.5" width="5" height="1.5" />
+    <rect x="2.75" y="13" width="5" height="1.5" />
+    <rect x="12.25" y="5.5" width="1.5" height="5" />
   </svg>
 );
 export const IconSliders = (p: SVGProps<SVGSVGElement>) => (
@@ -41,12 +45,12 @@ export const IconSliders = (p: SVGProps<SVGSVGElement>) => (
     <rect x="6" y="6.5" width="3" height="3" />
   </svg>
 );
+/** A globe: sources are the sites jobs come from. */
 export const IconSources = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <rect x="2" y="2" width="5" height="5" />
-    <rect x="9" y="2" width="5" height="5" />
-    <rect x="2" y="9" width="5" height="5" />
-    <rect x="9" y="9" width="5" height="5" />
+    <circle cx="8" cy="8" r="6.5" />
+    <ellipse cx="8" cy="8" rx="2.75" ry="6.5" />
+    <path d="M2 8H14" />
   </svg>
 );
 export const IconUser = (p: SVGProps<SVGSVGElement>) => (
@@ -153,10 +157,10 @@ export const IconCheck = (p: SVGProps<SVGSVGElement>) => (
     <path d="M3 8.5l3.25 3.25L13 5" />
   </svg>
 );
-/** Settings: a cog (eight teeth on a ring, a hole in the middle). */
+/** A cog with six teeth. */
 export const IconSettings = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)} strokeLinejoin="round">
-    <path d="M12.81,6.62 L14.48,6.74 L14.48,9.26 L12.81,9.38 L12.37,10.42 L13.47,11.69 L11.69,13.47 L10.42,12.37 L9.38,12.81 L9.26,14.48 L6.74,14.48 L6.62,12.81 L5.58,12.37 L4.31,13.47 L2.53,11.69 L3.63,10.42 L3.19,9.38 L1.52,9.26 L1.52,6.74 L3.19,6.62 L3.63,5.58 L2.53,4.31 L4.31,2.53 L5.58,3.63 L6.62,3.19 L6.74,1.52 L9.26,1.52 L9.38,3.19 L10.42,3.63 L11.69,2.53 L13.47,4.31 L12.37,5.58Z" />
+    <path d="M6.49,3.34 L6.72,1.42 L9.28,1.42 L9.51,3.34 L11.28,4.36 L13.06,3.60 L14.33,5.82 L12.79,6.98 L12.79,9.02 L14.33,10.18 L13.06,12.40 L11.28,11.64 L9.51,12.66 L9.28,14.58 L6.72,14.58 L6.49,12.66 L4.72,11.64 L2.94,12.40 L1.67,10.18 L3.21,9.02 L3.21,6.98 L1.67,5.82 L2.94,3.60 L4.72,4.36Z" />
     <circle cx="8" cy="8" r="2" />
   </svg>
 );
