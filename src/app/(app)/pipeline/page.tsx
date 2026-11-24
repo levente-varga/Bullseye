@@ -35,10 +35,13 @@ const NEXT: Partial<Record<JobStatus, JobStatus[]>> = {
 
 export default async function PipelinePage() {
   const supabase = await createClient();
-  const [{ data, error }, { data: criteria }] = await Promise.all([
+  const [{ data, error }, { data: criteria }, { data: draftRows }] = await Promise.all([
     supabase.from("my_jobs").select(JOB_LIST_COLUMNS).in("status", PIPELINE_STATUSES).order("status_changed_at", { ascending: false }),
     supabase.from("criteria").select("followup_days").single(),
+    // Written drafts only: a letter that waits for its questions has no content yet.
+    supabase.from("drafts").select("job_id, kind").not("content", "is", null),
   ]);
+  const drafted = new Set((draftRows ?? []).map((d) => `${d.job_id}:${d.kind}`));
   if (error) throw new Error(error.message);
   const jobs = data as unknown as Job[];
   const followupDays = criteria?.followup_days ?? 10;
@@ -48,30 +51,10 @@ export default async function PipelinePage() {
     const last = j.followed_up_at ?? j.applied_at;
     return j.status === "applied" && !!last && now - new Date(last).getTime() > followupMs;
   };
-  const count = (s: JobStatus) => jobs.filter((j) => j.status === s).length;
-  const dueCount = jobs.filter(due).length;
 
   return (
     <>
-      <PageHeader
-        title="Pipeline"
-        meta={
-          <>
-            {PIPELINE_STATUSES.map((s, i) => (
-              <span key={s}>
-                {i > 0 && " · "}
-                <span className="mono text-[var(--fg)]">{count(s)}</span> {LABEL[s].toLowerCase()}
-              </span>
-            ))}
-            {dueCount > 0 && (
-              <span className="text-[var(--warn)]">
-                {" "}
-                · <span className="mono">{dueCount}</span> follow-up{dueCount === 1 ? "" : "s"} due
-              </span>
-            )}
-          </>
-        }
-      />
+      <PageHeader title="Pipeline" />
 
       <div className="space-y-6">
         <AddJobForm />
@@ -98,6 +81,8 @@ export default async function PipelinePage() {
                               <div className="font-medium">{job.title}</div>
                               <div className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px]">
                                 <span>{job.company}</span>
+                                {drafted.has(`${job.id}:cv`) && <Pill tone="muted">CV</Pill>}
+                                {drafted.has(`${job.id}:cover_letter`) && <Pill tone="muted">Cover letter</Pill>}
                                 {job.applied_at && <span className="mono faint">applied {agoText(job.applied_at)}</span>}
                                 {job.followed_up_at && <span className="mono faint">followed up {agoText(job.followed_up_at)}</span>}
                                 {due(job) && (
@@ -145,9 +130,6 @@ export default async function PipelinePage() {
           );
         })}
       </div>
-      <p className="faint mt-4 text-[12px]">
-        Follow-up due: no reply after <span className="mono">{followupDays}</span> days.
-      </p>
     </>
   );
 }

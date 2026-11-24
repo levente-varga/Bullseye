@@ -119,8 +119,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
           <SubmitButton className="btn-primary" done="Saved">Save criteria</SubmitButton>
         </form>
 
-        {/* The schedule and AI budget are shared settings (the admin's Settings page): here
-            just when the next search runs and what this person may spend. */}
+        {/* The schedule is a shared setting (the admin's Settings page): here just when the next search runs. */}
         <p className="hint">
           Daily search{" "}
           {nextDaily === null ? (
@@ -130,9 +129,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
               next <span className="mono text-[var(--fg)]">{formatNextRun(nextDaily, settings.timezone, nowMs())}</span> (
               {settings.timezone.replace(/_/g, " ")})
             </>
-          )}{" "}
-          · your AI budget <span className="mono text-[var(--fg)]">${Number(member.max_run_cost_usd)}</span> per run,{" "}
-          <span className="mono text-[var(--fg)]">${Number(member.max_daily_cost_usd)}</span> per 24h
+          )}
           {me.isAdmin ? (
             <>
               {" "}
