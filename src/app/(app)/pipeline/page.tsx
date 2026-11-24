@@ -121,7 +121,8 @@ export default async function PipelinePage() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5">
+                            {/* On phones the buttons get their own row under the title, as on Sources. */}
+                            <div className="flex items-center gap-1.5 max-sm:w-full">
                               {/* The main move forward; everything else is in the ⋮ menu. */}
                               {(NEXT[status] ?? []).filter(isMain).map((to) => (
                                 <form key={to} action={setStatus}>
