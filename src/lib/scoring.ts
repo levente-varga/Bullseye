@@ -4,7 +4,7 @@ import { z } from "zod";
 import { careerText, withDefaults } from "./career-schema";
 import { CHECKS, type CheckKey } from "./score-checks";
 import type { TokenUsage } from "./pricing";
-import { SCORING_MODELS, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
+import { SCORING_MODELS, SKIP_UNAVAILABLE, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
 
 /**
  * LLM scoring: how well does a listing fit the candidate?
@@ -97,8 +97,15 @@ export function buildSystemPrompt(
   const list = (xs: string[]) => (xs.length ? xs.join(", ") : "(any)");
   // The career (Profile) is the candidate's description; the worker doesn't score without one.
   const career = withDefaults(profile.career);
-  const examples = feedback.length
-    ? feedback
+  // A posting that was gone says nothing about taste: that reason is dropped, and so is a
+  // skip that had no other reason or note. Other skips (even without reasons) still count.
+  const telling = feedback.flatMap((f) => {
+    if (!f.reasons.includes(SKIP_UNAVAILABLE)) return [f];
+    const reasons = f.reasons.filter((r) => r !== SKIP_UNAVAILABLE);
+    return reasons.length || f.note ? [{ ...f, reasons }] : [];
+  });
+  const examples = telling.length
+    ? telling
         .map(
           (f) =>
             `- ${f.decision.toUpperCase()}: "${f.title}" at ${f.company}` +
