@@ -31,10 +31,10 @@ export const IconInbox = (p: SVGProps<SVGSVGElement>) => (
 /** A pipe tee seen from the side, branch to the right, with flanges on its three ends (lines on whole or half units). */
 export const IconPipeline = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
-    <path d="M3.5 3V13M6.5 3V6.5H12M6.5 13V9.5H12" />
-    <rect x="2.5" y="1.5" width="5" height="1.5" />
-    <rect x="2.5" y="13" width="5" height="1.5" />
-    <rect x="12" y="5.5" width="1.5" height="5" />
+    <path d="M4 3V13M7 3V6.5H12.5M7 13V9.5H12.5" />
+    <rect x="3" y="1.5" width="5" height="1.5" />
+    <rect x="3" y="13" width="5" height="1.5" />
+    <rect x="12.5" y="5.5" width="1.5" height="5" />
   </svg>
 );
 export const IconSliders = (p: SVGProps<SVGSVGElement>) => (
