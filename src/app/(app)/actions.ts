@@ -561,6 +561,8 @@ async function recordAiUsage(
     kind: u.kind,
     model: u.model,
     tokens_in: u.usage.input + u.usage.cacheWrite + u.usage.cacheRead,
+    tokens_cache_write: u.usage.cacheWrite,
+    tokens_cache_read: u.usage.cacheRead,
     tokens_out: u.usage.output,
     cost_usd: Math.round(u.costUsd * 1e6) / 1e6,
     detail: u.detail ?? "",
@@ -612,7 +614,7 @@ export async function careerFromPdf(_prev: CareerResult, form: FormData): Promis
     revalidatePath("/", "layout"); // the Inbox says when scoring waits for a career; the Report lists the cost
     return {
       tone: "ok",
-      message: `Filled from ${file.name}: ${career.experiences.length} roles, ${career.education.length} degrees, ${career.projects.length} projects. Cost $${costUsd.toFixed(4)}. Check it below.`,
+      message: `Filled from ${file.name}: ${career.experiences.length} roles, ${career.education.length} degrees, ${career.projects.length} projects. Check it below.`,
       at,
     };
   } catch (e) {
@@ -871,7 +873,7 @@ export async function rescoreJob(jobId: string): Promise<RescoreResult> {
       ).error,
     );
     revalidatePath("/", "layout");
-    return { tone: "ok", message: `Re-scored: ${s.score}. Cost $${cost.toFixed(4)}.` };
+    return { tone: "ok", message: `Re-scored: ${s.score}.` };
   } catch (e) {
     return bad(`Re-scoring failed: ${e instanceof Error ? e.message : e}`);
   }
@@ -947,7 +949,7 @@ export async function draftCv(jobId: string): Promise<DraftResult> {
     await recordAiUsage(ctx.supabase, { kind: "cv_draft", model: r.model, usage: r.usage, costUsd: r.costUsd, detail: `${ctx.job.title} @ ${ctx.job.company}` });
     await upsertDraft(ctx.supabase, { job_id: jobId, kind: "cv", language: ctx.profile.draft_language, content: r.draft, model: r.model, cost_usd: r.costUsd });
     revalidatePath("/report");
-    return { tone: "ok", message: `CV drafted. Cost $${r.costUsd.toFixed(4)}.`, at };
+    return { tone: "ok", message: "CV drafted.", at };
   } catch (e) {
     return { tone: "bad", message: `Drafting the CV failed: ${e instanceof Error ? e.message : e}`, at };
   }
@@ -968,7 +970,7 @@ export async function draftLetter(jobId: string, answers?: LetterQA[]): Promise<
     if (!answers && ctx.profile.letter_questions && !saved) {
       // A short call: Haiku is plenty for picking 1-2 questions.
       const q = await letterQuestions(ctx.client, DEFAULT_SCORING_MODEL, ctx.career, ctx.job);
-      await recordAiUsage(ctx.supabase, { kind: "cover_letter", model: q.model, usage: q.usage, costUsd: q.costUsd, detail: `questions: ${ctx.job.title} @ ${ctx.job.company}` });
+      await recordAiUsage(ctx.supabase, { kind: "letter_questions", model: q.model, usage: q.usage, costUsd: q.costUsd, detail: `${ctx.job.title} @ ${ctx.job.company}` });
       await upsertDraft(ctx.supabase, {
         job_id: jobId,
         kind: "cover_letter",
@@ -990,7 +992,7 @@ export async function draftLetter(jobId: string, answers?: LetterQA[]): Promise<
       cost_usd: r.costUsd,
     });
     revalidatePath("/report");
-    return { tone: "ok", message: `Cover letter written. Cost $${r.costUsd.toFixed(4)}.`, at };
+    return { tone: "ok", message: "Cover letter written.", at };
   } catch (e) {
     return { tone: "bad", message: `Writing the cover letter failed: ${e instanceof Error ? e.message : e}`, at };
   }

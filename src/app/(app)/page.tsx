@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, currentUser } from "@/lib/supabase/server";
 import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { IconExternal } from "@/components/icons";
 import { InboxSearch } from "@/components/InboxSearch";
@@ -9,8 +9,9 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { RescoreButton } from "@/components/RescoreButton";
 import { SkipForm } from "@/components/SkipForm";
 import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
+import { estimateTask, type Estimate } from "@/lib/estimates";
 import { ago, pad2 } from "@/lib/time";
-import { JOB_LIST_COLUMNS, type Job } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, SCORING_MODELS, type Job } from "@/lib/types";
 import { approveJob, restoreToInbox } from "./actions";
 
 const PAGE = 50;
@@ -43,8 +44,19 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   const limit = Math.min(500, Math.max(PAGE, Number(n) || PAGE));
   const supabase = await createClient();
 
-  const { data: criteria } = await supabase.from("criteria").select("score_threshold").single();
+  const [{ data: criteria }, { data: st }, me] = await Promise.all([
+    supabase.from("criteria").select("score_threshold").single(),
+    supabase.from("settings").select("scoring_model").single(),
+    currentUser(supabase),
+  ]);
   const threshold = criteria?.score_threshold ?? 60;
+  // "Re-score now" in opened rows: one scoring call on the scoring model.
+  const rescoreEstimate = await estimateTask(
+    supabase,
+    me.id,
+    "rescore",
+    SCORING_MODELS.find((m) => m.id === st?.scoring_model)?.id ?? DEFAULT_SCORING_MODEL,
+  );
 
   // With a search, the total number of matches comes back too.
   const rows = () => supabase.from("my_jobs").select(JOB_LIST_COLUMNS, words.length ? { count: "exact" } : undefined);
@@ -158,6 +170,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
                 job={job}
                 index={i + 1}
                 dim={view === "skipped" || (job.score ?? 0) < threshold}
+                rescoreEstimate={rescoreEstimate}
                 skipped={view === "skipped"}
               />
             ))}
@@ -179,13 +192,14 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   );
 }
 
-function JobRow({ job, index, dim, skipped }: { job: Job; index: number; dim: boolean; skipped: boolean }) {
+function JobRow(props: { job: Job; index: number; dim: boolean; skipped: boolean; rescoreEstimate: Estimate }) {
+  const { job, index, dim, skipped } = props;
   return (
     <li>
       <ExpandableJobRow
         id={job.id}
         url={job.url}
-        side={skipped ? undefined : <DecisionPanel id={job.id} />}
+        side={skipped ? undefined : <DecisionPanel id={job.id} rescoreEstimate={props.rescoreEstimate} />}
         version={job.scored_at}
         summaryClassName={`grid cursor-pointer list-none grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[28px_72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
         summary={
@@ -267,7 +281,7 @@ function WaitingRow({ job, index }: { job: Job; index: number }) {
 }
 
 /** The opened row's right column: approve, or skip with reasons. Approving needs the row open, so the reasoning gets read first. */
-function DecisionPanel({ id }: { id: string }) {
+function DecisionPanel({ id, rescoreEstimate }: { id: string; rescoreEstimate: Estimate }) {
   return (
     <div className="space-y-4">
       <form action={approveJob} className="space-y-2.5">
@@ -279,7 +293,7 @@ function DecisionPanel({ id }: { id: string }) {
         <SkipForm id={id} />
       </div>
       <div className="border-t border-[var(--border)] pt-4">
-        <RescoreButton id={id} />
+        <RescoreButton id={id} estimate={rescoreEstimate} />
       </div>
     </div>
   );

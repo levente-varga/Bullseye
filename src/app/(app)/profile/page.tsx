@@ -1,9 +1,10 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, currentUser } from "@/lib/supabase/server";
 import { CareerSection } from "@/components/CareerSection";
 import { PhotoForm } from "@/components/PhotoForm";
 import { SubmitButton } from "@/components/SubmitButton";
 import { Empty, PageHeader, Panel, SectionHeader } from "@/components/ui";
 import { withDefaults } from "@/lib/career-schema";
+import { estimateTask } from "@/lib/estimates";
 import { pad2 } from "@/lib/time";
 import { DRAFT_LANGUAGES, SCORING_MODELS, type Profile } from "@/lib/types";
 import { deleteAnswer, saveAnswer, saveDraftSettings, saveProfile } from "../actions";
@@ -15,8 +16,10 @@ export default async function ProfilePage() {
     supabase.from("answers").select("*").order("question"),
     supabase.from("settings").select("writing_model").single(),
   ]);
-  // The writing model (Settings) reads CV PDFs into the career; named in the import hint.
+  // The writing model (Settings) reads CV PDFs into the career: the import button's estimate.
   const writingModel = SCORING_MODELS.find((m) => m.id === st?.writing_model) ?? SCORING_MODELS[0];
+  const me = await currentUser(supabase);
+  const importEstimate = await estimateTask(supabase, me.id, "career_import", writingModel.id);
   if (error) throw new Error(error.message);
   const profile = p as Profile;
   // Careers saved before projects/certifications/other existed get them empty.
@@ -113,7 +116,8 @@ export default async function ProfilePage() {
           <CareerSection
             career={career}
             updatedAt={profile.career_updated_at ?? null}
-            modelLabel={writingModel.label}
+            importEstimate={importEstimate}
+            isAdmin={me.isAdmin}
           />
         </section>
 

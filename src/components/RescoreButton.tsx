@@ -3,13 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { rescoreJob, type RescoreResult } from "@/app/(app)/actions";
+import type { Estimate } from "@/lib/estimates";
 import { IconRefresh } from "./icons";
+import { Price } from "./Price";
 
 /**
  * Re-scores one Inbox job now (in its opened row): filters with today's criteria, then a
  * fresh AI score. The row's reasoning reloads once the new score is in.
  */
-export function RescoreButton({ id }: { id: string }) {
+export function RescoreButton({ id, estimate }: { id: string; estimate: Estimate }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<RescoreResult | null>(null);
@@ -31,7 +33,7 @@ export function RescoreButton({ id }: { id: string }) {
         }}
       >
         <IconRefresh className={pending ? "animate-spin" : undefined} />
-        {pending ? "Re-scoring…" : "Re-score now"}
+        {pending ? "Re-scoring…" : "Re-score now"} <Price estimate={estimate} />
       </button>
       {result ? (
         <p role="status" className={`text-[12px] ${result.tone === "ok" ? "muted" : "text-[var(--bad)]"}`}>
