@@ -9,8 +9,8 @@ import { IconChart, IconInbox, IconPipeline, IconSettings, IconSliders, IconSour
 export const NAV = [
   { href: "/", label: "Inbox", Icon: IconInbox, key: "inbox" },
   { href: "/pipeline", label: "Pipeline", Icon: IconPipeline, key: "pipeline" },
-  { href: "/criteria", label: "Criteria", Icon: IconSliders, key: "criteria" },
   { href: "/sources", label: "Sources", Icon: IconSources, key: "sources" },
+  { href: "/criteria", label: "Criteria", Icon: IconSliders, key: "criteria" },
   { href: "/profile", label: "Profile", Icon: IconUser, key: "profile" },
   { href: "/report", label: "Report", Icon: IconChart, key: "report" },
 ] as const;
