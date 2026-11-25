@@ -549,6 +549,10 @@ export interface JobDetails {
   score_summary: string | null;
   score_pros: string[] | null;
   score_cons: string[] | null;
+  /** For aggregator listings: where the description came from (null for direct sources). */
+  description_source: "company" | "aggregator" | null;
+  /** The aggregator's name, when description_source is set. */
+  aggregator: string | null;
 }
 
 export interface Run {

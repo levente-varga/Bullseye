@@ -28,7 +28,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   bull: "•", middot: "·", euro: "€", pound: "£",
 };
 
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")

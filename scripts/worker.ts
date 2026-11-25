@@ -18,6 +18,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { fetchBoardCounted, isLandingJobsPosting, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
+import { companyLink } from "../src/lib/company-link";
+import { robotsAllows } from "../src/lib/robots";
 import { hardFilter } from "../src/lib/filters";
 import { searchTerms } from "../src/lib/search-terms";
 import { costUsd } from "../src/lib/pricing";
@@ -27,6 +29,7 @@ import { renderDigest, renderInvite, renderWatchlistAlert, sendEmail } from "../
 import {
   ATS_INFO,
   FETCH_MODES,
+  type Ats,
   type Criteria,
   type FetchedJob,
   type Job,
@@ -351,14 +354,18 @@ async function syncSource(
   // and location filters; each follower's full filter runs when their match is made.
   const passesSomeone = (j: FetchedJob) =>
     subscribers.some((p) => !verdict({ ...j, thin: false }, p.criteria));
-  const needDescription = candidates.filter((j) => !j.description && passesSomeone(j));
+  // Aggregators that link to the company's posting read it even when their list has text.
+  const needDescription = candidates.filter((j) => (!j.description || LINKS_TO_COMPANY.has(source.ats)) && passesSomeone(j));
   const rows = new Map<string, Record<string, unknown>>();
   for (const j of candidates) {
-    if (!needDescription.includes(j)) rows.set(j.external_id, { ...j, source_id: source.id, thin: false });
+    if (!needDescription.includes(j))
+      rows.set(j.external_id, { ...j, source_id: source.id, thin: false, ...(isAggregator && j.description ? { description_source: "aggregator" } : {}) });
   }
+  const origin = new Map<string, Described["origin"]>();
   await pool(needDescription, DESCRIBE_CONCURRENCY, async (j) => {
     try {
-      const found = await describe(source, j);
+      const found = await describeJob(source, j);
+      origin.set(j.external_id, found.origin);
       j.description = found.text;
       if (found.location) j.location = found.location;
       if (found.remote) j.remote = true; // Avature: the work model is on the posting page
@@ -373,7 +380,7 @@ async function syncSource(
       }
       console.warn(`  no description for ${j.title} @ ${j.company}: ${e instanceof Error ? e.message : e}`);
     }
-    rows.set(j.external_id, { ...j, source_id: source.id, thin: j.description.length < THIN_THRESHOLD });
+    rows.set(j.external_id, { ...j, source_id: source.id, thin: j.description.length < THIN_THRESHOLD, description_source: origin.get(j.external_id) ?? null });
   });
 
   const toInsert = [...rows.values()];
@@ -457,6 +464,33 @@ async function discoverSources(jobs: FetchedJob[], subscribers: Person[]) {
 
 type MatchWithJob = { id: string; user_id: string; job_id: string; jobs: Job };
 
+/** Aggregators whose listings lead to the company's own posting (src/lib/company-link.ts). */
+const LINKS_TO_COMPANY = new Set<string>(["jobtech", "swedengamejobs", "jobindex", "workingnomads"]);
+
+type Described = Awaited<ReturnType<typeof describe>> & { origin: "company" | "aggregator" | null };
+
+/**
+ * A posting's description. An aggregator's listing reads the company's own posting first,
+ * when the aggregator links to it and the company's robots.txt allows it, and falls back
+ * to the aggregator's own text. A direct source reads its own posting (origin null).
+ */
+async function describeJob(source: Source, job: { external_id: string; url: string; title: string; description?: string }): Promise<Described> {
+  if (!ATS_INFO[source.ats]?.aggregator) return { ...(await describe(source, job)), origin: null };
+  const link = LINKS_TO_COMPANY.has(source.ats) ? await companyLink(source.ats, job.url) : null;
+  if (link && (await robotsAllows(link))) {
+    try {
+      // A known job system by its URL, else the page's JobPosting data, else its text if it
+      // names this job: never a general careers page, which shows the same text for every job.
+      const found = await describe({ ats: "company" as Ats, slug: "" }, { external_id: "", url: link }, { structuredOnly: true, title: job.title });
+      if (found.text.length >= THIN_THRESHOLD) return { ...found, origin: "company" };
+    } catch {
+      // the company page couldn't be read: the aggregator's text it is
+    }
+  }
+  if ((job.description ?? "").length >= THIN_THRESHOLD) return { text: job.description!, origin: "aggregator" };
+  return { ...(await describe(source, job)), origin: "aggregator" };
+}
+
 /**
  * Fetches descriptions for postings someone is waiting on that never got one: postings
  * filtered for everyone when they arrived (so not described), which a re-evaluation or
@@ -486,9 +520,9 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 
   let described = 0;
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
-    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string } = { text: "" };
+    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string; origin?: Described["origin"] } = { text: "" };
     try {
-      found = await describe(sources.get(job.source_id!)!, job); // jobs without a source were filtered out above
+      found = await describeJob(sources.get(job.source_id!)!, job); // jobs without a source were filtered out above
       described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
@@ -516,6 +550,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
           remote: updated.remote,
           title: updated.title,
           thin,
+          description_source: found.origin ?? null,
           ...(found.company && !job.company ? { company: found.company } : {}),
         })
         .eq("id", job.id),
@@ -571,9 +606,9 @@ async function retryThin(people: Person[], acc: PerPerson): Promise<Record<strin
   let fixed = 0;
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
     const tried = { describe_attempts: (Number(job.describe_attempts) || 0) + 1, described_at: new Date().toISOString() };
-    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string };
+    let found: Described;
     try {
-      found = await describe(sources.get(job.source_id!)!, job);
+      found = await describeJob(sources.get(job.source_id!)!, job);
     } catch (e) {
       if (e instanceof PostingClosedError) {
         await must(db.from("jobs").update({ closed_at: new Date().toISOString(), ...tried }).eq("id", job.id));
@@ -605,6 +640,7 @@ async function retryThin(people: Person[], acc: PerPerson): Promise<Record<strin
           remote: updated.remote,
           title: updated.title,
           thin: false,
+          description_source: found.origin,
           ...tried,
           ...(found.company && (!job.company || isLandingJobsPosting(job.url)) ? { company: found.company } : {}),
         })

@@ -5,6 +5,7 @@ import { getJobDetails } from "@/app/(app)/actions";
 import type { JobDetails } from "@/lib/types";
 import { IconChevronDown, IconExternal } from "./icons";
 import { ScoreChecks } from "./ScoreChecks";
+import { Pill } from "./ui";
 
 /**
  * A job row that opens to show the scorer's reasoning. Only the summary line
@@ -79,9 +80,17 @@ export function ExpandableJobRow(props: {
                 </div>
               </>
             )}
-            <a href={props.url} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1 text-[12px]">
-              Open posting <IconExternal />
-            </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <a href={props.url} target="_blank" rel="noreferrer" className="link inline-flex items-center gap-1 text-[12px]">
+                Open posting <IconExternal />
+              </a>
+              {/* Aggregator listings: whether the text came from the company's own posting or the aggregator. */}
+              {details?.description_source && (
+                <Pill tone="muted">
+                  {details.description_source === "company" ? "Description from the company's page" : `Description from ${details.aggregator ?? "the aggregator"}`}
+                </Pill>
+              )}
+            </div>
           </div>
           {props.side}
           {props.extra && <div className={`border-t border-[var(--border)] pt-4 ${props.side ? "lg:col-span-2" : ""}`}>{props.extra}</div>}
