@@ -33,6 +33,9 @@ export type Ats =
   | "trakstar"
   | "homerun"
   | "jazzhr"
+  | "cornerstone"
+  | "comeet"
+  | "medel"
   | "jobtech"
   | "swedengamejobs"
   | "himalayas"
@@ -78,6 +81,37 @@ export const FETCH_MODES: Record<FetchMode, { label: string; how: string; watcha
  * defaultName: the name used when the form leaves it empty.
  * blurb: one line on what it covers, for the Sources page.
  */
+/**
+ * How a source type is read, shown as a badge beside its brand on Sources:
+ * - api:  a public data API (JSON)
+ * - feed: an RSS/Atom/XML feed or a sitemap
+ * - page: the web pages themselves (HTML, or the data embedded in them)
+ * - key:  an API that needs the key or token the site hands every visitor
+ */
+export type Access = "api" | "feed" | "page" | "key";
+export const ACCESS_INFO: Record<Access, { label: string; hint: string }> = {
+  api: { label: "API", hint: "Read from a public data API" },
+  feed: { label: "Feed", hint: "Read from an RSS/XML feed or sitemap" },
+  page: { label: "Page", hint: "Read from the web pages themselves" },
+  key: { label: "Key", hint: "Read from an API with the key the site gives every visitor" },
+};
+const ACCESS_GROUPS: Record<Access, Ats[]> = {
+  api: [
+    "greenhouse", "lever", "ashby", "smartrecruiters", "recruitee", "workable", "workday", "pinpoint", "breezy", "bamboohr",
+    "rippling", "gem", "manatal", "traffit", "hibob", "eightfold", "oracle", "taleo", "jobtech", "himalayas", "workingnomads",
+    "remoteok", "arbeitnow", "magnetme", "jobsch",
+  ],
+  feed: ["teamtailor", "personio", "radancy", "trakstar", "homerun", "weworkremotely", "jobindex", "berlinstartupjobs", "landingjobs"],
+  page: [
+    "jobylon", "apple", "avature", "phenom", "inrecruiting", "haileyhr", "successfactors", "join", "jobvite", "softgarden", "jazzhr",
+    "swedengamejobs", "workwithindies",
+  ],
+  key: ["cornerstone", "comeet", "medel"],
+};
+export const ATS_ACCESS = Object.fromEntries(
+  (Object.entries(ACCESS_GROUPS) as [Access, Ats[]][]).flatMap(([access, list]) => list.map((a) => [a, access])),
+) as Record<Ats, Access>;
+
 export const ATS_INFO: Record<
   Ats,
   {
@@ -178,6 +212,9 @@ export const ATS_INFO: Record<
   trakstar: { fetch: "feed", label: "Trakstar Hire", slugLabel: "Careers site URL", slugExample: "trakstar.hire.trakstar.com" },
   homerun: { fetch: "feed", label: "Homerun", slugLabel: "Careers site URL", slugExample: "acme.homerun.co" },
   jazzhr: { fetch: "board", label: "JazzHR", slugLabel: "Careers page URL", slugExample: "irongalaxy.applytojob.com" },
+  cornerstone: { fetch: "board", label: "Cornerstone", slugLabel: "Careers site URL", slugExample: "nintendoeurope.csod.com/1" },
+  comeet: { fetch: "board", label: "Comeet", slugLabel: "Careers page URL", slugExample: "careers.overwolf.com" },
+  medel: { fetch: "board", label: "MED-EL careers", slugLabel: "—", slugExample: "jobs.medel.com", fixedSlug: "jobs.medel.com", defaultName: "MED-EL" },
   bamboohr: { fetch: "board", label: "BambooHR", slugLabel: "Careers site URL", slugExample: "blazinggriffin.bamboohr.com/careers" },
   avature: {
     fetch: "paged",

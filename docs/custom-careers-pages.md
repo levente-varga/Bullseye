@@ -49,15 +49,11 @@ its headings; the rest are a list of links to job pages.
   Digital's HiBob site.
 - **Tesla** (`tesla.com/careers`): its CDN answers every bot request with "Access Denied"
   (403), robots.txt included; reading it would mean posing as a browser.
-- **Nintendo Europe** (Cornerstone OnDemand, `nintendoeurope.csod.com`): its job search
-  needs the anonymous token the careers page issues; skipped for now.
 - **Super Spline Studios** (`supersplinestudios.com/jobs/`): answers Bullseye with 403
   Forbidden, like gamejobs.co.
 - **Second Star Games** (CharlieHR Recruit, `jobs.recruit.charliehr.com/<company>/<job>/view-job`):
   each job page is readable (Next.js data and JSON-LD), but no public list of a company's
   jobs was found (`/<company>` and `/<company>/jobs` are 404).
-- **Overwolf** (Comeet): job pages render with JSON-LD, but the list of positions is loaded
-  by Comeet's script, whose API needs a company id and token not found on the site.
 - **Fawkes Games** (`fawkesgames.com/en/careers`): a JavaScript app (Vite/React) whose
   jobs come from its own `api.fawkesgames.com/api/careers/positions`; that API (behind
   Cloudflare) answers Bullseye with 500, and the sitemap lists no job pages. No job system
@@ -65,9 +61,6 @@ its headings; the rest are a list of links to job pages.
 - **Game Dev Estonia** (`gamedevestonia.ee/jobs`, an industry job board): readable (RSS
   and a WordPress `jobpost` API), but only 7 jobs, the newest seen from 2024, and every
   job names "Gamedev Estonia" rather than the studio, so not worth an aggregator.
-- **MED-EL** (`jobs.medel.com`): a single-page app on AWS Amplify; jobs come from a private
-  GraphQL (AppSync) API with a key in its bundle, and every URL (sitemap included) returns
-  the same shell. Not readable without that undocumented API.
 - **Playtouch** (`playtouch.net/career`): the jobs are added by JavaScript (the linked
   `#qa-release-ops-…` job isn't in the page's HTML); no job system behind it.
 - **Playrix** (`playrix.com/job/open/…`): the whole site is a JavaScript app. Every URL
@@ -86,7 +79,6 @@ Trakstar Hire, Homerun and JazzHR were added:
   session.
 - **Dover** (`jobs.dover.com`): a Cloudflare-protected app whose API is disallowed in
   `robots.txt`.
-- **Cornerstone OnDemand**, **Comeet**: the job lists need a token issued by the page.
 
 Not built yet for lack of a live example (send a link to one and it can be checked):
 UKG (UltiPro), Paylocity, ADP Workforce Now, Zoho Recruit, Freshteam, d.vinci, rexx,
@@ -94,3 +86,17 @@ Abacus Umantis, onlyfy (Prescreen), eRecruiter.
 
 Built but not yet tried on a board with openings: **Trakstar Hire** (RSS feed) and
 **JazzHR** (careers page list); fix their parsing on the first real board.
+
+## Read with the key a site gives every visitor
+
+Since 2026-11-25 Bullseye may use keys or tokens a site hands every visitor (still obeying
+robots.txt and identifying as BullseyeBot). These are supported that way ("Key" badge on
+Sources):
+
+- **Cornerstone OnDemand** (e.g. Nintendo Europe, `nintendoeurope.csod.com`): the careers
+  page's `csod.context` token opens Cornerstone's job search; each posting page has the
+  full text as JobPosting data. 10 seconds between requests, as its robots.txt asks.
+- **Comeet** (e.g. Overwolf, `careers.overwolf.com`): the page's `COMEET.init` token and
+  company uid open Comeet's documented careers API, with full details.
+- **MED-EL** (`jobs.medel.com`): its AppSync GraphQL API, signed with the anonymous AWS
+  credentials the site gets from Cognito for every visitor.

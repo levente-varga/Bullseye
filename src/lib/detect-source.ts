@@ -1,6 +1,7 @@
 import {
   USER_AGENT,
   appleTotal,
+  comeetConfig,
   eightfoldTotal,
   fetchBoard,
   isEightfoldSite,
@@ -123,7 +124,10 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     // A Radancy (TalentBrew) careers site: read from its sitemap.
     const radancy = !phenom && !sf && html ? radancyBase(url, html) : null;
     if (radancy) candidates.push({ ats: "radancy", slug: radancy });
-    if (html && !phenom && !sf && !radancy) {
+    // A careers page embedding Comeet (COMEET.init with a public token): read through Comeet's API.
+    const comeet = !phenom && !sf && !radancy && html ? comeetConfig(html) : null;
+    if (comeet) candidates.push({ ats: "comeet", slug: `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}` });
+    if (html && !phenom && !sf && !radancy && !comeet) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
         if (m && !IGNORED_SLUGS.test(slug(m).split("/").pop() ?? "")) candidates.push({ ats, slug: slug(m) });
@@ -207,7 +211,7 @@ function guessName(ats: Ats, slug: string): string {
   if (ats === "lever") slug = slug.replace(/^eu\//, "");
   const host = slug.split("/")[0];
   if (ats === "inrecruiting") slug = slug.split("/")[1] ?? slug; // the company segment
-  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors", "eightfold", "radancy", "taleo", "traffit", "softgarden", "homerun", "oracle"].includes(ats)
+  const base = ["teamtailor", "personio", "recruitee", "workday", "pinpoint", "avature", "phenom", "successfactors", "eightfold", "radancy", "taleo", "traffit", "softgarden", "homerun", "oracle", "cornerstone", "comeet"].includes(ats)
     ? (host.split(".").find((p) => !/^(www|career|careers|jobs|job|apply|work|join|explore)$/i.test(p)) ?? host)
     : slug;
   // "disneycareers" → "disney"; a Rippling board "kinetic-games-careers" → "kinetic-games"
