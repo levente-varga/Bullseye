@@ -187,18 +187,6 @@ export async function saveSettings(form: FormData) {
         .eq("id", 1)
     ).error,
   );
-  // The admin's own caps sit on their member row, like everyone's.
-  check(
-    (
-      await supabase
-        .from("members")
-        .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
-        })
-        .eq("user_id", me.id)
-    ).error,
-  );
   revalidatePath("/settings");
   revalidatePath("/criteria"); // its schedule line
 }
@@ -734,22 +722,19 @@ export async function cancelInvite(form: FormData) {
   revalidatePath("/admin");
 }
 
-export async function updateMemberCaps(form: FormData) {
+/**
+ * Your own spend caps (Criteria → AI spending), per run and per 24 hours. Everyone sets
+ * their own; members are otherwise only limited by their balance. An empty or invalid
+ * field keeps its value.
+ */
+export async function saveMySpendCaps(form: FormData) {
   const supabase = await db();
   const me = await currentUser(supabase);
-  if (!me.isAdmin) return;
-  check(
-    (
-      await supabase
-        .from("members")
-        .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
-        })
-        .eq("user_id", str(form, "user_id"))
-    ).error,
-  );
-  revalidatePath("/admin");
+  const { data: cur } = await supabase.from("members").select("max_run_cost_usd, max_daily_cost_usd").eq("user_id", me.id).single();
+  const run = money(str(form, "max_run_cost_usd")) ?? Number(cur?.max_run_cost_usd ?? 0);
+  const daily = money(str(form, "max_daily_cost_usd")) ?? Number(cur?.max_daily_cost_usd ?? 0);
+  check((await supabase.rpc("set_my_spend_caps", { p_run: run, p_daily: daily })).error);
+  revalidatePath("/criteria");
 }
 
 /** Gives a member AI credit (Members page), or takes some back with a negative amount. */
@@ -764,7 +749,6 @@ export async function addCreditGrant(form: FormData) {
       await supabase.from("credit_grants").insert({
         user_id: str(form, "user_id"),
         amount_usd: Math.round(amount * 10_000) / 10_000,
-        note: str(form, "note"),
       })
     ).error,
   );
@@ -777,26 +761,6 @@ export async function removeMember(form: FormData) {
   const supabase = await db();
   if (form.get("confirm") !== "on") redirect("/admin?error=Tick the box to confirm removing a member.");
   check((await supabase.rpc("remove_member", { p_user: str(form, "user_id") })).error);
-  revalidatePath("/admin");
-}
-
-/** The caps new members start with (admin only; RLS enforces it too). */
-export async function saveMemberDefaults(form: FormData) {
-  const supabase = await db();
-  const me = await currentUser(supabase);
-  if (!me.isAdmin) return;
-  check(
-    (
-      await supabase
-        .from("settings")
-        .update({
-          default_run_cost_usd: money(str(form, "default_run_cost_usd")),
-          default_daily_cost_usd: money(str(form, "default_daily_cost_usd")),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", 1)
-    ).error,
-  );
   revalidatePath("/admin");
 }
 
