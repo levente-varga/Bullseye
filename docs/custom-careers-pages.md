@@ -58,6 +58,10 @@ its headings; the rest are a list of links to job pages.
   jobs was found (`/<company>` and `/<company>/jobs` are 404).
 - **Overwolf** (Comeet): job pages render with JSON-LD, but the list of positions is loaded
   by Comeet's script, whose API needs a company id and token not found on the site.
+- **Fawkes Games** (`fawkesgames.com/en/careers`): a JavaScript app (Vite/React) whose
+  jobs come from its own `api.fawkesgames.com/api/careers/positions`; that API (behind
+  Cloudflare) answers Bullseye with 500, and the sitemap lists no job pages. No job system
+  behind it. Add its jobs by hand in the Pipeline.
 - **Game Dev Estonia** (`gamedevestonia.ee/jobs`, an industry job board): readable (RSS
   and a WordPress `jobpost` API), but only 7 jobs, the newest seen from 2024, and every
   job names "Gamedev Estonia" rather than the studio, so not worth an aggregator.
