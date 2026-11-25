@@ -93,8 +93,27 @@ export async function approveJob(form: FormData) {
 /** The scorer's reasoning for one job, loaded when its Inbox row is opened. */
 export async function getJobDetails(id: string): Promise<JobDetails | null> {
   const supabase = await db();
-  const { data } = await supabase.from("my_jobs").select("url, score_checks, score_summary, score_pros, score_cons").eq("id", id).single();
-  return (data as JobDetails | null) ?? null;
+  const { data } = await supabase
+    .from("my_jobs")
+    .select("url, score_checks, score_summary, score_pros, score_cons, description_source, source_id")
+    .eq("id", id)
+    .single();
+  if (!data) return null;
+  // The aggregator's name for the "where the description came from" badge.
+  let aggregator: string | null = null;
+  if (data.description_source && data.source_id) {
+    const { data: src } = await supabase.from("sources").select("ats").eq("id", data.source_id).maybeSingle();
+    aggregator = src ? (ATS_INFO[src.ats as Ats]?.label ?? src.ats).replace(/\s*\(aggregator\)$/i, "") : null;
+  }
+  return {
+    url: data.url,
+    score_checks: data.score_checks,
+    score_summary: data.score_summary,
+    score_pros: data.score_pros,
+    score_cons: data.score_cons,
+    description_source: data.description_source,
+    aggregator,
+  };
 }
 
 export async function skipJob(form: FormData) {
