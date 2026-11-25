@@ -198,9 +198,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
       </div>
         {/* Full height, so the panel can stay in view while the page scrolls. The invisible
-            heading lines the panel up with the top of the Company boards table. */}
+            search box and heading line the panel up with the top of the Company boards table
+            (same sizes and gap as the left column's). */}
         <aside className="max-xl:order-first xl:self-stretch">
-          <div aria-hidden className="invisible max-xl:hidden">
+          <div aria-hidden className="invisible space-y-10 max-xl:hidden">
+            <input className="input" tabIndex={-1} readOnly />
             <SectionHeader title="Company boards" />
           </div>
           <div className="xl:sticky xl:top-6">
