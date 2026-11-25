@@ -532,6 +532,101 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
   return { described_later: described };
 }
 
+/** Retries per run, tries per posting, and the wait between tries, for thin descriptions. */
+const THIN_RETRIES_PER_RUN = 40;
+const THIN_MAX_ATTEMPTS = 3;
+const THIN_RETRY_AFTER_MS = 20 * 3_600_000;
+
+/**
+ * Retries the description of thin postings still open in someone's Inbox (waiting or
+ * scored): a fetch that failed for a moment, e.g. a site rate-limiting a big first import,
+ * left them scored on title and location only. Once a day, at most three tries each.
+ * When the text comes in, each follower's full filter runs again; scored ones that still
+ * pass are queued for a re-score (they keep their score until the new one replaces it).
+ */
+async function retryThin(people: Person[], acc: PerPerson): Promise<Record<string, number>> {
+  const before = new Date(Date.now() - THIN_RETRY_AFTER_MS).toISOString();
+  type Row = MatchWithJob & { status: string; jobs: Job & { describe_attempts?: number } };
+  const rows = await must<Row[]>(
+    db
+      .from("matches")
+      .select("id, user_id, job_id, status, jobs!inner(*)")
+      .in("status", ["new", "scored"])
+      .eq("jobs.thin", true)
+      .is("jobs.closed_at", null)
+      .not("jobs.source_id", "is", null)
+      .lt("jobs.describe_attempts", THIN_MAX_ATTEMPTS)
+      .or(`described_at.is.null,described_at.lt.${before}`, { referencedTable: "jobs" })
+      .limit(THIN_RETRIES_PER_RUN * 4),
+  );
+  if (!rows.length) return {};
+  const byJob = new Map<string, Row[]>();
+  for (const m of rows) byJob.set(m.job_id, [...(byJob.get(m.job_id) ?? []), m]);
+  const jobs = [...byJob.values()].map((ms) => ms[0].jobs).slice(0, THIN_RETRIES_PER_RUN);
+  const sources = new Map(
+    (await must<Source[]>(db.from("sources").select("*").in("id", [...new Set(jobs.map((j) => j.source_id))]))).map((s) => [s.id, s]),
+  );
+  const criteriaOf = new Map(people.map((p) => [p.id, p.criteria]));
+
+  let fixed = 0;
+  await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
+    const tried = { describe_attempts: (Number(job.describe_attempts) || 0) + 1, described_at: new Date().toISOString() };
+    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string };
+    try {
+      found = await describe(sources.get(job.source_id!)!, job);
+    } catch (e) {
+      if (e instanceof PostingClosedError) {
+        await must(db.from("jobs").update({ closed_at: new Date().toISOString(), ...tried }).eq("id", job.id));
+        await must(db.from("matches").update({ status: "closed" }).eq("job_id", job.id).in("status", OPEN_STATUSES));
+        return;
+      }
+      console.warn(`  still no description for ${job.title} @ ${job.company}: ${e instanceof Error ? e.message : e}`);
+      await must(db.from("jobs").update(tried).eq("id", job.id));
+      return;
+    }
+    if (found.text.length < THIN_THRESHOLD) {
+      await must(db.from("jobs").update(tried).eq("id", job.id));
+      return;
+    }
+    const updated = {
+      ...job,
+      description: found.text,
+      location: found.location ?? job.location,
+      remote: job.remote || Boolean(found.remote),
+      title: found.title || job.title,
+      thin: false,
+    };
+    await must(
+      db
+        .from("jobs")
+        .update({
+          description: updated.description,
+          location: updated.location,
+          remote: updated.remote,
+          title: updated.title,
+          thin: false,
+          ...tried,
+          ...(found.company && (!job.company || isLandingJobsPosting(job.url)) ? { company: found.company } : {}),
+        })
+        .eq("id", job.id),
+    );
+    fixed++;
+    for (const m of byJob.get(job.id)!) {
+      const c = criteriaOf.get(m.user_id);
+      const reason = c ? verdict(updated, c) : null;
+      if (reason) {
+        await must(db.from("matches").update({ status: "filtered", filter_reason: reason }).eq("id", m.id));
+        acc.add(m.user_id, "filtered_later");
+      } else if (m.status === "scored") {
+        // Scored on the title alone: score it again, first, now that there's text.
+        await must(db.from("matches").update({ scored_at: null }).eq("id", m.id));
+      }
+    }
+  });
+  console.log(`thin descriptions retried: ${jobs.length}, filled in: ${fixed}`);
+  return { thin_retried: jobs.length, thin_filled: fixed };
+}
+
 /** One person's AI spend over the last 24 hours, from their run shares. */
 /** AI spend in the last 24 hours (one person's, or everyone's): runs plus other AI tasks (CV imports, drafts). */
 async function spentLast24h(userId?: string): Promise<number> {
@@ -775,6 +870,8 @@ async function runFetch(mode: "watchlist" | "full"): Promise<RunResult> {
   }
   const ids = sources.map((s) => s.id);
   Object.assign(totals, await describePending(people, ids, acc));
+  // The daily run also retries descriptions that failed before (see retryThin).
+  if (mode === "full") Object.assign(totals, await retryThin(people, acc));
   // A watchlist run scores only what the watched sources brought in.
   const cost = await scoreAll(people, settings, mode === "watchlist" ? ids : null, acc);
   totals.cost_usd = Math.round(cost * 1e6) / 1e6;
