@@ -93,8 +93,27 @@ export async function approveJob(form: FormData) {
 /** The scorer's reasoning for one job, loaded when its Inbox row is opened. */
 export async function getJobDetails(id: string): Promise<JobDetails | null> {
   const supabase = await db();
-  const { data } = await supabase.from("my_jobs").select("url, score_checks, score_summary, score_pros, score_cons").eq("id", id).single();
-  return (data as JobDetails | null) ?? null;
+  const { data } = await supabase
+    .from("my_jobs")
+    .select("url, score_checks, score_summary, score_pros, score_cons, description_source, source_id")
+    .eq("id", id)
+    .single();
+  if (!data) return null;
+  // The aggregator's name for the "where the description came from" badge.
+  let aggregator: string | null = null;
+  if (data.description_source && data.source_id) {
+    const { data: src } = await supabase.from("sources").select("ats").eq("id", data.source_id).maybeSingle();
+    aggregator = src ? (ATS_INFO[src.ats as Ats]?.label ?? src.ats).replace(/\s*\(aggregator\)$/i, "") : null;
+  }
+  return {
+    url: data.url,
+    score_checks: data.score_checks,
+    score_summary: data.score_summary,
+    score_pros: data.score_pros,
+    score_cons: data.score_cons,
+    description_source: data.description_source,
+    aggregator,
+  };
 }
 
 export async function skipJob(form: FormData) {
@@ -185,18 +204,6 @@ export async function saveSettings(form: FormData) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1)
-    ).error,
-  );
-  // The admin's own caps sit on their member row, like everyone's.
-  check(
-    (
-      await supabase
-        .from("members")
-        .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
-        })
-        .eq("user_id", me.id)
     ).error,
   );
   revalidatePath("/settings");
@@ -734,22 +741,19 @@ export async function cancelInvite(form: FormData) {
   revalidatePath("/admin");
 }
 
-export async function updateMemberCaps(form: FormData) {
+/**
+ * Your own spend caps (Criteria → AI spending), per run and per 24 hours. Everyone sets
+ * their own; members are otherwise only limited by their balance. An empty or invalid
+ * field keeps its value.
+ */
+export async function saveMySpendCaps(form: FormData) {
   const supabase = await db();
   const me = await currentUser(supabase);
-  if (!me.isAdmin) return;
-  check(
-    (
-      await supabase
-        .from("members")
-        .update({
-          max_run_cost_usd: money(str(form, "max_run_cost_usd")),
-          max_daily_cost_usd: money(str(form, "max_daily_cost_usd")),
-        })
-        .eq("user_id", str(form, "user_id"))
-    ).error,
-  );
-  revalidatePath("/admin");
+  const { data: cur } = await supabase.from("members").select("max_run_cost_usd, max_daily_cost_usd").eq("user_id", me.id).single();
+  const run = money(str(form, "max_run_cost_usd")) ?? Number(cur?.max_run_cost_usd ?? 0);
+  const daily = money(str(form, "max_daily_cost_usd")) ?? Number(cur?.max_daily_cost_usd ?? 0);
+  check((await supabase.rpc("set_my_spend_caps", { p_run: run, p_daily: daily })).error);
+  revalidatePath("/criteria");
 }
 
 /** Gives a member AI credit (Members page), or takes some back with a negative amount. */
@@ -764,7 +768,6 @@ export async function addCreditGrant(form: FormData) {
       await supabase.from("credit_grants").insert({
         user_id: str(form, "user_id"),
         amount_usd: Math.round(amount * 10_000) / 10_000,
-        note: str(form, "note"),
       })
     ).error,
   );
@@ -777,26 +780,6 @@ export async function removeMember(form: FormData) {
   const supabase = await db();
   if (form.get("confirm") !== "on") redirect("/admin?error=Tick the box to confirm removing a member.");
   check((await supabase.rpc("remove_member", { p_user: str(form, "user_id") })).error);
-  revalidatePath("/admin");
-}
-
-/** The caps new members start with (admin only; RLS enforces it too). */
-export async function saveMemberDefaults(form: FormData) {
-  const supabase = await db();
-  const me = await currentUser(supabase);
-  if (!me.isAdmin) return;
-  check(
-    (
-      await supabase
-        .from("settings")
-        .update({
-          default_run_cost_usd: money(str(form, "default_run_cost_usd")),
-          default_daily_cost_usd: money(str(form, "default_daily_cost_usd")),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", 1)
-    ).error,
-  );
   revalidatePath("/admin");
 }
 

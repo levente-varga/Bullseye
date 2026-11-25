@@ -8,7 +8,8 @@ import { estimateScoringPerJob } from "@/lib/estimates";
 import { dailySlots, formatNextRun } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
 import { DEFAULT_SCORING_MODEL, SCORING_MODELS, type Criteria, type Member, type Settings } from "@/lib/types";
-import { addExcludeKeyword, reevaluate, saveCriteria } from "../actions";
+import { addExcludeKeyword, reevaluate, saveCriteria, saveMySpendCaps } from "../actions";
+import { formatUsd } from "@/lib/pricing";
 
 export default async function CriteriaPage({ searchParams }: PageProps<"/criteria">) {
   const done = await searchParams; // set after a re-evaluation
@@ -21,6 +22,9 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     { count: scoredCount },
     { data: st },
     { data: mem },
+    { data: myRuns },
+    { data: myTasks },
+    { data: bal },
   ] = await Promise.all([
     supabase.from("criteria").select("*").single(),
     supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
@@ -28,7 +32,14 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
     supabase.from("settings").select("*").single(),
     supabase.from("members").select("*").eq("user_id", me.id).single(),
+    // Your AI spend in the last 24 hours: run shares and other AI tasks (shown with your caps).
+    supabase.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", me.id).gte("runs.started_at", daysAgoIso(1)),
+    supabase.from("ai_usage").select("cost_usd").eq("user_id", me.id).gte("created_at", daysAgoIso(1)),
+    supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle(),
   ]);
+  const spent24h =
+    (myRuns ?? []).reduce((a, r) => a + (Number((r.stats as Record<string, unknown>)?.cost_usd) || 0), 0) +
+    (myTasks ?? []).reduce((a, t) => a + Number(t.cost_usd), 0);
   const settings = st as Settings;
   const member = mem as Member;
   // Re-scoring them all: scoring one job in your last runs, priced at the current scoring model.
@@ -140,6 +151,29 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
         </div>
 
         <aside className="space-y-3">
+          {/* Everyone sets their own caps; a member's balance (from the admin) is the only other limit. */}
+          <Panel title="AI spending" aside="yours">
+            <form action={saveMySpendCaps} className="space-y-3 p-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <Money name="max_run_cost_usd" label="Per run" value={member.max_run_cost_usd} />
+                <Money name="max_daily_cost_usd" label="Per 24 hours" value={member.max_daily_cost_usd} />
+              </div>
+              <p className="faint text-[12px]">
+                Scoring stops for the run once a cap is reached and picks up in the next; 0 pauses it.{" "}
+                <span className="mono text-[var(--fg)]">{formatUsd(spent24h)}</span> spent in 24h
+                {!me.isAdmin && (
+                  <>
+                    {" "}
+                    · <span className="mono text-[var(--fg)]">{formatUsd(Number(bal?.balance_usd ?? 0))}</span> balance left
+                  </>
+                )}
+                .
+              </p>
+              <SubmitButton className="btn" done="Saved">
+                Save caps
+              </SubmitButton>
+            </form>
+          </Panel>
           <Panel title="What your skips say" aside="60 days">
             {ranked.length === 0 ? (
               <Empty>No skips yet.</Empty>
@@ -179,7 +213,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                 </label>
                 {scoringPaused && (
                   <p className="text-[12px] text-[var(--warn)]">
-                    Scoring is paused: your AI budget is $0{me.isAdmin ? " (Settings)" : " (set by the admin)"}. Nothing gets scored until it&apos;s raised.
+                    Scoring is paused: one of your spend caps is $0 (AI spending, beside). Nothing gets scored until it&apos;s raised.
                   </p>
                 )}
                 <SubmitButton className="btn" done="Done">
@@ -214,4 +248,16 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
 
 function List(props: { name: string; value: string[]; placeholder: string }) {
   return <textarea name={props.name} defaultValue={props.value.join(", ")} rows={2} className="input" placeholder={props.placeholder} />;
+}
+
+function Money(props: { name: string; label: string; value: number }) {
+  return (
+    <label className="field">
+      <span className="hint">{props.label}</span>
+      <span className="flex items-center gap-1.5">
+        <span className="faint mono">$</span>
+        <input name={props.name} type="number" min={0} step={0.01} defaultValue={props.value} className="input mono w-24" />
+      </span>
+    </label>
+  );
 }

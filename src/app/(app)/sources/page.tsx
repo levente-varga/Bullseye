@@ -11,7 +11,7 @@ import { ATS_BOARD_URL } from "@/lib/ats";
 import { SourceSearch } from "@/components/SourceSearch";
 import { Dot, Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { agoText, pad2 } from "@/lib/time";
-import { ATS_INFO, FETCH_MODES, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
+import { ACCESS_INFO, ATS_ACCESS, ATS_INFO, FETCH_MODES, type Ats, type Source, type SourceSuggestion } from "@/lib/types";
 import { acceptSuggestion, addSource, deleteSource, dismissSuggestion, updateSource } from "../actions";
 
 /** The company job systems auto-detect recognises, A to Z (listed under the add form). */
@@ -198,9 +198,11 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
 
       </div>
         {/* Full height, so the panel can stay in view while the page scrolls. The invisible
-            heading lines the panel up with the top of the Company boards table. */}
+            search box and heading line the panel up with the top of the Company boards table
+            (same sizes and gap as the left column's). */}
         <aside className="max-xl:order-first xl:self-stretch">
-          <div aria-hidden className="invisible max-xl:hidden">
+          <div aria-hidden className="invisible space-y-10 max-xl:hidden">
+            <input className="input" tabIndex={-1} readOnly />
             <SectionHeader title="Company boards" />
           </div>
           <div className="xl:sticky xl:top-6">
@@ -287,7 +289,11 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
               </td>
               {!props.aggregators && (
                 <td data-label="Type" className="@max-[44rem]:hidden">
-                  <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
+                  {/* The brand, then how it's read (API, feed, pages, or an API with the site's key). */}
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    <Pill tone="muted">{ATS_INFO[s.ats]?.label ?? s.ats}</Pill>
+                    <AccessBadge ats={s.ats} />
+                  </span>
                 </td>
               )}
               <td data-label="Fetch">
@@ -473,5 +479,19 @@ function WatchToggle({ source, watchEvery }: { source: Source; watchEvery: numbe
       title={title}
       icon={<IconStar filled={source.watchlist} className={source.watchlist ? "text-[var(--accent-strong)]" : undefined} />}
     />
+  );
+}
+
+/** How a source type is read: a small outlined tag, apart from the brand pill (hover explains). */
+function AccessBadge({ ats }: { ats: Ats }) {
+  const access = ATS_ACCESS[ats];
+  if (!access) return null;
+  return (
+    <span
+      className="mono faint border border-[var(--border-strong)] px-1 text-[10px] leading-[16px] tracking-wide uppercase"
+      title={ACCESS_INFO[access].hint}
+    >
+      {ACCESS_INFO[access].label}
+    </span>
   );
 }

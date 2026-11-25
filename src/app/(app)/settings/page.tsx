@@ -8,7 +8,7 @@ import { formatUsd } from "@/lib/pricing";
 import { formatNextRun, nextRuns, timezones } from "@/lib/schedule";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { nowMs } from "@/lib/time";
-import { SCORING_MODELS, WATCH_INTERVALS, type Member, type ScoringModel, type Settings } from "@/lib/types";
+import { SCORING_MODELS, WATCH_INTERVALS, type ScoringModel, type Settings } from "@/lib/types";
 import { saveSettings } from "../actions";
 
 /**
@@ -24,39 +24,17 @@ export default async function SettingsPage() {
   const lastRun = (kind: string) =>
     supabase.from("runs").select("started_at").eq("kind", kind).order("started_at", { ascending: false }).limit(1);
   const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
-  const [
-    { data: st },
-    { data: mem },
-    { data: lastWatch },
-    { data: lastFull },
-    { data: myDay },
-    { data: allDay },
-    { data: scoredRuns },
-    { data: tasksDay },
-  ] = await Promise.all([
-      supabase.from("settings").select("*").single(),
-      supabase.from("members").select("*").eq("user_id", me.id).single(),
-      lastRun("watchlist"),
-      lastRun("full"),
-      supabase.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", me.id).gte("runs.started_at", dayAgo),
-      supabase.from("runs").select("stats").gte("started_at", dayAgo),
-      // Your recent run shares that scored something: their cost per listing sizes a run.
-      supabase.from("run_users").select("stats").eq("user_id", me.id).gt("stats->scored", 0).order("run_id").limit(20),
-      // Other AI tasks (CV imports, drafts) in the last 24 hours: they count against the caps too.
-      supabase.from("ai_usage").select("user_id, cost_usd").gte("created_at", dayAgo),
-    ]);
+  const [{ data: st }, { data: lastWatch }, { data: lastFull }, { data: allDay }, { data: tasksDay }] = await Promise.all([
+    supabase.from("settings").select("*").single(),
+    lastRun("watchlist"),
+    lastRun("full"),
+    supabase.from("runs").select("stats").gte("started_at", dayAgo),
+    // Other AI tasks (CV imports, drafts) in the last 24 hours: they count against the account cap too.
+    supabase.from("ai_usage").select("cost_usd").gte("created_at", dayAgo),
+  ]);
   const settings = st as Settings;
-  const member = mem as Member;
   const sum = (rows: { stats: Record<string, unknown> }[] | null) => (rows ?? []).reduce((a, r) => a + (Number(r.stats?.cost_usd) || 0), 0);
-  const tasks = (tasksDay ?? []) as { user_id: string; cost_usd: number | string }[];
-  const tasksCost = (rows: typeof tasks) => rows.reduce((a, t) => a + Number(t.cost_usd), 0);
-  const spent24h = sum(myDay) + tasksCost(tasks.filter((t) => t.user_id === me.id));
-  const spentAll24h = sum(allDay) + tasksCost(tasks);
-  const scored = (scoredRuns ?? []).reduce(
-    (a, r) => ({ cost: a.cost + (Number(r.stats.cost_usd) || 0), jobs: a.jobs + (Number(r.stats.scored) || 0) }),
-    { cost: 0, jobs: 0 },
-  );
-  const perJob = scored.jobs ? scored.cost / scored.jobs : 0.0005;
+  const spentAll24h = sum(allDay) + (tasksDay ?? []).reduce((a, t) => a + Number(t.cost_usd), 0);
   const ms = (rows: { started_at: string }[] | null) => (rows?.[0] ? Date.parse(rows[0].started_at) : null);
   const next = nextRuns(settings, { watchlist: ms(lastWatch), full: ms(lastFull) }, nowMs());
   const tz = settings.timezone;
@@ -68,7 +46,7 @@ export default async function SettingsPage() {
       {/* Keyed by what was saved: a <select>'s defaultValue only applies when it mounts, so
           without the remount the form would keep showing the old choice after saving. */}
       <form
-        key={`${settings.updated_at}|${member.max_run_cost_usd}|${member.max_daily_cost_usd}`}
+        key={settings.updated_at}
         action={saveSettings}
         className="max-w-[52rem] space-y-6"
       >
@@ -109,19 +87,11 @@ export default async function SettingsPage() {
             <Row label="Writing model" hint="Builds careers from CVs; will write CV and cover letter drafts.">
               <ModelPicker name="writing_model" value={settings.writing_model ?? "claude-haiku-5-5"} />
             </Row>
-            <Row label="Your spend caps" hint="Over-cap listings wait for budget. 0 pauses scoring.">
-              <div className="flex flex-wrap items-end gap-4">
-                <Money name="max_run_cost_usd" label="Per run" value={member.max_run_cost_usd} />
-                <Money name="max_daily_cost_usd" label="Per 24 hours" value={member.max_daily_cost_usd} />
-              </div>
-              <p className="faint mt-2 text-[12px]">
-                <span className="mono text-[var(--fg)]">{formatUsd(spent24h)}</span> spent in 24h · a run covers ~
-                <span className="mono">{perJob > 0 ? Math.floor(Number(member.max_run_cost_usd) / perJob).toLocaleString("en-US") : "–"}</span>{" "}
-                listings
-              </p>
-            </Row>
-            <Row label="Everyone, per 24 hours" hint="Stops all scoring once reached.">
-              <Money name="max_total_daily_cost_usd" label="All members" value={settings.max_total_daily_cost_usd} />
+            <Row
+              label="Account, per 24 hours"
+              hint="A backstop on the API key: your own scoring stops once everyone's 24-hour spend reaches it. Members are limited by their balance instead."
+            >
+              <Money name="max_total_daily_cost_usd" label="All spend" value={settings.max_total_daily_cost_usd} />
               <p className="faint mt-2 text-[12px]">
                 <span className="mono text-[var(--fg)]">{formatUsd(spentAll24h)}</span> spent in 24h
               </p>

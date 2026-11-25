@@ -167,6 +167,8 @@ export type DetectedAts =
   | "trakstar"
   | "homerun"
   | "jazzhr"
+  | "cornerstone"
+  | "medel"
   | "probe?" // a custom domain that looks like Teamtailor or Recruitee; confirmed with probeHost()
   | "custom";
 
@@ -236,6 +238,11 @@ export function detectAts(url: string): { ats: DetectedAts; slug: string } {
   if (host.endsWith(".hire.trakstar.com")) return { ats: "trakstar", slug: host.split(".")[0] };
   if (host.endsWith(".homerun.co") && !/^(www|jobs|feed|app|api)\./.test(host)) return { ats: "homerun", slug: host };
   if (host.endsWith(".applytojob.com") && !/^(www|app)\./.test(host)) return { ats: "jazzhr", slug: host.split(".")[0] };
+  if (host.endsWith(".csod.com")) {
+    const site = u.pathname.match(/\/ux\/ats\/careersite\/(\d+)\//)?.[1];
+    if (site) return { ats: "cornerstone", slug: `${host}/${site}` };
+  }
+  if (host === "jobs.medel.com") return { ats: "medel", slug: "jobs.medel.com" };
   {
     const base = avatureBase(url);
     if (base) return { ats: "avature", slug: base };

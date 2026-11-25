@@ -18,6 +18,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { fetchBoardCounted, isLandingJobsPosting, locationNeedsDetail, probeHost } from "../src/lib/ats";
 import { dedupeKey, detectAts } from "../src/lib/dedupe";
 import { describe, PostingClosedError, THIN_THRESHOLD } from "../src/lib/describe";
+import { companyLink } from "../src/lib/company-link";
+import { robotsAllows } from "../src/lib/robots";
 import { hardFilter } from "../src/lib/filters";
 import { searchTerms } from "../src/lib/search-terms";
 import { costUsd } from "../src/lib/pricing";
@@ -27,6 +29,7 @@ import { renderDigest, renderInvite, renderWatchlistAlert, sendEmail } from "../
 import {
   ATS_INFO,
   FETCH_MODES,
+  type Ats,
   type Criteria,
   type FetchedJob,
   type Job,
@@ -351,14 +354,18 @@ async function syncSource(
   // and location filters; each follower's full filter runs when their match is made.
   const passesSomeone = (j: FetchedJob) =>
     subscribers.some((p) => !verdict({ ...j, thin: false }, p.criteria));
-  const needDescription = candidates.filter((j) => !j.description && passesSomeone(j));
+  // Aggregators that link to the company's posting read it even when their list has text.
+  const needDescription = candidates.filter((j) => (!j.description || LINKS_TO_COMPANY.has(source.ats)) && passesSomeone(j));
   const rows = new Map<string, Record<string, unknown>>();
   for (const j of candidates) {
-    if (!needDescription.includes(j)) rows.set(j.external_id, { ...j, source_id: source.id, thin: false });
+    if (!needDescription.includes(j))
+      rows.set(j.external_id, { ...j, source_id: source.id, thin: false, ...(isAggregator && j.description ? { description_source: "aggregator" } : {}) });
   }
+  const origin = new Map<string, Described["origin"]>();
   await pool(needDescription, DESCRIBE_CONCURRENCY, async (j) => {
     try {
-      const found = await describe(source, j);
+      const found = await describeJob(source, j);
+      origin.set(j.external_id, found.origin);
       j.description = found.text;
       if (found.location) j.location = found.location;
       if (found.remote) j.remote = true; // Avature: the work model is on the posting page
@@ -373,7 +380,7 @@ async function syncSource(
       }
       console.warn(`  no description for ${j.title} @ ${j.company}: ${e instanceof Error ? e.message : e}`);
     }
-    rows.set(j.external_id, { ...j, source_id: source.id, thin: j.description.length < THIN_THRESHOLD });
+    rows.set(j.external_id, { ...j, source_id: source.id, thin: j.description.length < THIN_THRESHOLD, description_source: origin.get(j.external_id) ?? null });
   });
 
   const toInsert = [...rows.values()];
@@ -457,6 +464,33 @@ async function discoverSources(jobs: FetchedJob[], subscribers: Person[]) {
 
 type MatchWithJob = { id: string; user_id: string; job_id: string; jobs: Job };
 
+/** Aggregators whose listings lead to the company's own posting (src/lib/company-link.ts). */
+const LINKS_TO_COMPANY = new Set<string>(["jobtech", "swedengamejobs", "jobindex", "workingnomads"]);
+
+type Described = Awaited<ReturnType<typeof describe>> & { origin: "company" | "aggregator" | null };
+
+/**
+ * A posting's description. An aggregator's listing reads the company's own posting first,
+ * when the aggregator links to it and the company's robots.txt allows it, and falls back
+ * to the aggregator's own text. A direct source reads its own posting (origin null).
+ */
+async function describeJob(source: Source, job: { external_id: string; url: string; title: string; description?: string }): Promise<Described> {
+  if (!ATS_INFO[source.ats]?.aggregator) return { ...(await describe(source, job)), origin: null };
+  const link = LINKS_TO_COMPANY.has(source.ats) ? await companyLink(source.ats, job.url) : null;
+  if (link && (await robotsAllows(link))) {
+    try {
+      // A known job system by its URL, else the page's JobPosting data, else its text if it
+      // names this job: never a general careers page, which shows the same text for every job.
+      const found = await describe({ ats: "company" as Ats, slug: "" }, { external_id: "", url: link }, { structuredOnly: true, title: job.title });
+      if (found.text.length >= THIN_THRESHOLD) return { ...found, origin: "company" };
+    } catch {
+      // the company page couldn't be read: the aggregator's text it is
+    }
+  }
+  if ((job.description ?? "").length >= THIN_THRESHOLD) return { text: job.description!, origin: "aggregator" };
+  return { ...(await describe(source, job)), origin: "aggregator" };
+}
+
 /**
  * Fetches descriptions for postings someone is waiting on that never got one: postings
  * filtered for everyone when they arrived (so not described), which a re-evaluation or
@@ -486,9 +520,9 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
 
   let described = 0;
   await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
-    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string } = { text: "" };
+    let found: { text: string; location?: string; company?: string; remote?: boolean; title?: string; origin?: Described["origin"] } = { text: "" };
     try {
-      found = await describe(sources.get(job.source_id!)!, job); // jobs without a source were filtered out above
+      found = await describeJob(sources.get(job.source_id!)!, job); // jobs without a source were filtered out above
       described++;
     } catch (e) {
       if (e instanceof PostingClosedError) {
@@ -516,6 +550,7 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
           remote: updated.remote,
           title: updated.title,
           thin,
+          description_source: found.origin ?? null,
           ...(found.company && !job.company ? { company: found.company } : {}),
         })
         .eq("id", job.id),
@@ -530,6 +565,102 @@ async function describePending(people: Person[], sourceIds: string[] | null, acc
     }
   });
   return { described_later: described };
+}
+
+/** Retries per run, tries per posting, and the wait between tries, for thin descriptions. */
+const THIN_RETRIES_PER_RUN = 40;
+const THIN_MAX_ATTEMPTS = 3;
+const THIN_RETRY_AFTER_MS = 20 * 3_600_000;
+
+/**
+ * Retries the description of thin postings still open in someone's Inbox (waiting or
+ * scored): a fetch that failed for a moment, e.g. a site rate-limiting a big first import,
+ * left them scored on title and location only. Once a day, at most three tries each.
+ * When the text comes in, each follower's full filter runs again; scored ones that still
+ * pass are queued for a re-score (they keep their score until the new one replaces it).
+ */
+async function retryThin(people: Person[], acc: PerPerson): Promise<Record<string, number>> {
+  const before = new Date(Date.now() - THIN_RETRY_AFTER_MS).toISOString();
+  type Row = MatchWithJob & { status: string; jobs: Job & { describe_attempts?: number } };
+  const rows = await must<Row[]>(
+    db
+      .from("matches")
+      .select("id, user_id, job_id, status, jobs!inner(*)")
+      .in("status", ["new", "scored"])
+      .eq("jobs.thin", true)
+      .is("jobs.closed_at", null)
+      .not("jobs.source_id", "is", null)
+      .lt("jobs.describe_attempts", THIN_MAX_ATTEMPTS)
+      .or(`described_at.is.null,described_at.lt.${before}`, { referencedTable: "jobs" })
+      .limit(THIN_RETRIES_PER_RUN * 4),
+  );
+  if (!rows.length) return {};
+  const byJob = new Map<string, Row[]>();
+  for (const m of rows) byJob.set(m.job_id, [...(byJob.get(m.job_id) ?? []), m]);
+  const jobs = [...byJob.values()].map((ms) => ms[0].jobs).slice(0, THIN_RETRIES_PER_RUN);
+  const sources = new Map(
+    (await must<Source[]>(db.from("sources").select("*").in("id", [...new Set(jobs.map((j) => j.source_id))]))).map((s) => [s.id, s]),
+  );
+  const criteriaOf = new Map(people.map((p) => [p.id, p.criteria]));
+
+  let fixed = 0;
+  await pool(jobs, DESCRIBE_CONCURRENCY, async (job) => {
+    const tried = { describe_attempts: (Number(job.describe_attempts) || 0) + 1, described_at: new Date().toISOString() };
+    let found: Described;
+    try {
+      found = await describeJob(sources.get(job.source_id!)!, job);
+    } catch (e) {
+      if (e instanceof PostingClosedError) {
+        await must(db.from("jobs").update({ closed_at: new Date().toISOString(), ...tried }).eq("id", job.id));
+        await must(db.from("matches").update({ status: "closed" }).eq("job_id", job.id).in("status", OPEN_STATUSES));
+        return;
+      }
+      console.warn(`  still no description for ${job.title} @ ${job.company}: ${e instanceof Error ? e.message : e}`);
+      await must(db.from("jobs").update(tried).eq("id", job.id));
+      return;
+    }
+    if (found.text.length < THIN_THRESHOLD) {
+      await must(db.from("jobs").update(tried).eq("id", job.id));
+      return;
+    }
+    const updated = {
+      ...job,
+      description: found.text,
+      location: found.location ?? job.location,
+      remote: job.remote || Boolean(found.remote),
+      title: found.title || job.title,
+      thin: false,
+    };
+    await must(
+      db
+        .from("jobs")
+        .update({
+          description: updated.description,
+          location: updated.location,
+          remote: updated.remote,
+          title: updated.title,
+          thin: false,
+          description_source: found.origin,
+          ...tried,
+          ...(found.company && (!job.company || isLandingJobsPosting(job.url)) ? { company: found.company } : {}),
+        })
+        .eq("id", job.id),
+    );
+    fixed++;
+    for (const m of byJob.get(job.id)!) {
+      const c = criteriaOf.get(m.user_id);
+      const reason = c ? verdict(updated, c) : null;
+      if (reason) {
+        await must(db.from("matches").update({ status: "filtered", filter_reason: reason }).eq("id", m.id));
+        acc.add(m.user_id, "filtered_later");
+      } else if (m.status === "scored") {
+        // Scored on the title alone: score it again, first, now that there's text.
+        await must(db.from("matches").update({ scored_at: null }).eq("id", m.id));
+      }
+    }
+  });
+  console.log(`thin descriptions retried: ${jobs.length}, filled in: ${fixed}`);
+  return { thin_retried: jobs.length, thin_filled: fixed };
 }
 
 /** One person's AI spend over the last 24 hours, from their run shares. */
@@ -552,16 +683,19 @@ async function spentLast24h(userId?: string): Promise<number> {
 }
 
 /**
- * What a person may spend on scoring in this run: their per-run cap, or what's left of
- * their 24-hour cap, or what's left of everyone's 24-hour cap, whichever is least.
+ * What a person may spend on scoring in this run: the least of their own per-run cap and
+ * what's left of their own 24-hour cap (both set by them), and then
+ * - for a member, what's left of their balance (credit from the admin): nothing else;
+ * - for the admin, what's left of the account's 24-hour cap (everyone's spend counts).
  * `runSpend` is what this run has spent so far (not in the runs log yet).
  */
 async function budgetFor(p: Person, settings: Settings, runSpend: { total: number }): Promise<number> {
-  const [mine, all, balance] = await Promise.all([spentLast24h(p.id), spentLast24h(), balanceLeft(p)]);
-  return Math.max(
-    0,
-    Math.min(p.runCap, p.dayCap - mine, Number(settings.max_total_daily_cost_usd) - all - runSpend.total, balance),
-  );
+  const mine = await spentLast24h(p.id);
+  const own = Math.min(p.runCap, p.dayCap - mine);
+  const limit = p.isAdmin
+    ? Number(settings.max_total_daily_cost_usd) - (await spentLast24h()) - runSpend.total
+    : await balanceLeft(p);
+  return Math.max(0, Math.min(own, limit));
 }
 
 /**
@@ -772,6 +906,8 @@ async function runFetch(mode: "watchlist" | "full"): Promise<RunResult> {
   }
   const ids = sources.map((s) => s.id);
   Object.assign(totals, await describePending(people, ids, acc));
+  // The daily run also retries descriptions that failed before (see retryThin).
+  if (mode === "full") Object.assign(totals, await retryThin(people, acc));
   // A watchlist run scores only what the watched sources brought in.
   const cost = await scoreAll(people, settings, mode === "watchlist" ? ids : null, acc);
   totals.cost_usd = Math.round(cost * 1e6) / 1e6;

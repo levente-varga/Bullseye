@@ -24,7 +24,14 @@ const CLOSED_RE =
 export async function describe(
   source: Pick<Source, "ats" | "slug">,
   job: { external_id: string; url: string },
+  /**
+   * structuredOnly: a page must carry a real posting (a known job system, or the page's
+   * JobPosting data), not just text. For companies' own pages behind aggregator links,
+   * where a careers page can show the same general text for every job.
+   */
+  opts: { structuredOnly?: boolean; title?: string } = {},
 ): Promise<{ text: string; location?: string; company?: string; remote?: boolean; title?: string }> {
+  const only = opts.structuredOnly ? { title: opts.title } : null;
   if (source.ats === "smartrecruiters") {
     return { text: await fetchSmartRecruitersDescription(source.slug, job.external_id) };
   }
@@ -51,7 +58,7 @@ export async function describe(
   // Radancy: the link only gives a rough title and the city; the posting's structured data
   // has the real title, the full location and the text.
   if (isRadancyPosting(job.url)) {
-    const { text, location, title } = await describePage(job.url);
+    const { text, location, title } = await describePage(job.url, only);
     return { text, location, title };
   }
   // Landing.jobs: the sitemap gives only the link; the page's data has everything else.
@@ -63,16 +70,16 @@ export async function describe(
   // Jobylon lists and Personio careers pages name the city only: the posting's structured
   // data adds the country.
   if (isJobylonPosting(job.url) || isPersonioPosting(job.url) || CITY_ONLY_LISTS.test(job.url)) {
-    const { text, location } = await describePage(job.url);
+    const { text, location } = await describePage(job.url, only);
     return { text, location };
   }
   // Magnet.me's API has no company names; its list already has the full location
   // ("Utrecht, Netherlands"), which the page would shorten to a country code.
   if (/^https:\/\/magnet\.me\/en\/opportunity\//.test(job.url)) {
-    const { text, company } = await describePage(job.url);
+    const { text, company } = await describePage(job.url, only);
     return { text, company };
   }
-  return { text: await describeFromPage(job.url) };
+  return { text: (await describePage(job.url, only)).text };
 }
 
 
@@ -83,7 +90,26 @@ export async function describeFromPage(url: string): Promise<string> {
 }
 
 /** The posting's text, and its location ("City, Country") when its structured data has one. */
-async function describePage(url: string): Promise<{ text: string; location?: string; company?: string; title?: string }> {
+/** Hosts whose robots.txt asks for a pause between requests (Cornerstone: Crawl-delay 10). */
+const SLOW_HOSTS: [RegExp, number][] = [[/\.csod\.com$/i, 10_000]];
+const lastHit = new Map<string, Promise<void>>();
+/** Waits until a slow host may be asked again; requests to it queue up one by one. */
+function politeTurn(url: string): Promise<void> {
+  const host = new URL(url).hostname;
+  const gap = SLOW_HOSTS.find(([re]) => re.test(host))?.[1];
+  if (!gap) return Promise.resolve();
+  const prev = lastHit.get(host) ?? Promise.resolve();
+  const mine = prev.then(() => new Promise<void>((r) => setTimeout(r, gap)));
+  lastHit.set(host, mine);
+  return prev;
+}
+
+async function describePage(
+  url: string,
+  /** Set for companies' own pages: page text only counts when it names the job (see describe). */
+  strict: { title?: string } | null = null,
+): Promise<{ text: string; location?: string; company?: string; title?: string }> {
+  await politeTurn(url);
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     redirect: "follow",
@@ -129,7 +155,19 @@ async function describePage(url: string): Promise<{ text: string; location?: str
     .filter((l) => l.length > 1)
     .join("\n");
   if (text.length < 2000 && CLOSED_RE.test(text)) throw new PostingClosedError(`closed: ${url}`);
+  // A company's page without posting data: its text only counts when it names this job.
+  // A general careers page (the same text for every job) doesn't.
+  if (strict && !(strict.title && namesTheJob(text, strict.title))) throw new Error(`no posting for this job on ${url}`);
   return { text: text.slice(0, MAX) };
+}
+
+/** Whether page text names the job: most of the title's words (3+ letters), accents and case aside. */
+function namesTheJob(text: string, title: string): boolean {
+  const fold = (x: string) => x.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const page = fold(text);
+  const words = fold(title).split(/[^\p{L}\p{N}+#]+/u).filter((w) => w.length >= 3);
+  if (!words.length) return false;
+  return words.filter((w) => page.includes(w)).length / words.length >= 0.75;
 }
 
 /** "Helsinki, Finland" from a JobPosting's jobLocation (one place or several), if it has a country. */
@@ -180,7 +218,10 @@ function findJobPosting(node: Json): { description?: Json; jobLocation?: Json; h
   }
   if (node && typeof node === "object") {
     const type = node["@type"];
-    if (type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) return node;
+    if (type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) {
+      // Some sites (Cornerstone) capitalize the property names: "Title", "Description".
+      return { ...node, description: node.description ?? node.Description, title: node.title ?? node.Title, jobLocation: node.jobLocation ?? node.JobLocation, hiringOrganization: node.hiringOrganization ?? node.HiringOrganization };
+    }
     if (node["@graph"]) return findJobPosting(node["@graph"]);
   }
   return null;

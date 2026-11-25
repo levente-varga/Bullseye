@@ -6,8 +6,8 @@ import { Empty, PageHeader, Panel, Pill, SectionHeader } from "@/components/ui";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { formatUsd } from "@/lib/pricing";
 import { agoText, nowMs } from "@/lib/time";
-import type { Member, Settings } from "@/lib/types";
-import { addCreditGrant, cancelInvite, inviteMember, removeMember, saveMemberDefaults, updateMemberCaps } from "../actions";
+import type { Member } from "@/lib/types";
+import { addCreditGrant, cancelInvite, inviteMember, removeMember } from "../actions";
 
 /** Admin only: invite friends, set their AI spend caps, remove them. */
 export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
@@ -17,20 +17,18 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
   if (!me.isAdmin) notFound();
 
   const dayAgo = new Date(nowMs() - 86_400_000).toISOString();
-  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }, { data: st }, { data: bal }] = await Promise.all([
+  const [{ data: m }, { data: inv }, { data: shares }, { data: subs }, { data: bal }] = await Promise.all([
     supabase.from("members").select("*").order("created_at"),
     supabase.from("invites").select("*").order("invited_at", { ascending: false }),
     // Everyone's spend in the last 24 hours (admin sees all run shares).
     supabase.from("run_users").select("user_id, stats, runs!inner(started_at)").gte("runs.started_at", dayAgo),
     supabase.from("subscriptions").select("user_id"),
-    supabase.from("settings").select("*").single(),
     // Each member's AI balance: granted here, minus their runs and other AI tasks.
     supabase.from("member_balances").select("user_id, granted_usd, spent_usd, balance_usd"),
   ]);
   const balanceOf = new Map(
     ((bal ?? []) as { user_id: string; granted_usd: number; spent_usd: number; balance_usd: number }[]).map((b) => [b.user_id, b]),
   );
-  const settings = st as Settings;
   const members = (m ?? []) as Member[];
   const memberEmails = new Set(members.map((x) => x.email.toLowerCase()));
   // An invite is done once its person is a member and has signed in (or it failed).
@@ -72,15 +70,6 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
             </SubmitButton>
           </form>
           <p className="faint mt-2 text-[12px]">They get a link to set a password.</p>
-          <form action={saveMemberDefaults} className="panel mt-3 flex flex-wrap items-end gap-3 p-3">
-            <div className="w-full text-[13px]">
-              Defaults for new members
-              <span className="hint">Existing members keep theirs.</span>
-            </div>
-            <Money name="default_run_cost_usd" label="Per run" value={settings.default_run_cost_usd} />
-            <Money name="default_daily_cost_usd" label="Per 24 hours" value={settings.default_daily_cost_usd} />
-            <SubmitButton className="btn btn-field" done="Saved">Save defaults</SubmitButton>
-          </form>
           {invites.length > 0 && (
             <Panel title="Pending invites" aside={String(invites.length)}>
               <ul className="divide">
@@ -151,23 +140,14 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
                             <span className="hint">Add credit ($, negative to take back)</span>
                             <input name="amount" type="number" step={0.01} required className="input mono w-28" placeholder="5.00" />
                           </label>
-                          <label className="field">
-                            <span className="hint">Note</span>
-                            <input name="note" className="input w-44" placeholder="optional" />
-                          </label>
                           <SubmitButton className="btn btn-field" done="Added">
                             Add
                           </SubmitButton>
                         </form>
                       </div>
                     )}
+                    {/* Spend caps are each member's own (Criteria → AI spending); their balance is the limit set here. */}
                     <div className="flex flex-wrap items-end gap-3">
-                      <form action={updateMemberCaps} className="flex flex-wrap items-end gap-3">
-                        <input type="hidden" name="user_id" value={x.user_id} />
-                        <Money name="max_run_cost_usd" label="Per run" value={x.max_run_cost_usd} />
-                        <Money name="max_daily_cost_usd" label="Per 24 hours" value={x.max_daily_cost_usd} />
-                        <SubmitButton className="btn btn-field" done="Saved">Save caps</SubmitButton>
-                      </form>
                       {!x.is_admin && x.user_id !== me.id && (
                         <form action={removeMember} className="ml-auto flex flex-wrap items-center gap-2 text-[12px]">
                           <input type="hidden" name="user_id" value={x.user_id} />
@@ -187,17 +167,5 @@ export default async function AdminPage({ searchParams }: PageProps<"/admin">) {
         </section>
       </div>
     </>
-  );
-}
-
-function Money(props: { name: string; label: string; value: number }) {
-  return (
-    <label className="field">
-      <span className="hint">{props.label}</span>
-      <span className="flex items-center gap-1.5">
-        <span className="faint mono">$</span>
-        <input name={props.name} type="number" min={0} step={0.01} defaultValue={props.value} className="input mono w-24" />
-      </span>
-    </label>
   );
 }
