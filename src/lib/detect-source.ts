@@ -125,8 +125,16 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     const radancy = !phenom && !sf && html ? radancyBase(url, html) : null;
     if (radancy) candidates.push({ ats: "radancy", slug: radancy });
     // A careers page embedding Comeet (COMEET.init with a public token): read through Comeet's API.
-    const comeet = !phenom && !sf && !radancy && html ? comeetConfig(html) : null;
-    if (comeet) candidates.push({ ats: "comeet", slug: `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}` });
+    // A job page shows Comeet (its apply form) without the token, which sits on the careers
+    // home: then the home page is the source.
+    let comeet = !phenom && !sf && !radancy && html ? comeetConfig(html) : null;
+    let comeetSlug = `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
+    if (!comeet && !phenom && !sf && !radancy && html && /\bCOMEET\b|comeet-applyform/.test(html)) {
+      const home = await fetchText(`${url.origin}/`);
+      comeet = home ? comeetConfig(home) : null;
+      comeetSlug = url.hostname.toLowerCase();
+    }
+    if (comeet) candidates.push({ ats: "comeet", slug: comeetSlug });
     if (html && !phenom && !sf && !radancy && !comeet) {
       for (const { ats, re, slug } of EMBEDDED) {
         const m = html.match(re);
