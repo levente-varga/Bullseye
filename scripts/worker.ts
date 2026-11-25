@@ -552,16 +552,19 @@ async function spentLast24h(userId?: string): Promise<number> {
 }
 
 /**
- * What a person may spend on scoring in this run: their per-run cap, or what's left of
- * their 24-hour cap, or what's left of everyone's 24-hour cap, whichever is least.
+ * What a person may spend on scoring in this run: the least of their own per-run cap and
+ * what's left of their own 24-hour cap (both set by them), and then
+ * - for a member, what's left of their balance (credit from the admin): nothing else;
+ * - for the admin, what's left of the account's 24-hour cap (everyone's spend counts).
  * `runSpend` is what this run has spent so far (not in the runs log yet).
  */
 async function budgetFor(p: Person, settings: Settings, runSpend: { total: number }): Promise<number> {
-  const [mine, all, balance] = await Promise.all([spentLast24h(p.id), spentLast24h(), balanceLeft(p)]);
-  return Math.max(
-    0,
-    Math.min(p.runCap, p.dayCap - mine, Number(settings.max_total_daily_cost_usd) - all - runSpend.total, balance),
-  );
+  const mine = await spentLast24h(p.id);
+  const own = Math.min(p.runCap, p.dayCap - mine);
+  const limit = p.isAdmin
+    ? Number(settings.max_total_daily_cost_usd) - (await spentLast24h()) - runSpend.total
+    : await balanceLeft(p);
+  return Math.max(0, Math.min(own, limit));
 }
 
 /**
