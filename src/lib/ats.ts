@@ -2598,6 +2598,239 @@ async function fetchTrakstar(slug: string, company: string): Promise<FetchedJob[
   });
 }
 
+// --- Cornerstone OnDemand (<corp>.csod.com) -----------------------------------------------------
+// Slug: "<corp>.csod.com/<career site id>", e.g. "nintendoeurope.csod.com/1". The careers page
+// hands every visitor a token (csod.context) for Cornerstone's job search API; the list has a
+// summary only, and each posting's page carries the full text as JobPosting data. robots.txt
+// asks for 10 seconds between requests.
+const CSOD_DELAY_MS = 10_000;
+const CSOD_PAGE = 100;
+
+export const isCornerstonePosting = (url: string) => /^https:\/\/[a-z0-9-]+\.csod\.com\/ux\/ats\/careersite\/\d+\/home\/requisition\/\d+/i.test(url);
+
+async function fetchCornerstone(slug: string, company: string): Promise<FetchedJob[]> {
+  const [host, site = "1"] = slug.split("/");
+  const corp = host.split(".")[0];
+  const html = await (await get(`https://${host}/ux/ats/careersite/${site}/home?c=${encodeURIComponent(corp)}`, "text/html")).text();
+  const raw = html.match(/csod\.context=(\{.*?\});/)?.[1];
+  if (!raw) throw new Error("Cornerstone: no page context with a token (site layout changed?)");
+  const ctx = JSON.parse(raw) as { token: string; endpoints: { cloud: string }; cultureID?: number; cultureName?: string };
+  const out: FetchedJob[] = [];
+  for (let page = 1; page <= 20; page++) {
+    await sleep(CSOD_DELAY_MS);
+    const d = await postJson<{ data?: { totalCount?: number; requisitions?: { requisitionId: number; displayJobTitle: string; postingEffectiveDate?: string; locations?: { city?: string; country?: string }[] }[] } }>(
+      `${ctx.endpoints.cloud}rec-job-search/external/jobs`,
+      {
+        careerSiteId: Number(site), careerSitePageId: Number(site), pageNumber: page, pageSize: CSOD_PAGE,
+        cultureId: ctx.cultureID ?? 1, cultureName: ctx.cultureName ?? "en-US", searchText: "",
+        states: [], countryCodes: [], cities: [], placeID: "", radius: null, postingsWithinDays: null,
+        customFieldCheckboxKeys: [], customFieldDropdowns: [], customFieldRadios: [],
+      },
+      undefined,
+      { Authorization: `Bearer ${ctx.token}` },
+    );
+    const reqs = d.data?.requisitions ?? [];
+    for (const r of reqs) {
+      const location = (r.locations ?? []).map((l) => [l.city, countryName(l.country)].filter(Boolean).join(", ")).filter(Boolean).join(" | ");
+      const [m, dd, y] = (r.postingEffectiveDate ?? "").split("/");
+      out.push({
+        external_id: String(r.requisitionId),
+        title: r.displayJobTitle.trim(),
+        company,
+        location,
+        remote: looksRemote(location),
+        url: `https://${host}/ux/ats/careersite/${site}/home/requisition/${r.requisitionId}?c=${encodeURIComponent(corp)}`,
+        description: "", // the posting page has the full text (JobPosting data)
+        compensation: null,
+        posted_at: y && m && dd ? new Date(Date.UTC(Number(y), Number(m) - 1, Number(dd))).toISOString() : null,
+      });
+    }
+    if (reqs.length < CSOD_PAGE || out.length >= (d.data?.totalCount ?? 0)) break;
+  }
+  return out;
+}
+
+/** A Cornerstone careers-site link as its source slug ("<corp>.csod.com/<site id>"), or null. */
+export function cornerstoneSlug(url: URL): string | null {
+  if (!url.hostname.endsWith(".csod.com")) return null;
+  const site = url.pathname.match(/\/ux\/ats\/careersite\/(\d+)\//)?.[1];
+  return site ? `${url.hostname.toLowerCase()}/${site}` : null;
+}
+
+// --- Comeet (careers pages with COMEET.init) -----------------------------------------------------
+// Slug: the careers page that embeds Comeet, e.g. "careers.overwolf.com". The page's
+// COMEET.init gives a public token and the company uid for Comeet's documented careers API,
+// which lists every position with its details (description, responsibilities, requirements).
+interface ComeetPosition {
+  uid: string;
+  name: string;
+  url_active_page?: string | null;
+  url_comeet_hosted_page?: string | null;
+  location?: { name?: string | null; city?: string | null; country?: string | null } | null;
+  workplace_type?: string | null;
+  time_updated?: string | null;
+  details?: { name: string; value: string | null }[] | null;
+}
+
+/** The token and company uid from a page's COMEET.init (also when it sits in escaped JSON). */
+export function comeetConfig(html: string): { token: string; uid: string } | null {
+  const plain = html.replace(/\\+"/g, '"');
+  const token = plain.match(/COMEET\.init\(\{[^}]*?"token"\s*:\s*"([A-Z0-9]+)"/i)?.[1];
+  const uid = plain.match(/COMEET\.init\(\{[^}]*?"company-uid"\s*:\s*"([A-Z0-9.]+)"/i)?.[1];
+  return token && uid ? { token, uid } : null;
+}
+
+/** Comeet's links carry a source tag ("?src=LinkedIn"): not ours to pass on. */
+const withoutSrc = (link: string) => {
+  try {
+    const u = new URL(link);
+    u.searchParams.delete("src");
+    return u.toString();
+  } catch {
+    return link;
+  }
+};
+
+async function fetchComeet(slug: string, company: string): Promise<FetchedJob[]> {
+  const page = /^https?:\/\//.test(slug) ? slug : `https://${slug}`;
+  const cfg = comeetConfig(await (await get(page, "text/html")).text());
+  if (!cfg) throw new Error("Comeet: no COMEET.init token on the careers page (site changed?)");
+  const positions = await getJson<ComeetPosition[]>(
+    `https://www.comeet.co/careers-api/2.0/company/${encodeURIComponent(cfg.uid)}/positions?token=${encodeURIComponent(cfg.token)}&details=true`,
+  );
+  return positions.map((p) => {
+    const l = p.location ?? {};
+    const place = [l.city || l.name, countryName(l.country)].filter(Boolean).join(", ");
+    const remote = /remote/i.test(p.workplace_type ?? "") || looksRemote(place);
+    const text = (p.details ?? [])
+      .filter((d) => d.value)
+      .map((d) => `${d.name}\n${htmlToText(String(d.value))}`)
+      .join("\n\n");
+    return {
+      external_id: p.uid,
+      title: p.name.trim(),
+      company,
+      location: remote && !/remote/i.test(place) ? [place, "Remote"].filter(Boolean).join(" / ") : place,
+      remote,
+      url: withoutSrc(p.url_active_page || p.url_comeet_hosted_page || page),
+      description: clip(text),
+      compensation: null,
+      posted_at: p.time_updated ?? null,
+    };
+  });
+}
+
+// --- MED-EL (jobs.medel.com) ---------------------------------------------------------------------
+// One company's own careers app (AWS Amplify). Its positions come from an AppSync GraphQL API
+// that takes anonymous AWS credentials the site gets from Cognito for every visitor; requests
+// are signed (SigV4). Only ACTIVE positions are listed on the site.
+const MEDEL = {
+  region: "eu-west-1",
+  identityPool: "eu-west-1:278b3fe3-44b6-4c49-8865-95d61339e2f1",
+  api: "https://am6fq3rfjzakvpgov3i3aym77y.appsync-api.eu-west-1.amazonaws.com/graphql",
+};
+/** MED-EL writes countries in German. */
+const GERMAN_COUNTRIES: Record<string, string> = {
+  Österreich: "Austria", Deutschland: "Germany", Schweiz: "Switzerland", Frankreich: "France", Italien: "Italy",
+  Spanien: "Spain", Polen: "Poland", Tschechien: "Czechia", Ungarn: "Hungary", Niederlande: "Netherlands",
+  Belgien: "Belgium", Schweden: "Sweden", Dänemark: "Denmark", Norwegen: "Norway", Finnland: "Finland",
+  Vereinigtes_Königreich: "United Kingdom", Großbritannien: "United Kingdom", Vereinigte_Staaten: "United States",
+  USA: "United States", Indien: "India", China: "China", Australien: "Australia", Kanada: "Canada",
+};
+
+async function medelCredentials(): Promise<{ AccessKeyId: string; SecretKey: string; SessionToken: string }> {
+  const call = async <T,>(target: string, body: object): Promise<T> => {
+    const res = await fetch(`https://cognito-identity.${MEDEL.region}.amazonaws.com/`, {
+      method: "POST",
+      headers: { "User-Agent": USER_AGENT, "Content-Type": "application/x-amz-json-1.1", "X-Amz-Target": `AWSCognitoIdentityService.${target}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`MED-EL: Cognito ${target} answered ${res.status}`);
+    return (await res.json()) as T;
+  };
+  const { IdentityId } = await call<{ IdentityId: string }>("GetId", { IdentityPoolId: MEDEL.identityPool });
+  return (await call<{ Credentials: { AccessKeyId: string; SecretKey: string; SessionToken: string } }>("GetCredentialsForIdentity", { IdentityId })).Credentials;
+}
+
+/** A POST to AppSync, signed with AWS Signature Version 4. */
+async function medelQuery<T>(creds: { AccessKeyId: string; SecretKey: string; SessionToken: string }, query: string, variables: object): Promise<T> {
+  const { createHash, createHmac } = await import("node:crypto");
+  const body = JSON.stringify({ query, variables });
+  const amz = new Date().toISOString().replace(/[-:]|\.\d{3}/g, "");
+  const day = amz.slice(0, 8);
+  const host = new URL(MEDEL.api).host;
+  const headers: Record<string, string> = { "content-type": "application/json", host, "x-amz-date": amz, "x-amz-security-token": creds.SessionToken };
+  const signed = Object.keys(headers).sort();
+  const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+  const canonical = ["POST", "/graphql", "", ...signed.map((h) => `${h}:${headers[h]}`), "", signed.join(";"), sha(body)].join("\n");
+  const scope = `${day}/${MEDEL.region}/appsync/aws4_request`;
+  const hmac = (k: Buffer | string, s: string) => createHmac("sha256", k).update(s).digest();
+  const key = hmac(hmac(hmac(hmac(`AWS4${creds.SecretKey}`, day), MEDEL.region), "appsync"), "aws4_request");
+  const signature = createHmac("sha256", key).update(["AWS4-HMAC-SHA256", amz, scope, sha(canonical)].join("\n")).digest("hex");
+  const res = await fetch(MEDEL.api, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "User-Agent": USER_AGENT,
+      Authorization: `AWS4-HMAC-SHA256 Credential=${creds.AccessKeyId}/${scope}, SignedHeaders=${signed.join(";")}, Signature=${signature}`,
+    },
+    body,
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`MED-EL: API answered ${res.status}`);
+  const d = (await res.json()) as { data?: T; errors?: { message: string }[] };
+  if (d.errors?.length) throw new Error(`MED-EL: ${d.errors[0].message}`);
+  return d.data as T;
+}
+
+interface MedelPosition {
+  medel_id: string;
+  title: string;
+  city?: string | null;
+  countrycode?: string | null;
+  state?: string | null;
+  activity?: string | null;
+  profile?: string | null;
+  free_text1?: string | null;
+  free_text2?: string | null;
+  header_tasks?: string | null;
+  header_profile?: string | null;
+  updatedAt?: string | null;
+}
+
+async function fetchMedel(company: string): Promise<FetchedJob[]> {
+  const creds = await medelCredentials();
+  const query = `query ($limit: Int, $nextToken: String) { listOpenPositions(limit: $limit, nextToken: $nextToken) {
+    items { medel_id title city countrycode state activity profile free_text1 free_text2 header_tasks header_profile updatedAt } nextToken } }`;
+  const all: MedelPosition[] = [];
+  let next: string | null = null;
+  for (let i = 0; i < 20; i++) {
+    const d: { listOpenPositions: { items: MedelPosition[]; nextToken: string | null } } = await medelQuery(creds, query, { limit: 200, nextToken: next });
+    all.push(...d.listOpenPositions.items);
+    next = d.listOpenPositions.nextToken;
+    if (!next) break;
+  }
+  return all
+    .filter((p) => p.state === "ACTIVE" && p.medel_id && p.title)
+    .map((p) => {
+      const country = p.countrycode ? (GERMAN_COUNTRIES[p.countrycode.replace(/ /g, "_")] ?? p.countrycode) : "";
+      const location = [p.city, country].filter(Boolean).join(", ");
+      const part = (head: string | null | undefined, html: string | null | undefined) => (html ? `${head ? `${head}\n` : ""}${htmlToText(html)}` : "");
+      return {
+        external_id: p.medel_id,
+        title: p.title.trim(),
+        company,
+        location,
+        remote: looksRemote(location),
+        url: `https://jobs.medel.com/en/open-position/${encodeURIComponent(p.medel_id)}`,
+        description: clip([part(p.header_tasks, p.activity), part(p.header_profile, p.profile), part(null, p.free_text1), part(null, p.free_text2)].filter(Boolean).join("\n\n")),
+        compensation: null,
+        posted_at: p.updatedAt ?? null,
+      };
+    });
+}
+
 // --- Homerun (<company>.homerun.co) ------------------------------------------------------------
 // The careers page links its Atom feed (feed.homerun.co/jobs_atom_<id>.xml), which has every
 // job with its text.
@@ -2742,6 +2975,12 @@ export function fetchBoard(
       return fetchHomerun(slug, company);
     case "jazzhr":
       return fetchJazzHr(slug, company);
+    case "cornerstone":
+      return fetchCornerstone(slug, company);
+    case "comeet":
+      return fetchComeet(slug, company);
+    case "medel":
+      return fetchMedel(company);
     case "jobtech":
       return fetchJobTech(terms);
     case "swedengamejobs":
@@ -2827,6 +3066,12 @@ export const ATS_BOARD_URL: Record<Ats, (slug: string) => string> = {
   softgarden: (s) => `https://${s}/en/vacancies`,
   trakstar: (s) => `https://${s}.hire.trakstar.com/`,
   homerun: (s) => `https://${s}/`,
+  cornerstone: (s) => {
+    const [host, site = "1"] = s.split("/");
+    return `https://${host}/ux/ats/careersite/${site}/home?c=${host.split(".")[0]}`;
+  },
+  comeet: (s) => (/^https?:\/\//.test(s) ? s : `https://${s}`),
+  medel: () => "https://jobs.medel.com/en/",
   jazzhr: (s) => `https://${s}.applytojob.com/apply`,
 };
 

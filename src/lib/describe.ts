@@ -90,11 +90,26 @@ export async function describeFromPage(url: string): Promise<string> {
 }
 
 /** The posting's text, and its location ("City, Country") when its structured data has one. */
+/** Hosts whose robots.txt asks for a pause between requests (Cornerstone: Crawl-delay 10). */
+const SLOW_HOSTS: [RegExp, number][] = [[/\.csod\.com$/i, 10_000]];
+const lastHit = new Map<string, Promise<void>>();
+/** Waits until a slow host may be asked again; requests to it queue up one by one. */
+function politeTurn(url: string): Promise<void> {
+  const host = new URL(url).hostname;
+  const gap = SLOW_HOSTS.find(([re]) => re.test(host))?.[1];
+  if (!gap) return Promise.resolve();
+  const prev = lastHit.get(host) ?? Promise.resolve();
+  const mine = prev.then(() => new Promise<void>((r) => setTimeout(r, gap)));
+  lastHit.set(host, mine);
+  return prev;
+}
+
 async function describePage(
   url: string,
   /** Set for companies' own pages: page text only counts when it names the job (see describe). */
   strict: { title?: string } | null = null,
 ): Promise<{ text: string; location?: string; company?: string; title?: string }> {
+  await politeTurn(url);
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     redirect: "follow",
@@ -203,7 +218,10 @@ function findJobPosting(node: Json): { description?: Json; jobLocation?: Json; h
   }
   if (node && typeof node === "object") {
     const type = node["@type"];
-    if (type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) return node;
+    if (type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) {
+      // Some sites (Cornerstone) capitalize the property names: "Title", "Description".
+      return { ...node, description: node.description ?? node.Description, title: node.title ?? node.Title, jobLocation: node.jobLocation ?? node.JobLocation, hiringOrganization: node.hiringOrganization ?? node.HiringOrganization };
+    }
     if (node["@graph"]) return findJobPosting(node["@graph"]);
   }
   return null;
