@@ -7,7 +7,7 @@ import { ExpandableJobRow, ExpandToggle } from "@/components/ExpandableJobRow";
 import { Dot, Empty, PageHeader, Panel, Pill, ScoreMeter } from "@/components/ui";
 import { estimateTask } from "@/lib/estimates";
 import { agoText, nowMs } from "@/lib/time";
-import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, PIPELINE_STATUSES, SCORING_MODELS, type Job, type JobStatus } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, PIPELINE_STATUSES, SCORING_MODELS, isEffort, type Job, type JobStatus } from "@/lib/types";
 import { markFollowedUp, restoreToInbox, setStatus } from "../actions";
 
 const LABEL: Record<string, string> = {
@@ -57,15 +57,16 @@ export default async function PipelinePage() {
     supabase.from("criteria").select("followup_days").single(),
     // Written drafts only: a letter that waits for its questions has no content yet.
     supabase.from("drafts").select("job_id, kind").not("content", "is", null),
-    supabase.from("settings").select("writing_model").single(),
+    supabase.from("settings").select("writing_model, writing_effort").single(),
     supabase.from("profile").select("letter_questions").single(),
   ]);
   // Estimates for the draft buttons: drafts use the writing model, the questions Haiku.
   const writingModel = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
+  const writingEffort = isEffort(st?.writing_effort) ? st.writing_effort : "medium";
   const [cvEst, questionsEst, letterEst] = await Promise.all([
-    estimateTask(supabase, me.id, "cv_draft", writingModel),
-    estimateTask(supabase, me.id, "letter_questions", DEFAULT_SCORING_MODEL),
-    estimateTask(supabase, me.id, "cover_letter", writingModel),
+    estimateTask(supabase, me.id, "cv_draft", writingModel, writingEffort),
+    estimateTask(supabase, me.id, "letter_questions", DEFAULT_SCORING_MODEL, "low"),
+    estimateTask(supabase, me.id, "cover_letter", writingModel, writingEffort),
   ]);
   const estimates = { cv: cvEst, questions: questionsEst, letter: letterEst };
   const questionsOn = prof?.letter_questions ?? true;
