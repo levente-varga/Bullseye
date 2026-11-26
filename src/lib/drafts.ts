@@ -4,7 +4,7 @@ import { z } from "zod";
 import { formatCareerDate, type Career } from "./career-schema";
 import type { Coverage, CvDraft, LetterDraft, LetterQA } from "./draft-types";
 import { costUsd, type TokenUsage } from "./pricing";
-import { DRAFT_LANGUAGES, type Profile, type ScoringModel } from "./types";
+import { DRAFT_LANGUAGES, maxTokensFor, type Effort, type Profile, type ScoringModel } from "./types";
 
 /**
  * CV and cover letter drafts. The career goes to the model with a stable id on every
@@ -150,13 +150,14 @@ export async function generateCv(
   career: Career,
   profile: Profile,
   job: DraftJob,
+  effort: Effort = "medium",
 ): Promise<Result<CvDraft>> {
   const indexed = indexCareer(career);
   const response = await client.beta.messages.parse({
     model,
-    max_tokens: 6000,
+    max_tokens: maxTokensFor(6000, effort),
     system: [{ type: "text", text: cvSystemPrompt(indexed, profile, profile.cv_length, profile.draft_language), cache_control: { type: "ephemeral" } }],
-    output_config: { format: betaZodOutputFormat(CvOutput) },
+    output_config: { effort, format: betaZodOutputFormat(CvOutput) },
     messages: [{ role: "user", content: jobBlock(job) }],
   });
   if (response.stop_reason === "refusal") throw new Error("The model declined to write this CV.");
@@ -276,7 +277,8 @@ export async function letterQuestions(client: Anthropic, model: ScoringModel, ca
 <career>
 ${indexCareer(career).text}
 </career>`,
-    output_config: { format: betaZodOutputFormat(QuestionsOutput) },
+    // 1-2 short questions: little to think about.
+    output_config: { effort: "low", format: betaZodOutputFormat(QuestionsOutput) },
     messages: [{ role: "user", content: jobBlock(job) }],
   });
   if (!response.parsed_output) throw new Error(`No usable result (stop_reason=${response.stop_reason}).`);
@@ -297,12 +299,13 @@ export async function generateLetter(
   profile: Profile,
   job: DraftJob,
   answers: LetterQA[],
+  effort: Effort = "medium",
 ): Promise<Result<LetterDraft>> {
   const indexed = indexCareer(career);
   const qa = answers.filter((a) => a.answer.trim());
   const response = await client.beta.messages.parse({
     model,
-    max_tokens: 3000,
+    max_tokens: maxTokensFor(3000, effort),
     system: [
       {
         type: "text",
@@ -324,7 +327,7 @@ ${indexed.text}
         cache_control: { type: "ephemeral" },
       },
     ],
-    output_config: { format: betaZodOutputFormat(LetterOutput) },
+    output_config: { effort, format: betaZodOutputFormat(LetterOutput) },
     messages: [
       {
         role: "user",

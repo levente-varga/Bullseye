@@ -29,6 +29,7 @@ import { renderDigest, renderInvite, renderWatchlistAlert, sendEmail } from "../
 import {
   ATS_INFO,
   FETCH_MODES,
+  isEffort,
   type Ats,
   type Criteria,
   type FetchedJob,
@@ -764,6 +765,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
   const { profile, feedback } = await loadContext(p);
   const system = buildSystemPrompt(profile, p.criteria, feedback);
   const model = resolveModel(settings.scoring_model);
+  const effort = isEffort(settings.scoring_effort) ? settings.scoring_effort : "low"; // Settings → AI
   console.log(`[${p.email}] scoring ${pending.length} listings with ${model}, budget $${budget.toFixed(4)}`);
   let scored = 0;
   let errors = 0;
@@ -777,7 +779,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
       for (let m = queue.shift(); m && spend.cost < budget; m = queue.shift()) {
         const job = m.jobs;
         try {
-          const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job);
+          const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job, effort);
           const cost = costUsd(answeredBy, usage);
           spend.cost += cost;
           runSpend.total += cost;
