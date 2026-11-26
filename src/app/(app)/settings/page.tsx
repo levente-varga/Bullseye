@@ -58,7 +58,7 @@ export default async function SettingsPage() {
                   <input type="checkbox" name="daily_enabled" defaultChecked={settings.daily_enabled} />
                   <span className="muted">every day at</span>
                 </label>
-                <input name="daily_time" type="time" defaultValue={settings.daily_time} className="input mono w-28" />
+                <input name="daily_time" type="time" defaultValue={settings.daily_time} className="input mono w-36" />
               </div>
               <p className="hint mt-1.5">Next: {formatNextRun(next.daily, tz, nowMs())}</p>
             </Row>
