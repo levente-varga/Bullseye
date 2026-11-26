@@ -42,8 +42,10 @@ const s = StyleSheet.create({
   itemMeta: { color: MUTED, fontSize: 8.5 },
   bullet: { flexDirection: "row", marginTop: 1.5 },
   bulletDot: { width: 9, color: MUTED },
-  bulletText: { flex: 1 },
-  para: { marginBottom: 9 },
+  // Running text is justified (sorkizárt): both edges straight, the last line left-aligned.
+  justify: { textAlign: "justify" },
+  bulletText: { flex: 1, textAlign: "justify" },
+  para: { marginBottom: 9, textAlign: "justify" },
   link: { color: MUTED, textDecoration: "none" },
 });
 
@@ -130,7 +132,7 @@ function CvDocument({ cv, profile, language, photo }: { cv: CvDraft; profile: Pr
         <Header profile={profile} headline={cv.headline} photo={photo} />
         {cv.summary && (
           <Section title={L.summary}>
-            <Text>{cv.summary}</Text>
+            <Text style={s.justify}>{cv.summary}</Text>
           </Section>
         )}
         {cv.experiences.length > 0 && (
@@ -162,7 +164,7 @@ function CvDocument({ cv, profile, language, photo }: { cv: CvDraft; profile: Pr
                     </Link>
                   )}
                 </Text>
-                <Text>{p.description}</Text>
+                <Text style={s.justify}>{p.description}</Text>
               </View>
             ))}
           </Section>
@@ -178,7 +180,7 @@ function CvDocument({ cv, profile, language, photo }: { cv: CvDraft; profile: Pr
                   </Text>
                   <Text style={s.itemMeta}>{dates(d.start, d.end, L.present, language)}</Text>
                 </View>
-                {d.details && <Text style={{ color: MUTED }}>{d.details}</Text>}
+                {d.details && <Text style={{ ...s.justify, color: MUTED }}>{d.details}</Text>}
               </View>
             ))}
           </Section>
