@@ -75,17 +75,20 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
   if (runFilter === "daily") runsQuery = runsQuery.in("kind", ["full", "digest"]);
   if (runFilter === "watchlist") runsQuery = runsQuery.eq("kind", "watchlist");
   if (runFilter === "failed") runsQuery = runsQuery.not("error", "is", null);
-  const counts = await Promise.all(
-    FUNNEL.map(async (f) => {
-      const { count } = await supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", f.status);
-      return [f.status, count ?? 0] as const;
-    }),
-  );
-  const { data: tzRow } = await supabase.from("settings").select("timezone").single();
+  // The funnel counts only need your matches, not the job rows; the timezone comes in the same round.
+  const [counts, { data: tzRow }] = await Promise.all([
+    Promise.all(
+      FUNNEL.map(async (f) => {
+        const { count } = await supabase.from("matches").select("id", { count: "exact", head: true }).eq("status", f.status);
+        return [f.status, count ?? 0] as const;
+      }),
+    ),
+    supabase.from("settings").select("timezone").single(),
+  ]);
   const timezone = (tzRow?.timezone as string | undefined) ?? "UTC";
   const [{ data: runRows, count: runTotal, error }, { data: scores }, { data: perDay }] = await Promise.all([
     runsQuery.order("started_at", { ascending: false }).limit(runLimit),
-    supabase.from("my_jobs").select("score").not("score", "is", null).limit(10000),
+    supabase.from("matches").select("score").not("score", "is", null).limit(10000),
     supabase.rpc("my_new_per_day", { p_days: 30, p_tz: timezone }),
   ]);
   const newPerDay = fillDays((perDay ?? []) as DayCount[], timezone);
