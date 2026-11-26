@@ -2,17 +2,14 @@ import { formatEstimate, type Estimate } from "@/lib/estimates";
 
 /**
  * An estimated cost inside (or beside) the button that spends it: "~$0.02" from the
- * person's own last tasks, "≈$0.02" when it's borrowed or typical. Quiet, so the label leads.
+ * person's own recent tasks at this model and thinking level, "~$0.02*" when it's a guess
+ * (borrowed, scaled or typical; see estimates.ts). Quiet, so the label leads.
  */
 export function Price({ estimate }: { estimate: Estimate }) {
   return (
     <span
       className="mono text-[11px] font-normal opacity-70"
-      title={
-        estimate.guessed
-          ? "Estimated AI cost: a typical task of this kind, priced at the current model"
-          : "Estimated AI cost: the average of your last 5 such tasks, priced at the current model"
-      }
+      title="Estimated AI cost"
     >
       {formatEstimate(estimate)}
     </span>

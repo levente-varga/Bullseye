@@ -11,7 +11,7 @@ import { SkipForm } from "@/components/SkipForm";
 import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
 import { estimateTask, type Estimate } from "@/lib/estimates";
 import { ago, pad2 } from "@/lib/time";
-import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, SCORING_MODELS, type Job } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, SCORING_MODELS, isEffort, type Job } from "@/lib/types";
 import { approveJob, restoreToInbox } from "./actions";
 
 const PAGE = 50;
@@ -46,7 +46,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
 
   const [{ data: criteria }, { data: st }, me] = await Promise.all([
     supabase.from("criteria").select("score_threshold").single(),
-    supabase.from("settings").select("scoring_model").single(),
+    supabase.from("settings").select("scoring_model, scoring_effort").single(),
     currentUser(supabase),
   ]);
   const threshold = criteria?.score_threshold ?? 60;
@@ -56,6 +56,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
     me.id,
     "rescore",
     SCORING_MODELS.find((m) => m.id === st?.scoring_model)?.id ?? DEFAULT_SCORING_MODEL,
+    isEffort(st?.scoring_effort) ? st.scoring_effort : "low",
   );
 
   // With a search, the total number of matches comes back too.
