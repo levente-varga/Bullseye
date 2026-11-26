@@ -172,7 +172,8 @@ export async function saveCriteria(form: FormData) {
           include_keywords: list(form, "include_keywords"),
           exclude_keywords: list(form, "exclude_keywords"),
           preferences: str(form, "preferences"),
-          score_threshold: Math.min(100, Math.max(0, Number(str(form, "score_threshold")) || 60)),
+          score_threshold: score(str(form, "score_threshold")),
+          email_threshold: score(str(form, "email_threshold")),
           followup_days: Math.max(1, Number(str(form, "followup_days")) || 10),
           digest_email: str(form, "digest_email"),
           updated_at: new Date().toISOString(),
@@ -321,6 +322,12 @@ export async function addExcludeKeyword(form: FormData) {
   const next = [...new Set([...(data!.exclude_keywords as string[]), kw])];
   check((await supabase.from("criteria").update({ exclude_keywords: next }).eq("user_id", me.id)).error);
   revalidatePath("/criteria");
+}
+
+/** A 0-100 score from a form field; 60 when empty or invalid (0 is a valid value). */
+function score(raw: string): number {
+  const n = Number(raw);
+  return raw.trim() !== "" && Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 60;
 }
 
 /** A dollar amount from a form field: non-negative, in cents; undefined when empty or invalid (the value stays as it was). */

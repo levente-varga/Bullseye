@@ -109,6 +109,9 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
               <Row label="Send emails to" hint="Digest and watchlist alerts.">
                 <input name="digest_email" type="email" defaultValue={criteria.digest_email} className="input" placeholder="you@example.com" />
               </Row>
+              <Row label="Email threshold" hint="Only email me about jobs scored at least this. Can differ from the Inbox threshold.">
+                <input name="email_threshold" type="number" min={0} max={100} defaultValue={criteria.email_threshold} className="input mono w-24" />
+              </Row>
               <Row
                 label="Remind me to follow up"
                 hint="Flags applications with no reply."

@@ -466,6 +466,8 @@ export interface Criteria {
   exclude_keywords: string[];
   preferences: string;
   score_threshold: number;
+  /** Digest and watchlist alerts only mention jobs scored at or above this (can differ from the Inbox's). */
+  email_threshold: number;
   followup_days: number;
   digest_email: string;
 }
