@@ -923,7 +923,7 @@ async function runFetch(mode: "watchlist" | "full"): Promise<RunResult> {
           .select(MATCH_WITH_JOB)
           .eq("user_id", p.id)
           .eq("status", "scored")
-          .gte("score", p.criteria.score_threshold)
+          .gte("score", p.criteria.email_threshold) // emails have their own threshold (Criteria → Notifications)
           .is("notified_at", null)
           .in("jobs.source_id", watched)
           .order("score", { ascending: false }),
@@ -966,7 +966,7 @@ async function runDigest(): Promise<RunResult> {
     const followCutoff = new Date(now - p.criteria.followup_days * 86_400_000).toISOString();
     const [newMatches, applied, statusChanges] = await Promise.all([
       must<(MatchWithJob & Partial<Job>)[]>(
-        mine().eq("status", "scored").gte("score", p.criteria.score_threshold).is("notified_at", null).order("score", { ascending: false }).limit(25),
+        mine().eq("status", "scored").gte("score", p.criteria.email_threshold).is("notified_at", null).order("score", { ascending: false }).limit(25),
       ),
       must<(MatchWithJob & Partial<Job>)[]>(mine().eq("status", "applied")),
       must<(MatchWithJob & Partial<Job>)[]>(
