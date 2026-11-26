@@ -8,7 +8,7 @@ import { formatUsd } from "@/lib/pricing";
 import { formatNextRun, nextRuns, timezones } from "@/lib/schedule";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { nowMs } from "@/lib/time";
-import { SCORING_MODELS, WATCH_INTERVALS, type ScoringModel, type Settings } from "@/lib/types";
+import { EFFORTS, SCORING_MODELS, WATCH_INTERVALS, type Effort, type ScoringModel, type Settings } from "@/lib/types";
 import { saveSettings } from "../actions";
 
 /**
@@ -58,7 +58,7 @@ export default async function SettingsPage() {
                   <input type="checkbox" name="daily_enabled" defaultChecked={settings.daily_enabled} />
                   <span className="muted">every day at</span>
                 </label>
-                <input name="daily_time" type="time" defaultValue={settings.daily_time} className="input mono w-28" />
+                <input name="daily_time" type="time" defaultValue={settings.daily_time} className="input mono w-36" />
               </div>
               <p className="hint mt-1.5">Next: {formatNextRun(next.daily, tz, nowMs())}</p>
             </Row>
@@ -83,9 +83,11 @@ export default async function SettingsPage() {
           <div className="divide">
             <Row label="Scoring model" hint="Reads job listings and scores them. For everyone, from the next run.">
               <ModelPicker name="scoring_model" value={settings.scoring_model} />
+              <EffortPicker name="scoring_effort" value={settings.scoring_effort ?? "low"} />
             </Row>
-            <Row label="Writing model" hint="Builds careers from CVs; will write CV and cover letter drafts.">
+            <Row label="Writing model" hint="Reads CVs into careers, and writes CV and cover letter drafts.">
               <ModelPicker name="writing_model" value={settings.writing_model ?? "claude-haiku-5-5"} />
+              <EffortPicker name="writing_effort" value={settings.writing_effort ?? "medium"} />
             </Row>
             <Row
               label="Account, per 24 hours"
@@ -109,6 +111,30 @@ export default async function SettingsPage() {
         </div>
       </form>
     </>
+  );
+}
+
+/**
+ * How hard the model above thinks (Claude's effort): one row of five, the chosen one
+ * highlighted; its note shows on hover. Thinking is billed as output tokens.
+ */
+function EffortPicker({ name, value }: { name: string; value: Effort }) {
+  return (
+    <fieldset className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <legend className="hint float-left mr-3">Thinking</legend>
+      <div className="inline-flex flex-wrap border border-[var(--border-strong)] text-[12px]">
+        {EFFORTS.map((e, i) => (
+          <label
+            key={e.id}
+            title={e.note}
+            className={`cursor-pointer px-2.5 py-1 has-[:checked]:bg-[var(--row-active)] has-[:checked]:text-[var(--fg)] muted ${i > 0 ? "border-l border-[var(--border-strong)]" : ""}`}
+          >
+            <input type="radio" name={name} value={e.id} defaultChecked={value === e.id} className="sr-only" />
+            {e.label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

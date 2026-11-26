@@ -29,6 +29,7 @@ import { renderDigest, renderInvite, renderWatchlistAlert, sendEmail } from "../
 import {
   ATS_INFO,
   FETCH_MODES,
+  isEffort,
   type Ats,
   type Criteria,
   type FetchedJob,
@@ -145,16 +146,17 @@ const followers = (people: Person[], sourceId: string) => people.filter((p) => p
  * what it cost), saved to run_users: each person's Report and spend caps read these.
  */
 class PerPerson {
-  private m = new Map<string, Record<string, number>>();
+  // Counts add up; text values (the scoring model and level) are labels, kept as set.
+  private m = new Map<string, Record<string, number | string>>();
   add(userId: string, key: string, n = 1) {
     if (!n) return;
     const s = this.m.get(userId) ?? {};
-    s[key] = (s[key] ?? 0) + n;
+    s[key] = (Number(s[key]) || 0) + n;
     this.m.set(userId, s);
   }
-  set(userId: string, stats: Record<string, number>) {
+  set(userId: string, stats: Record<string, number | string>) {
     const s = this.m.get(userId) ?? {};
-    for (const [k, v] of Object.entries(stats)) s[k] = (s[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(stats)) s[k] = typeof v === "number" ? (Number(s[k]) || 0) + v : v;
     this.m.set(userId, s);
   }
   entries() {
@@ -732,7 +734,7 @@ async function loadContext(p: Person) {
  * their old score in the Inbox until this replaces it), then waiting matches, those that
  * started waiting most recently first (just arrived, or just passed a re-evaluation).
  */
-async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | null, runSpend: { total: number }): Promise<Record<string, number>> {
+async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | null, runSpend: { total: number }): Promise<Record<string, number | string>> {
   const select = () => {
     const q = db.from("matches").select("id, user_id, job_id, jobs!inner(*)").eq("user_id", p.id);
     return sourceIds ? q.in("jobs.source_id", sourceIds) : q;
@@ -764,6 +766,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
   const { profile, feedback } = await loadContext(p);
   const system = buildSystemPrompt(profile, p.criteria, feedback);
   const model = resolveModel(settings.scoring_model);
+  const effort = isEffort(settings.scoring_effort) ? settings.scoring_effort : "low"; // Settings → AI
   console.log(`[${p.email}] scoring ${pending.length} listings with ${model}, budget $${budget.toFixed(4)}`);
   let scored = 0;
   let errors = 0;
@@ -777,7 +780,7 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
       for (let m = queue.shift(); m && spend.cost < budget; m = queue.shift()) {
         const job = m.jobs;
         try {
-          const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job);
+          const { score: s, model: answeredBy, usage } = await scoreJob(client, model, system, job, effort);
           const cost = costUsd(answeredBy, usage);
           spend.cost += cost;
           runSpend.total += cost;
@@ -821,6 +824,9 @@ async function scoreFor(p: Person, settings: Settings, sourceIds: string[] | nul
     // Parts of tokens_in: cost estimates price them at the current model (src/lib/estimates.ts).
     tokens_cache_write: spend.cacheWrite,
     tokens_cache_read: spend.cacheRead,
+    // What scored them: estimates average runs at the same model and thinking level.
+    scoring_model: model,
+    scoring_effort: effort,
   };
 }
 
@@ -923,7 +929,7 @@ async function runFetch(mode: "watchlist" | "full"): Promise<RunResult> {
           .select(MATCH_WITH_JOB)
           .eq("user_id", p.id)
           .eq("status", "scored")
-          .gte("score", p.criteria.score_threshold)
+          .gte("score", p.criteria.email_threshold) // emails have their own threshold (Criteria → Notifications)
           .is("notified_at", null)
           .in("jobs.source_id", watched)
           .order("score", { ascending: false }),
@@ -946,7 +952,7 @@ async function runScore(): Promise<RunResult> {
   const stats: Record<string, number> = { ...(await describePending(people, null, acc)) };
   stats.cost_usd = Math.round((await scoreAll(people, settings, null, acc)) * 1e6) / 1e6;
   for (const [, s] of acc.entries()) {
-    for (const k of ["scored", "score_errors", "over_budget"]) if (s[k]) stats[k] = (stats[k] ?? 0) + s[k];
+    for (const k of ["scored", "score_errors", "over_budget"]) if (s[k]) stats[k] = (stats[k] ?? 0) + (Number(s[k]) || 0);
   }
   return { stats, perPerson: acc };
 }
@@ -966,7 +972,7 @@ async function runDigest(): Promise<RunResult> {
     const followCutoff = new Date(now - p.criteria.followup_days * 86_400_000).toISOString();
     const [newMatches, applied, statusChanges] = await Promise.all([
       must<(MatchWithJob & Partial<Job>)[]>(
-        mine().eq("status", "scored").gte("score", p.criteria.score_threshold).is("notified_at", null).order("score", { ascending: false }).limit(25),
+        mine().eq("status", "scored").gte("score", p.criteria.email_threshold).is("notified_at", null).order("score", { ascending: false }).limit(25),
       ),
       must<(MatchWithJob & Partial<Job>)[]>(mine().eq("status", "applied")),
       must<(MatchWithJob & Partial<Job>)[]>(

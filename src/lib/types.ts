@@ -407,6 +407,26 @@ export const SCORING_MODELS = [
 export type ScoringModel = (typeof SCORING_MODELS)[number]["id"];
 export const DEFAULT_SCORING_MODEL: ScoringModel = "claude-haiku-5-5";
 
+/**
+ * How hard a model thinks before answering (Claude's "effort"; Settings → AI). More effort
+ * means more thinking, billed as output tokens, and slower answers.
+ */
+export const EFFORTS = [
+  { id: "low", label: "Low", note: "Fastest, cheapest." },
+  { id: "medium", label: "Medium", note: "Balanced." },
+  { id: "high", label: "High", note: "Thinks harder; costs more." },
+  { id: "xhigh", label: "Extra", note: "Extra high: for hard judgment calls." },
+  { id: "max", label: "Max", note: "As much as it takes; the most expensive." },
+] as const;
+export type Effort = (typeof EFFORTS)[number]["id"];
+export const isEffort = (v: unknown): v is Effort => EFFORTS.some((e) => e.id === v);
+
+/** Thinking counts toward a request's output limit: more room at higher effort (16k max, so no streaming is needed). */
+export function maxTokensFor(base: number, effort: Effort): number {
+  const factor = { low: 1, medium: 2, high: 4, xhigh: 6, max: 8 }[effort];
+  return Math.min(16_000, base * factor);
+}
+
 /** Skipped because the posting is gone: says nothing about taste, so the scorer never learns from it. */
 export const SKIP_UNAVAILABLE = "No longer available";
 
@@ -466,6 +486,8 @@ export interface Criteria {
   exclude_keywords: string[];
   preferences: string;
   score_threshold: number;
+  /** Digest and watchlist alerts only mention jobs scored at or above this (can differ from the Inbox's). */
+  email_threshold: number;
   followup_days: number;
   digest_email: string;
 }
@@ -482,6 +504,10 @@ export interface Settings {
   scoring_model: ScoringModel;
   /** Builds careers from CVs (and will write CV and cover letter drafts). */
   writing_model: ScoringModel;
+  /** How hard the scoring model thinks (default low). */
+  scoring_effort: Effort;
+  /** How hard the writing model thinks: CV import, drafts (default medium). */
+  writing_effort: Effort;
   /** AI spend across everyone per rolling 24 hours (USD): a backstop over the per-person caps. */
   max_total_daily_cost_usd: number;
   /** The caps (USD) a new member starts with. */

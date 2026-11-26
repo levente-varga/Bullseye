@@ -7,7 +7,7 @@ import { Price } from "@/components/Price";
 import { estimateScoringPerJob } from "@/lib/estimates";
 import { dailySlots, formatNextRun } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
-import { DEFAULT_SCORING_MODEL, SCORING_MODELS, type Criteria, type Member, type Settings } from "@/lib/types";
+import { DEFAULT_SCORING_MODEL, SCORING_MODELS, isEffort, type Criteria, type Member, type Settings } from "@/lib/types";
 import { addExcludeKeyword, reevaluate, saveCriteria, saveMySpendCaps } from "../actions";
 import { formatUsd } from "@/lib/pricing";
 
@@ -42,8 +42,13 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     (myTasks ?? []).reduce((a, t) => a + Number(t.cost_usd), 0);
   const settings = st as Settings;
   const member = mem as Member;
-  // Re-scoring them all: scoring one job in your last runs, priced at the current scoring model.
-  const perJob = await estimateScoringPerJob(supabase, me.id, SCORING_MODELS.find((m) => m.id === settings.scoring_model)?.id ?? DEFAULT_SCORING_MODEL);
+  // Re-scoring them all: scoring one job in your recent runs at the current scoring model and level.
+  const perJob = await estimateScoringPerJob(
+    supabase,
+    me.id,
+    SCORING_MODELS.find((m) => m.id === settings.scoring_model)?.id ?? DEFAULT_SCORING_MODEL,
+    isEffort(settings.scoring_effort) ? settings.scoring_effort : "low",
+  );
   const rescoreEstimate = { ...perJob, usd: (scoredCount ?? 0) * perJob.usd };
   if (error) throw new Error(error.message);
   const criteria = c as Criteria;
@@ -108,6 +113,9 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
             <div className="divide">
               <Row label="Send emails to" hint="Digest and watchlist alerts.">
                 <input name="digest_email" type="email" defaultValue={criteria.digest_email} className="input" placeholder="you@example.com" />
+              </Row>
+              <Row label="Email threshold" hint="Only email me about jobs scored at least this. Can differ from the Inbox threshold.">
+                <input name="email_threshold" type="number" min={0} max={100} defaultValue={criteria.email_threshold} className="input mono w-24" />
               </Row>
               <Row
                 label="Remind me to follow up"

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { careerText, withDefaults } from "./career-schema";
 import { CHECKS, type CheckKey } from "./score-checks";
 import type { TokenUsage } from "./pricing";
-import { SCORING_MODELS, SKIP_UNAVAILABLE, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
+import { SCORING_MODELS, SKIP_UNAVAILABLE, maxTokensFor, type Effort, type Criteria, type FetchedJob, type Profile, type ScoringModel } from "./types";
 
 /**
  * LLM scoring: how well does a listing fit the candidate?
@@ -164,18 +164,19 @@ export async function scoreJob(
   model: ScoringModel,
   system: string,
   job: FetchedJob,
+  effort: Effort = "low",
 ): Promise<{ score: Score; model: string; usage: TokenUsage }> {
   // The ratings come from the model; the 0-100 score is computed from them (combine).
   const response = await client.beta.messages.parse({
     model,
-    max_tokens: 2000,
+    max_tokens: maxTokensFor(2000, effort),
     // Haiku has no server-side refusal fallback; Sonnet and Opus do.
     ...(model !== "claude-haiku-5-5"
       ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
       : {}),
     // Stable per run: cached after the first job, so later jobs are cheaper.
     system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-    output_config: { effort: "low", format: betaZodOutputFormat(ScoreSchema) },
+    output_config: { effort, format: betaZodOutputFormat(ScoreSchema) },
     messages: [
       {
         role: "user",
