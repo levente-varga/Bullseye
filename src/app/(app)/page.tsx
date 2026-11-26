@@ -77,9 +77,10 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   }
   const [{ data, error, count: matchCount }, { count: scoredCount }, { count: aboveCount }, { count: waitingCount }, { data: prof }] = await Promise.all([
     rowsQuery.limit(limit + 1), // one extra row tells us whether there's more
-    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
-    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
-    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "new"),
+    // Header counts need only your matches (not the job rows): straight from matches.
+    supabase.from("matches").select("id", { count: "exact", head: true }).eq("status", "scored"),
+    supabase.from("matches").select("id", { count: "exact", head: true }).eq("status", "scored").gte("score", threshold),
+    supabase.from("matches").select("id", { count: "exact", head: true }).eq("status", "new"),
     supabase.from("profile").select("career").single(),
   ]);
   // The scorer reads the career: without one, nothing gets scored.

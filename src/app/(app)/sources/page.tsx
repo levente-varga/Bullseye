@@ -37,18 +37,10 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
   const addable = suggestions.filter((s) => s.ats !== "custom");
   const custom = suggestions.filter((s) => s.ats === "custom");
 
-  // Listings per source (open = new, scored or in the pipeline).
-  const counts = await Promise.all(
-    sources.map(async (s) => {
-      const { count } = await supabase
-        .from("my_jobs")
-        .select("id", { count: "exact", head: true })
-        .eq("source_id", s.id)
-        .not("status", "in", "(closed,filtered)");
-      return [s.id, count ?? 0] as const;
-    }),
-  );
-  const open = Object.fromEntries(counts);
+  // Listings per source (open = new, scored or in the pipeline): one grouped count.
+  const { data: openRows } = await supabase.rpc("my_open_counts");
+  const open: Record<string, number> = Object.fromEntries(sources.map((s) => [s.id, 0]));
+  for (const r of (openRows ?? []) as { source_id: string; open: number }[]) open[r.source_id] = Number(r.open);
 
   // Healthy means fetched successfully; a source that hasn't been fetched yet is unknown, not healthy.
   // Company boards (one employer each) and aggregators (many employers) are listed apart.

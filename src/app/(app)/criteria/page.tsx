@@ -28,8 +28,8 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
   ] = await Promise.all([
     supabase.from("criteria").select("*").single(),
     supabase.from("feedback").select("reasons").eq("decision", "skip").gte("created_at", daysAgoIso(60)),
-    supabase.from("my_jobs").select("id", { count: "exact", head: true }).in("status", ["new", "scored", "filtered"]),
-    supabase.from("my_jobs").select("id", { count: "exact", head: true }).eq("status", "scored"),
+    supabase.from("matches").select("id", { count: "exact", head: true }).in("status", ["new", "scored", "filtered"]),
+    supabase.from("matches").select("id", { count: "exact", head: true }).eq("status", "scored"),
     supabase.from("settings").select("*").single(),
     supabase.from("members").select("*").eq("user_id", me.id).single(),
     // Your AI spend in the last 24 hours: run shares and other AI tasks (shown with your caps).
