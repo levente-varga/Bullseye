@@ -20,6 +20,8 @@ import {
   DEFAULT_SCORING_MODEL,
   DRAFT_LANGUAGES,
   SCORING_MODELS,
+  isEffort,
+  type Effort,
   WATCH_INTERVALS,
   type Ats,
   type Criteria,
@@ -200,6 +202,8 @@ export async function saveSettings(form: FormData) {
           writing_model: SCORING_MODELS.some((m) => m.id === str(form, "writing_model"))
             ? str(form, "writing_model")
             : DEFAULT_SCORING_MODEL,
+          scoring_effort: isEffort(str(form, "scoring_effort")) ? str(form, "scoring_effort") : "low",
+          writing_effort: isEffort(str(form, "writing_effort")) ? str(form, "writing_effort") : "medium",
           max_total_daily_cost_usd: money(str(form, "max_total_daily_cost_usd")),
           ...scheduleFields(form),
           updated_at: new Date().toISOString(),
@@ -614,12 +618,12 @@ export async function careerFromPdf(_prev: CareerResult, form: FormData): Promis
     const { data: bal } = await supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle();
     if (Number(bal?.balance_usd ?? 0) <= 0) return bad("Your AI balance is used up. Ask the admin for more credit.");
   }
-  const { data: st } = await supabase.from("settings").select("writing_model").single();
+  const { data: st } = await supabase.from("settings").select("writing_model, writing_effort").single();
   // The admin's writing model (Settings); Haiku until one is set.
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const { career, costUsd, usage } = await extractCareer(new Anthropic(), model, text);
+    const { career, costUsd, usage } = await extractCareer(new Anthropic(), model, text, isEffort(st?.writing_effort) ? st.writing_effort : "medium");
     // Logged first, so the spend is on record even if saving the career fails.
     await recordAiUsage(supabase, { kind: "career_import", model, usage, costUsd, detail: file.name });
     check(
@@ -813,7 +817,7 @@ export async function rescoreJob(jobId: string): Promise<RescoreResult> {
     supabase.from("my_jobs").select("id, url, title, company, location, remote, description, compensation, posted_at, thin, status").eq("id", jobId).single(),
     supabase.from("criteria").select("*").single(),
     supabase.from("profile").select("*").single(),
-    supabase.from("settings").select("scoring_model").single(),
+    supabase.from("settings").select("scoring_model, scoring_effort").single(),
     supabase.from("feedback").select("decision, reasons, note, jobs(title, company)").order("created_at", { ascending: false }).limit(40),
   ]);
   if (!job || !["new", "scored"].includes(job.status)) return bad("Only jobs in the Inbox can be re-scored.");
@@ -842,7 +846,13 @@ export async function rescoreJob(jobId: string): Promise<RescoreResult> {
   const model = resolveModel(st?.scoring_model);
   try {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    const { score: s, model: answeredBy, usage } = await scoreJob(new Anthropic(), model, buildSystemPrompt(profile, criteria, feedback), job as unknown as FetchedJob);
+    const { score: s, model: answeredBy, usage } = await scoreJob(
+      new Anthropic(),
+      model,
+      buildSystemPrompt(profile, criteria, feedback),
+      job as unknown as FetchedJob,
+      isEffort(st?.scoring_effort) ? st.scoring_effort : "low",
+    );
     const cost = costUsd(answeredBy, usage);
     await recordAiUsage(supabase, { kind: "rescore", model: answeredBy, usage, costUsd: cost, detail: `${job.title} @ ${job.company}` });
     check(
@@ -881,6 +891,7 @@ type DraftContext =
       career: NonNullable<ReturnType<typeof withDefaults>>;
       job: DraftJob;
       model: (typeof SCORING_MODELS)[number]["id"];
+      effort: Effort;
       client: import("@anthropic-ai/sdk").default;
     };
 
@@ -897,7 +908,7 @@ async function draftContext(jobId: string): Promise<DraftContext> {
   const [{ data: profile }, { data: job }, { data: st }] = await Promise.all([
     supabase.from("profile").select("*").eq("user_id", me.id).single(),
     supabase.from("my_jobs").select("id, title, company, location, description, status, score_summary, score_checks").eq("id", jobId).single(),
-    supabase.from("settings").select("writing_model").single(),
+    supabase.from("settings").select("writing_model, writing_effort").single(),
   ]);
   if (!job || !PIPELINE_STATUSES.includes(job.status as JobStatus)) return { error: "Drafts are made for jobs in your Pipeline." };
   const career = withDefaults((profile as Profile | null)?.career);
@@ -912,7 +923,8 @@ async function draftContext(jobId: string): Promise<DraftContext> {
   };
   const model = SCORING_MODELS.find((m) => m.id === st?.writing_model)?.id ?? DEFAULT_SCORING_MODEL;
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  return { supabase, profile: profile as Profile, career, job: draftJob, model, client: new Anthropic() };
+  const effort: Effort = isEffort(st?.writing_effort) ? st.writing_effort : "medium";
+  return { supabase, profile: profile as Profile, career, job: draftJob, model, effort, client: new Anthropic() };
 }
 
 /** The job's drafts (Pipeline → opened row), loaded when the row opens. */
@@ -934,7 +946,7 @@ export async function draftCv(jobId: string): Promise<DraftResult> {
   const ctx = await draftContext(jobId);
   if ("error" in ctx) return { tone: "bad", message: ctx.error, at };
   try {
-    const r = await generateCv(ctx.client, ctx.model, ctx.career, ctx.profile, ctx.job);
+    const r = await generateCv(ctx.client, ctx.model, ctx.career, ctx.profile, ctx.job, ctx.effort);
     // Logged first, so the spend is on record even if saving fails.
     await recordAiUsage(ctx.supabase, { kind: "cv_draft", model: r.model, usage: r.usage, costUsd: r.costUsd, detail: `${ctx.job.title} @ ${ctx.job.company}` });
     await upsertDraft(ctx.supabase, { job_id: jobId, kind: "cv", language: ctx.profile.draft_language, content: r.draft, model: r.model, cost_usd: r.costUsd });
@@ -970,7 +982,7 @@ export async function draftLetter(jobId: string, answers?: LetterQA[]): Promise<
       return { tone: "ok", message: "", at };
     }
     const qa = (answers ?? saved ?? []).map((a) => ({ question: String(a.question).slice(0, 300), answer: String(a.answer).slice(0, 2000) }));
-    const r = await generateLetter(ctx.client, ctx.model, ctx.career, ctx.profile, ctx.job, qa);
+    const r = await generateLetter(ctx.client, ctx.model, ctx.career, ctx.profile, ctx.job, qa, ctx.effort);
     await recordAiUsage(ctx.supabase, { kind: "cover_letter", model: r.model, usage: r.usage, costUsd: r.costUsd, detail: `${ctx.job.title} @ ${ctx.job.company}` });
     await upsertDraft(ctx.supabase, {
       job_id: jobId,
