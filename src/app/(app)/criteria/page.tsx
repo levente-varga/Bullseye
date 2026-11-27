@@ -3,7 +3,7 @@ import { Row } from "@/components/FormRow";
 import { SubmitButton } from "@/components/SubmitButton";
 import { createClient, currentUser } from "@/lib/supabase/server";
 import { Bar, Empty, PageHeader, Panel } from "@/components/ui";
-import { Price } from "@/components/Price";
+import { ReevaluateControls } from "@/components/ReevaluateControls";
 import { estimateScoringPerJob } from "@/lib/estimates";
 import { dailySlots, formatNextRun } from "@/lib/schedule";
 import { daysAgoIso, nowMs } from "@/lib/time";
@@ -22,8 +22,6 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     { count: scoredCount },
     { data: st },
     { data: mem },
-    { data: myRuns },
-    { data: myTasks },
     { data: bal },
   ] = await Promise.all([
     supabase.from("criteria").select("*").single(),
@@ -32,14 +30,8 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
     supabase.from("matches").select("id", { count: "exact", head: true }).eq("status", "scored"),
     supabase.from("settings").select("*").single(),
     supabase.from("members").select("*").eq("user_id", me.id).single(),
-    // Your AI spend in the last 24 hours: run shares and other AI tasks (shown with your caps).
-    supabase.from("run_users").select("stats, runs!inner(started_at)").eq("user_id", me.id).gte("runs.started_at", daysAgoIso(1)),
-    supabase.from("ai_usage").select("cost_usd").eq("user_id", me.id).gte("created_at", daysAgoIso(1)),
     supabase.from("member_balances").select("balance_usd").eq("user_id", me.id).maybeSingle(),
   ]);
-  const spent24h =
-    (myRuns ?? []).reduce((a, r) => a + (Number((r.stats as Record<string, unknown>)?.cost_usd) || 0), 0) +
-    (myTasks ?? []).reduce((a, t) => a + Number(t.cost_usd), 0);
   const settings = st as Settings;
   const member = mem as Member;
   // Re-scoring them all: scoring one job in your recent runs at the current scoring model and level.
@@ -158,24 +150,22 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
         </p>
         </div>
 
-        <aside className="space-y-3">
+        <aside className="space-y-6">
           {/* Everyone sets their own caps; a member's balance (from the admin) is the only other limit. */}
-          <Panel title="AI spending" aside="yours">
+          <Panel title="AI spending">
             <form action={saveMySpendCaps} className="space-y-3 p-3">
               <div className="flex flex-wrap items-end gap-3">
                 <Money name="max_run_cost_usd" label="Per run" value={member.max_run_cost_usd} />
                 <Money name="max_daily_cost_usd" label="Per 24 hours" value={member.max_daily_cost_usd} />
               </div>
               <p className="faint text-[12px]">
-                Scoring stops for the run once a cap is reached and picks up in the next; 0 pauses it.{" "}
-                <span className="mono text-[var(--fg)]">{formatUsd(spent24h)}</span> spent in 24h
+                Scoring stops for the run once a cap is reached and picks up in the next.
                 {!me.isAdmin && (
                   <>
                     {" "}
-                    · <span className="mono text-[var(--fg)]">{formatUsd(Number(bal?.balance_usd ?? 0))}</span> balance left
+                    <span className="mono text-[var(--fg)]">{formatUsd(Number(bal?.balance_usd ?? 0))}</span> balance left.
                   </>
                 )}
-                .
               </p>
               <SubmitButton className="btn" done="Saved">
                 Save caps
@@ -198,12 +188,14 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                 ))}
               </ul>
             )}
-            <form action={addExcludeKeyword} className="flex gap-1.5 border-t border-[var(--border)] p-3">
-              <input name="keyword" placeholder="Exclude a title word" className="input" />
-              <SubmitButton className="btn" done="Added">Add</SubmitButton>
+            <form action={addExcludeKeyword} className="space-y-2 border-t border-[var(--border)] p-3">
+              <p className="faint text-[12px]">Frequent reasons make good filters.</p>
+              <div className="flex gap-1.5">
+                <input name="keyword" placeholder="Exclude a title word" className="input" />
+                <SubmitButton className="btn" done="Added">Add</SubmitButton>
+              </div>
             </form>
           </Panel>
-          <p className="faint text-[12px]">Frequent reasons make good filters.</p>
 
           <div id="reevaluate" className="scroll-mt-6">
             <Panel title="Re-evaluate">
@@ -212,21 +204,13 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                   Apply the saved criteria to the <span className="mono text-[var(--fg)]">{openCount ?? 0}</span> listings
                   you haven&apos;t acted on. Free.
                 </p>
-                <label className="flex items-start gap-2">
-                  <input type="checkbox" name="rescore" className="mt-0.5" />
-                  <span className="muted">
-                    Re-score the <span className="mono text-[var(--fg)]">{scoredCount ?? 0}</span> scored ones too <Price estimate={rescoreEstimate} />.
-                    They keep their score in the Inbox until the new one arrives, and go first.
-                  </span>
-                </label>
-                {scoringPaused && (
-                  <p className="text-[12px] text-[var(--warn)]">
-                    Scoring is paused: one of your spend caps is $0 (AI spending, beside). Nothing gets scored until it&apos;s raised.
-                  </p>
-                )}
-                <SubmitButton className="btn" done="Done">
-                  Re-evaluate
-                </SubmitButton>
+                <ReevaluateControls scoredCount={scoredCount ?? 0} estimate={rescoreEstimate}>
+                  {scoringPaused && (
+                    <p className="text-[12px] text-[var(--warn)]">
+                      Scoring is paused: one of your spend caps is $0 (AI spending, beside). Nothing gets scored until it&apos;s raised.
+                    </p>
+                  )}
+                </ReevaluateControls>
                 {done.filtered !== undefined && (
                   <p className="border-t border-[var(--border)] pt-2.5 text-[12px] leading-relaxed">
                     <span className="mono">{done.filtered}</span> moved to Filtered ·{" "}
@@ -240,7 +224,7 @@ export default async function CriteriaPage({ searchParams }: PageProps<"/criteri
                     {Number(done.waiting) + Number(done.rescore ?? 0) > 0 && (
                       <span className="faint">
                         {" "}
-                        {scoringPaused ? "They're scored once your AI budget is raised." : "Scored in the background, re-scores first."}
+                        {scoringPaused ? "They're scored once your AI budget is raised." : "Scored in the background."}
                       </span>
                     )}
                   </p>
