@@ -13,7 +13,7 @@ export interface RowMenuItem {
 
 /**
  * A row's secondary actions behind a ⋮ button (Pipeline rows: Drop, Back to Inbox,
- * Rejected…), so a row shows only its main button. It sits in the row's <summary>, so
+ * Rejected…; Sources: Pause, Unfollow), so a row shows only its main button. It sits in the row's <summary>, so
  * its clicks mustn't open or close the row. Closes on choosing, clicking outside or Esc.
  */
 export function RowMenu({ items, label = "More actions" }: { items: RowMenuItem[]; label?: string }) {
@@ -57,7 +57,7 @@ export function RowMenu({ items, label = "More actions" }: { items: RowMenuItem[
         <IconMore />
       </button>
       {open && (
-        <div role="menu" className="panel absolute top-full z-20 mt-1 min-w-[11rem] py-1 shadow-lg max-sm:left-0 sm:right-0">
+        <div role="menu" className="panel absolute top-full z-20 mt-1 min-w-[11rem] py-1 shadow-lg right-0">
           {items.map((item) => (
             <button
               key={item.label}

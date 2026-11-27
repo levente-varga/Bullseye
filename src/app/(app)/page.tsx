@@ -132,7 +132,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
       <InboxSearch matches={words.length ? (matchCount ?? 0) : null} />
 
       <section className="panel">
-        <div className="eyebrow hidden grid-cols-[72px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
+        <div className="eyebrow hidden grid-cols-[36px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
           <span>Fit</span>
           <span>Role</span>
           <span>Location</span>
@@ -201,11 +201,11 @@ function JobRow(props: { job: Job; dim: boolean; skipped: boolean; rescoreEstima
         url={job.url}
         side={skipped ? undefined : <DecisionPanel id={job.id} rescoreEstimate={props.rescoreEstimate} />}
         version={job.scored_at}
-        indent="lg:pl-[88px]"
-        summaryClassName={`grid cursor-pointer list-none grid-cols-[72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
+        indent="lg:pl-[64px]"
+        summaryClassName={`grid cursor-pointer list-none grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[36px_minmax(0,1fr)_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
         summary={
           <>
-          <ScoreMeter score={job.score} width="w-[72px]" />
+          <ScoreMeter score={job.score} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
@@ -218,7 +218,8 @@ function JobRow(props: { job: Job; dim: boolean; skipped: boolean; rescoreEstima
           </div>
           <LocationCell job={job} />
           <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(skipped ? job.status_changed_at : job.first_seen_at)}</span>
-          <div className="col-start-2 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
+          {/* Phones too: the buttons stay on the first row, on the right. */}
+          <div className="col-start-3 row-start-1 flex items-start justify-end gap-1.5 lg:col-start-auto lg:row-start-auto">
             {skipped && (
               <form action={restoreToInbox}>
                 <input type="hidden" name="id" value={job.id} />
@@ -237,7 +238,7 @@ function JobRow(props: { job: Job; dim: boolean; skipped: boolean; rescoreEstima
 /** The location column: a Remote pill (remote is where you'd work), then the places. */
 function LocationCell({ job }: { job: Pick<Job, "location" | "remote"> }) {
   return (
-    <div className="muted col-start-2 flex min-w-0 items-center gap-1.5 text-[12px] lg:col-start-auto lg:pt-0.5">
+    <div className="muted col-span-2 col-start-2 flex min-w-0 items-center lg:col-span-1 gap-1.5 text-[12px] lg:col-start-auto lg:pt-0.5">
       {job.remote && (
         <span className="shrink-0">
           <Pill tone="accent">Remote</Pill>
@@ -256,8 +257,10 @@ function LocationCell({ job }: { job: Pick<Job, "location" | "remote"> }) {
  */
 function WaitingRow({ job }: { job: Job }) {
   return (
-    <li className="grid grid-cols-[72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 lg:grid-cols-[72px_1fr_200px_44px_150px]">
-      <span className="mono faint pt-0.5 text-[11px]">waiting</span>
+    <li className="grid grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-x-4 gap-y-2 px-3 py-3 lg:grid-cols-[36px_minmax(0,1fr)_200px_44px_150px]">
+      <span title="Waiting to be scored">
+        <ScoreMeter score={null} />
+      </span>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
@@ -269,7 +272,7 @@ function WaitingRow({ job }: { job: Job }) {
       </div>
       <LocationCell job={job} />
       <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(job.first_seen_at)}</span>
-      <div className="col-start-2 flex lg:col-start-auto lg:justify-end">
+      <div className="col-start-3 row-start-1 flex justify-end lg:col-start-auto lg:row-start-auto">
         <a href={job.url} target="_blank" rel="noreferrer" className="btn btn-icon" title="Open posting">
           <IconExternal />
           <span className="sr-only">Open posting</span>
