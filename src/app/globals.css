@@ -309,6 +309,10 @@ input[type="radio"]:checked:hover {
     width: 18px;
     height: 29.5px;
     color: var(--muted);
+    /* Centred between the button before it (6px gap) and the item's edge (12px padding):
+       3px more on the left, 3px less on the right, so 9px on each side. */
+    margin-left: 3px;
+    margin-right: -3px;
   }
   .btn-ghost {
     @apply inline-flex cursor-pointer items-center gap-1.5 px-1.5 py-1 text-[13px];
