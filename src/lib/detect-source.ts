@@ -5,6 +5,7 @@ import {
   eightfoldTotal,
   fetchBoard,
   isEightfoldSite,
+  isSuccessFactorsFeed,
   isSuccessFactorsPage,
   oracleTotal,
   phenomBase,
@@ -119,7 +120,10 @@ export async function detectSource(input: string): Promise<Detected | { error: s
     const phenom = html ? phenomBase(url, html) : null;
     if (phenom) candidates.push({ ats: "phenom", slug: phenom });
     // A SAP SuccessFactors career site (Career Site Builder): searched on its own host.
-    const sf = !phenom && html && isSuccessFactorsPage(html);
+    // Some (Canon) have a bot defence that refuses their pages to programs; their Google
+    // Jobs feed (allowed, and what the adapter then reads) shows what the site is instead.
+    const sfFeed = !html && /^\/job\//.test(url.pathname) ? await fetchText(`${url.origin}/sitemap_index.xml`) : null;
+    const sf = !phenom && ((html && isSuccessFactorsPage(html)) || (sfFeed && isSuccessFactorsFeed(sfFeed)));
     if (sf) candidates.push({ ats: "successfactors", slug: url.hostname.toLowerCase() });
     // A Radancy (TalentBrew) careers site: read from its sitemap.
     const radancy = !phenom && !sf && html ? radancyBase(url, html) : null;

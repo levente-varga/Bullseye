@@ -701,8 +701,59 @@ function sfPlace(raw: string): string {
     .join(", ");
 }
 
+/**
+ * Newer sites (e.g. Canon Production Printing) fill their search page with JavaScript from
+ * /services/, which robots.txt closes. Those still publish every job in the Google Jobs
+ * feed at /sitemap_index.xml (allowed): title, link, id and the full description. Sites
+ * that never set locations say "DefaultSFJobLocation"; that's dropped, and the place is
+ * left to the description (the filter lets unknown locations through to scoring).
+ */
+const SF_DEFAULT_LOCATION = /DefaultSFJobLocation/i;
+
+async function fetchSuccessFactorsFeed(host: string, company: string): Promise<FetchedJob[]> {
+  const xml = await (await get(`https://${host}/sitemap_index.xml`, "application/xml")).text();
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) ?? [];
+  return items.flatMap((item) => {
+    const link = decodeEntities(xmlTag(item, "link"));
+    const id = xmlTag(item, "g:id") || link.match(/\/(\d+)\/?$/)?.[1];
+    if (!id || !link) return [];
+    const location = SF_DEFAULT_LOCATION.test(xmlTag(item, "g:location")) ? "" : sfPlace(decodeEntities(xmlTag(item, "g:location")));
+    return [
+      {
+        external_id: id,
+        // "Junior Software Engineer (Venlo, NL)": the place in brackets is the location field.
+        title: decodeEntities(xmlTag(item, "title")).replace(/\s*\([^()]*\)\s*$/, "").trim(),
+        company,
+        location,
+        remote: looksRemote(location),
+        url: link,
+        description: clip(htmlToText(xmlTag(item, "description"))),
+        compensation: null,
+        posted_at: null,
+      },
+    ];
+  });
+}
+
+/** Whether a search page lists its jobs in the page itself (older Career Site Builder). */
+const sfListsInPage = (html: string) => html.includes('<tr class="data-row"') || /of <b>\d+<\/b>/.test(html);
+
+/** Whether some XML is a SuccessFactors Google Jobs feed: items with g:id linking to /job/…/<id>/. */
+export const isSuccessFactorsFeed = (xml: string) => /<g:id>\d+<\/g:id>/.test(xml) && /<link>[^<]*\/job\/[^<]+\/\d+\/<\/link>/.test(xml);
+
+/** The search page, or null when it's refused (some sites' bot defence) or fails. */
+async function sfSearchPage(host: string): Promise<string | null> {
+  try {
+    return await (await get(`https://${host}/search/?q=&startrow=0`, "text/html")).text();
+  } catch {
+    return null;
+  }
+}
+
 async function fetchSuccessFactors(host: string, company: string, terms?: string[]): Promise<FetchedJob[]> {
-  let first = true;
+  const probe = await sfSearchPage(host);
+  if (!probe || !sfListsInPage(probe)) return fetchSuccessFactorsFeed(host, company);
+  let first = false; // the probe above was the first request
   return perTerm(terms, async (term) => {
     const out: FetchedJob[] = [];
     for (let page = 0; page < SF_MAX_PAGES; page++) {
@@ -740,8 +791,9 @@ export const isSuccessFactorsPage = (html: string) => /rmkcdn\.successfactors|jo
 
 /** Number of jobs on a SuccessFactors career site, from one search page (Add board shows it). */
 export async function successFactorsTotal(host: string): Promise<number> {
-  const html = await (await get(`https://${host}/search/?q=&startrow=0`, "text/html")).text();
-  return Number(html.match(/of <b>(\d+)<\/b>/)?.[1] ?? 0);
+  const html = await sfSearchPage(host);
+  if (html && sfListsInPage(html)) return Number(html.match(/of <b>(\d+)<\/b>/)?.[1] ?? 0);
+  return (await fetchSuccessFactorsFeed(host, "")).length;
 }
 
 // --- Eightfold (careers sites of Netflix, Ericsson and other large employers) -------------
