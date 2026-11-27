@@ -31,6 +31,9 @@ export function hardFilter(
 
   if (opts.locationPending) {
     // checked again once the description (and real location) is in
+  } else if (!job.location && job.description) {
+    // No location given (some sites never fill it in), but the description usually names
+    // the place: scoring judges it from there.
   } else if (c.locations.length) {
     const locationOk = c.locations.some((l) => l.trim() && has(job.location, l));
     if (!locationOk && !(c.remote_ok && job.remote)) {
