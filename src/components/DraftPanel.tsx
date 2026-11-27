@@ -153,16 +153,14 @@ function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: 
   }
   return (
     <section className="border border-[var(--border)] bg-[var(--surface)]">
-      <header className={`flex flex-wrap items-center gap-2 px-3 py-2 ${open ? "border-b border-[var(--border)]" : ""}`}>
-        <button
-          type="button"
-          className="flex items-center gap-1.5 font-medium"
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <IconChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} />
-          {props.title}
-        </button>
+      {/* The whole header opens and closes it, like a job row; its buttons and links do their own thing. */}
+      <header
+        className={`flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 hover:bg-[var(--surface-2)] ${open ? "border-b border-[var(--border)]" : ""}`}
+        onClick={(e) => {
+          if (!(e.target as HTMLElement).closest("a, button, input, select, textarea, label")) setOpen((o) => !o);
+        }}
+      >
+        <span className="font-medium">{props.title}</span>
         {d?.content && <span className="mono faint text-[11px]">{lang}</span>}
         <span className="ml-auto flex gap-1.5">
           {d?.content && (
@@ -171,6 +169,10 @@ function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: 
             </a>
           )}
           {props.actions}
+          <button type="button" className="btn btn-icon" aria-expanded={open} title={open ? "Hide" : "Show"} onClick={() => setOpen((o) => !o)}>
+            <IconChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} />
+            <span className="sr-only">{open ? `Hide ${props.title}` : `Show ${props.title}`}</span>
+          </button>
         </span>
       </header>
       {/* Hidden, not removed: unsaved edits survive collapsing. */}

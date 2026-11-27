@@ -10,7 +10,7 @@ import { RescoreButton } from "@/components/RescoreButton";
 import { SkipForm } from "@/components/SkipForm";
 import { Empty, PageHeader, Pill, ScoreMeter } from "@/components/ui";
 import { estimateTask, type Estimate } from "@/lib/estimates";
-import { ago, pad2 } from "@/lib/time";
+import { ago } from "@/lib/time";
 import { DEFAULT_SCORING_MODEL, JOB_LIST_COLUMNS, SCORING_MODELS, isEffort, type Job } from "@/lib/types";
 import { approveJob, restoreToInbox } from "./actions";
 
@@ -132,8 +132,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
       <InboxSearch matches={words.length ? (matchCount ?? 0) : null} />
 
       <section className="panel">
-        <div className="eyebrow hidden grid-cols-[28px_72px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
-          <span>#</span>
+        <div className="eyebrow hidden grid-cols-[72px_1fr_200px_44px_150px] gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 lg:grid">
           <span>Fit</span>
           <span>Role</span>
           <span>Location</span>
@@ -165,12 +164,11 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
         ) : (
           <ol className="divide">
             {view === "waiting"
-              ? jobs.map((job, i) => <WaitingRow key={job.id} job={job} index={i + 1} />)
-              : jobs.map((job, i) => (
+              ? jobs.map((job) => <WaitingRow key={job.id} job={job} />)
+              : jobs.map((job) => (
               <JobRow
                 key={job.id}
                 job={job}
-                index={i + 1}
                 dim={view === "skipped" || (job.score ?? 0) < threshold}
                 rescoreEstimate={rescoreEstimate}
                 skipped={view === "skipped"}
@@ -194,8 +192,8 @@ export default async function InboxPage({ searchParams }: PageProps<"/">) {
   );
 }
 
-function JobRow(props: { job: Job; index: number; dim: boolean; skipped: boolean; rescoreEstimate: Estimate }) {
-  const { job, index, dim, skipped } = props;
+function JobRow(props: { job: Job; dim: boolean; skipped: boolean; rescoreEstimate: Estimate }) {
+  const { job, dim, skipped } = props;
   return (
     <li>
       <ExpandableJobRow
@@ -203,10 +201,10 @@ function JobRow(props: { job: Job; index: number; dim: boolean; skipped: boolean
         url={job.url}
         side={skipped ? undefined : <DecisionPanel id={job.id} rescoreEstimate={props.rescoreEstimate} />}
         version={job.scored_at}
-        summaryClassName={`grid cursor-pointer list-none grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[28px_72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
+        indent="lg:pl-[88px]"
+        summaryClassName={`grid cursor-pointer list-none grid-cols-[72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] lg:grid-cols-[72px_1fr_200px_44px_150px] [&::-webkit-details-marker]:hidden ${dim ? "opacity-60" : ""}`}
         summary={
           <>
-          <span className="mono faint pt-0.5 text-[12px]">{pad2(index)}</span>
           <ScoreMeter score={job.score} width="w-[72px]" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -220,7 +218,7 @@ function JobRow(props: { job: Job; index: number; dim: boolean; skipped: boolean
           </div>
           <LocationCell job={job} />
           <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(skipped ? job.status_changed_at : job.first_seen_at)}</span>
-          <div className="col-start-3 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
+          <div className="col-start-2 flex items-start gap-1.5 lg:col-start-auto lg:justify-end">
             {skipped && (
               <form action={restoreToInbox}>
                 <input type="hidden" name="id" value={job.id} />
@@ -239,7 +237,7 @@ function JobRow(props: { job: Job; index: number; dim: boolean; skipped: boolean
 /** The location column: a Remote pill (remote is where you'd work), then the places. */
 function LocationCell({ job }: { job: Pick<Job, "location" | "remote"> }) {
   return (
-    <div className="muted col-start-3 flex min-w-0 items-center gap-1.5 text-[12px] lg:col-start-auto lg:pt-0.5">
+    <div className="muted col-start-2 flex min-w-0 items-center gap-1.5 text-[12px] lg:col-start-auto lg:pt-0.5">
       {job.remote && (
         <span className="shrink-0">
           <Pill tone="accent">Remote</Pill>
@@ -256,10 +254,9 @@ function LocationCell({ job }: { job: Pick<Job, "location" | "remote"> }) {
  * A listing that passed the filters and waits to be scored: no score or reasoning yet,
  * so no decision either. It links to the posting.
  */
-function WaitingRow({ job, index }: { job: Job; index: number }) {
+function WaitingRow({ job }: { job: Job }) {
   return (
-    <li className="grid grid-cols-[28px_72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 lg:grid-cols-[28px_72px_1fr_200px_44px_150px]">
-      <span className="mono faint pt-0.5 text-[12px]">{pad2(index)}</span>
+    <li className="grid grid-cols-[72px_1fr] items-start gap-x-4 gap-y-2 px-3 py-3 lg:grid-cols-[72px_1fr_200px_44px_150px]">
       <span className="mono faint pt-0.5 text-[11px]">waiting</span>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -272,7 +269,7 @@ function WaitingRow({ job, index }: { job: Job; index: number }) {
       </div>
       <LocationCell job={job} />
       <span className="mono faint hidden pt-0.5 text-[12px] lg:block">{ago(job.first_seen_at)}</span>
-      <div className="col-start-3 flex lg:col-start-auto lg:justify-end">
+      <div className="col-start-2 flex lg:col-start-auto lg:justify-end">
         <a href={job.url} target="_blank" rel="noreferrer" className="btn btn-icon" title="Open posting">
           <IconExternal />
           <span className="sr-only">Open posting</span>
