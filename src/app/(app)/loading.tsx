@@ -7,7 +7,7 @@ export default function Loading() {
         {Array.from({ length: 6 }, (_, i) => (
           // Shaped like a job row: score, title over company, location, the open button.
           <div key={i} className="flex items-start gap-4 border-b border-[var(--border)] px-3 py-3 last:border-0">
-            <div className="skeleton mt-1 h-2 w-[72px] shrink-0" />
+            <div className="skeleton mt-1 h-2 w-9 shrink-0" />
             <div className="min-w-0 flex-1 space-y-1.5">
               <div className="skeleton h-4 w-2/3" />
               <div className="skeleton h-3 w-1/3" />

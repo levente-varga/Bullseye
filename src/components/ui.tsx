@@ -73,12 +73,11 @@ export function scoreTone(score: number | null | undefined): Tone {
 }
 
 /** Score as a mono number over a thin bar. */
-export function ScoreMeter({ score, width = "w-16" }: { score: number | null; width?: string }) {
+export function ScoreMeter({ score, width = "w-9" }: { score: number | null; width?: string }) {
   return (
     <div className={`${width} shrink-0`}>
-      <div className="mono mb-1 flex justify-between text-[11px]">
-        <span className="faint">fit</span>
-        <span style={{ color: score != null && score >= 60 ? "var(--fg)" : "var(--muted)" }}>{score ?? "–"}</span>
+      <div className="mono mb-1 text-[11px]" style={{ color: score != null && score >= 60 ? "var(--fg)" : "var(--muted)" }}>
+        {score ?? "–"}
       </div>
       <Bar value={score ?? 0} tone={scoreTone(score)} />
     </div>

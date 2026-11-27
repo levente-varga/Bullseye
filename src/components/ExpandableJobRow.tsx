@@ -100,10 +100,10 @@ export function ExpandableJobRow(props: {
   );
 }
 
-/** The open/close control of an expandable row: a square button with an arrow (down when closed, up when open). Sits inside the row's <summary>, which does the toggling. */
+/** The open/closed indicator of an expandable row: an arrow (down when closed, up when open), last in the button row. The row's <summary> does the toggling. */
 export function ExpandToggle() {
   return (
-    <span className="btn btn-icon" title="Show details">
+    <span className="expand-indicator">
       <IconChevronDown className="transition-transform group-open:rotate-180" />
       <span className="sr-only">
         <span className="group-open:hidden">Show details</span>
