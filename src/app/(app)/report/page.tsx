@@ -186,8 +186,10 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
 
       <div className="space-y-10">
         {/* A member's report opened by the admin: money only (their jobs stay private). */}
+        {/* The overview panels sit as close as panels elsewhere (24px); the sections with
+            their own headings below keep the wider 40px. */}
         {!viewing && (
-          <>
+          <div className="space-y-6">
         <section className="panel grid grid-cols-2 divide-[var(--border)] max-sm:[&>*:nth-child(n+3)]:border-t sm:grid-cols-4 sm:divide-x [&>*]:border-[var(--border)] max-sm:[&>*:nth-child(even)]:border-l">
           <Stat label="Waiting" value={c.scored} unit="in inbox" />
           <Stat label="Applications" value={applied} unit="sent" />
@@ -226,7 +228,7 @@ export default async function ReportPage({ searchParams }: PageProps<"/report">)
             </ul>
           </Panel>
         </div>
-          </>
+          </div>
         )}
 
         {/* The account's credit (admin's own report) or a person's AI balance. */}
