@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { draftCv, draftLetter, getDrafts, saveDraft, type DraftResult } from "@/app/(app)/actions";
 import { Notice } from "@/components/Notice";
+import { IconChevronDown } from "@/components/icons";
 import { Price } from "@/components/Price";
 import type { Estimate } from "@/lib/estimates";
 import { formatCareerDate } from "@/lib/career-schema";
@@ -136,13 +137,32 @@ export function DraftPanel({ jobId, estimates, questionsOn }: { jobId: string; e
   );
 }
 
+/**
+ * One draft's card. Collapsed by default: the header (title, PDF, make/remake) is enough
+ * until you want to read or edit the text. It opens by itself while a draft is being
+ * made, so new text or a letter's questions show up without a click.
+ */
 function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: ReactNode; children?: ReactNode }) {
   const d = props.draft;
   const lang = DRAFT_LANGUAGES.find((l) => l.id === d?.language)?.label;
+  const [open, setOpen] = useState(false);
+  const [wasBusy, setWasBusy] = useState(props.busy);
+  if (props.busy !== wasBusy) {
+    setWasBusy(props.busy);
+    if (props.busy) setOpen(true);
+  }
   return (
     <section className="border border-[var(--border)] bg-[var(--surface)]">
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2">
-        <span className="font-medium">{props.title}</span>
+      <header className={`flex flex-wrap items-center gap-2 px-3 py-2 ${open ? "border-b border-[var(--border)]" : ""}`}>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 font-medium"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <IconChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} />
+          {props.title}
+        </button>
         {d?.content && <span className="mono faint text-[11px]">{lang}</span>}
         <span className="ml-auto flex gap-1.5">
           {d?.content && (
@@ -153,7 +173,8 @@ function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: 
           {props.actions}
         </span>
       </header>
-      <div className={`space-y-3 p-3 ${props.busy ? "opacity-60" : ""}`}>
+      {/* Hidden, not removed: unsaved edits survive collapsing. */}
+      <div hidden={!open} className={`space-y-3 p-3 ${props.busy ? "opacity-60" : ""}`}>
         {props.children ?? <p className="faint text-[12px]">Not drafted yet.</p>}
       </div>
     </section>
