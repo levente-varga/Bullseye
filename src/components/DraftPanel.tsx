@@ -155,24 +155,32 @@ function Card(props: { title: string; draft?: DraftRow; busy: boolean; actions: 
     <section className="border border-[var(--border)] bg-[var(--surface)]">
       {/* The whole header opens and closes it, like a job row; its buttons and links do their own thing. */}
       <header
-        className={`flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 hover:bg-[var(--surface-2)] ${open ? "border-b border-[var(--border)]" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        className={`flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-[var(--surface-2)] ${open ? "border-b border-[var(--border)]" : ""}`}
         onClick={(e) => {
           if (!(e.target as HTMLElement).closest("a, button, input, select, textarea, label")) setOpen((o) => !o);
         }}
+        onKeyDown={(e) => {
+          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
       >
-        <span className="font-medium">{props.title}</span>
+        <span className="min-w-0 truncate font-medium">{props.title}</span>
         {d?.content && <span className="mono faint text-[11px]">{lang}</span>}
-        <span className="ml-auto flex gap-1.5">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {d?.content && (
             <a className="btn" href={`/api/drafts/${d.id}/pdf`} target="_blank" rel="noreferrer">
               PDF
             </a>
           )}
           {props.actions}
-          <button type="button" className="btn btn-icon" aria-expanded={open} title={open ? "Hide" : "Show"} onClick={() => setOpen((o) => !o)}>
+          <span className="expand-indicator" aria-hidden>
             <IconChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} />
-            <span className="sr-only">{open ? `Hide ${props.title}` : `Show ${props.title}`}</span>
-          </button>
+          </span>
         </span>
       </header>
       {/* Hidden, not removed: unsaved edits survive collapsing. */}

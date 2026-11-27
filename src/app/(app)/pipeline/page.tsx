@@ -100,18 +100,21 @@ export default async function PipelinePage() {
                       <ExpandableJobRow
                         id={job.id}
                         url={job.url}
-                        indent="lg:pl-[88px]"
+                        indent="lg:pl-[64px]"
                         extra={<DraftPanel jobId={job.id} estimates={estimates} questionsOn={questionsOn} />}
-                        summaryClassName="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] [&::-webkit-details-marker]:hidden"
+                        summaryClassName="flex cursor-pointer list-none items-start gap-x-4 px-3 py-2.5 hover:bg-[var(--surface-2)] group-open:bg-[var(--row-active)] [&::-webkit-details-marker]:hidden"
                         summary={
                           <>
-                            <ScoreMeter score={job.score} width="w-14" />
+                            <ScoreMeter score={job.score} />
                             <div className="min-w-0 flex-1">
-                              <div className="font-medium">{job.title}</div>
-                              <div className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px]">
-                                <span>{job.company}</span>
+                              {/* The drafts made for it sit beside the title. */}
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="font-medium [overflow-wrap:anywhere]">{job.title}</span>
                                 {drafted.has(`${job.id}:cv`) && <Pill tone="muted">CV</Pill>}
                                 {drafted.has(`${job.id}:cover_letter`) && <Pill tone="muted">Cover letter</Pill>}
+                              </div>
+                              <div className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px]">
+                                <span>{job.company}</span>
                                 {job.applied_at && <span className="mono faint">applied {agoText(job.applied_at)}</span>}
                                 {job.followed_up_at && <span className="mono faint">followed up {agoText(job.followed_up_at)}</span>}
                                 {due(job) && (
@@ -122,8 +125,8 @@ export default async function PipelinePage() {
                                 )}
                               </div>
                             </div>
-                            {/* On phones the buttons get their own row under the title, as on Sources. */}
-                            <div className="flex items-center gap-1.5 max-sm:w-full">
+                            {/* Phones too: the buttons stay on the first row, on the right. */}
+                            <div className="flex shrink-0 items-center justify-end gap-1.5">
                               {/* The main move forward; everything else is in the ⋮ menu. */}
                               {(NEXT[status] ?? []).filter(isMain).map((to) => (
                                 <form key={to} action={setStatus}>

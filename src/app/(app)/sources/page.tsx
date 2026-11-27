@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ErrorDetailsText } from "@/components/ErrorDetails";
-import { IconChevronDown, IconMinus, IconPause, IconPlay, IconPlus, IconStar } from "@/components/icons";
+import { IconChevronDown, IconPlus, IconStar } from "@/components/icons";
+import { RowMenu } from "@/components/RowMenu";
 import { AddBoardForm } from "@/components/AddBoardForm";
 import { Notice } from "@/components/Notice";
 import { SourceName } from "@/components/SourceName";
@@ -155,13 +156,14 @@ export default async function SourcesPage({ searchParams }: PageProps<"/sources"
                     {addable.map((s, i) => (
                       <tr key={s.id} data-search={searchText(s.company_name, s.slug, s.ats)}>
                         <td className="mono faint text-[12px] max-md:hidden">{pad2(i + 1)}</td>
-                        <td className="max-md:w-full">
+                        {/* Stacked (phones): the name and the buttons share the first row. */}
+                        <td className="max-md:order-[-2] max-md:min-w-[calc(100%-9rem)] max-md:flex-1">
                           <div className="font-medium">{s.company_name}</div>
                           <div className="mono faint mt-0.5 text-[11px]">{s.slug}</div>
                         </td>
                         <td><Pill>{ATS_INFO[s.ats as Ats]?.label ?? s.ats}</Pill></td>
                         <td className="mono text-right" data-label="Jobs">{s.job_count}</td>
-                        <td className="max-md:ml-auto">
+                        <td className="max-md:order-[-1]">
                           <div className="flex justify-end gap-1.5">
                             <form action={acceptSuggestion}>
                               <input type="hidden" name="id" value={s.id} />
@@ -244,7 +246,8 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
         <tbody>
           {props.rows.map((s) => (
             <tr key={s.id} data-search={searchText(s.company_name, s.slug, s.ats)} className={`group ${s.enabled ? "" : "opacity-55"}`}>
-              <td className="@max-[30rem]:w-full">
+              {/* Stacked (narrow): the name and the buttons share the first row; the rest wraps below. */}
+              <td className="@max-[30rem]:order-[-2] @max-[30rem]:min-w-[calc(100%-5rem)] @max-[30rem]:flex-1">
                 {/* The dot stays beside the name; the name wraps between words (at least 7rem wide). */}
                 <div className="flex min-w-[7rem] items-start gap-2">
                   <span className="flex h-[1lh] shrink-0 items-center">
@@ -294,24 +297,21 @@ function SourceTable(props: { rows: Source[]; open: Record<string, number>; sort
               <td className="mono text-right" data-label="Open">{props.open[s.id]}</td>
               <td className="mono muted text-[12px] whitespace-nowrap" data-label="Checked">{s.last_checked_at ? agoText(s.last_checked_at) : "never"}</td>
               {/* As narrow as its buttons, on one line: a long error under the name mustn't squeeze them. */}
-              <td className="@max-[30rem]:w-full @min-[30rem]:w-px @min-[30rem]:whitespace-nowrap">
-                <div className="flex flex-wrap gap-1 @min-[30rem]:flex-nowrap @min-[30rem]:justify-end">
+              <td className="w-px whitespace-nowrap @max-[30rem]:order-[-1]">
+                {/* The star (watch) stays separate; pausing and unfollowing are in the ⋮ menu. */}
+                <div className="flex justify-end gap-1">
                   <WatchToggle source={s} watchEvery={props.watchEvery} />
-                  <Toggle
-                    id={s.id}
-                    field="enabled"
-                    on={!s.enabled}
-                    value={!s.enabled}
-                    label={s.enabled ? "Pause" : "Resume"}
-                    title={s.enabled ? "Pause: skip this source on fetches" : "Paused: click to resume"}
-                    icon={s.enabled ? <IconPause /> : <IconPlay />}
+                  <RowMenu
+                    label={`More actions for ${s.company_name}`}
+                    items={[
+                      {
+                        label: s.enabled ? "Pause" : "Resume",
+                        action: updateSource,
+                        fields: { id: s.id, field: "enabled", value: String(!s.enabled) },
+                      },
+                      { label: "Unfollow", action: deleteSource, fields: { id: s.id } },
+                    ]}
                   />
-                  <form action={deleteSource} title="Unfollow">
-                    <input type="hidden" name="id" value={s.id} />
-                    <SubmitButton className="btn btn-icon" aria-label={`Unfollow ${s.company_name}`}>
-                      <IconMinus />
-                    </SubmitButton>
-                  </form>
                 </div>
               </td>
             </tr>

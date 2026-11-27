@@ -10,6 +10,7 @@
   --surface: #121215; /* panels */
   --surface-2: #17171b; /* table headers, hovered rows */
   --row-active: #231c1a; /* highlighted row (warm, follows the accent) */
+  --pill: #22222a; /* neutral badges: a step lighter than hovered rows */
   --border: #26262c;
   --border-strong: #34343c;
 
@@ -47,6 +48,7 @@
     --surface: #ffffff;
     --surface-2: #f0f0ee;
     --row-active: #f8f2ed;
+    --pill: #f0f0ee;
     --border: #e2e2df;
     --border-strong: #cfcfcb;
     --fg: #17171a;
@@ -73,6 +75,7 @@
   --surface: #ffffff;
   --surface-2: #f0f0ee;
   --row-active: #f8f2ed;
+  --pill: #f0f0ee;
   --border: #e2e2df;
   --border-strong: #cfcfcb;
   --fg: #17171a;
@@ -299,6 +302,14 @@ input[type="radio"]:checked:hover {
   .btn-field { padding-top: 0.375rem; padding-bottom: 0.375rem; }
   /* A square icon-only button, as tall as .btn (13px text + 4px padding + border). */
   .btn-icon { width: 29.5px; height: 29.5px; padding: 0; }
+  /* The open/closed arrow of an expandable item: not a button (the whole item toggles),
+     just an indicator, as tall as a button so it lines up in the button row. */
+  .expand-indicator {
+    @apply inline-flex shrink-0 items-center justify-center;
+    width: 18px;
+    height: 29.5px;
+    color: var(--muted);
+  }
   .btn-ghost {
     @apply inline-flex cursor-pointer items-center gap-1.5 px-1.5 py-1 text-[13px];
     color: var(--muted);
@@ -319,7 +330,7 @@ input[type="radio"]:checked:hover {
   .pill-warn { color: var(--warn); background: var(--warn-tint); }
   .pill-bad { color: var(--bad); background: var(--bad-tint); }
   .pill-accent { color: var(--accent-strong); background: var(--accent-tint); }
-  .pill-muted { color: var(--muted); background: var(--surface-2); }
+  .pill-muted { color: var(--muted); background: var(--pill); }
 
   .dot { @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full; }
 
